@@ -24,11 +24,15 @@ public partial class Main : Node
     private Label[] _slotLabels = null!;
 
     // 物品熱鍵欄 HUD
-    private Panel[]        _hotbarPanels  = null!;
-    private Label[]        _hotbarLabels  = null!;
-    private StyleBoxFlat[] _hotbarStyles  = null!;
-    private float          _placeCooldown = 0f;
-    private Label          _paintModeLabel = null!;
+    private Panel[]          _hotbarPanels  = null!;
+    private StyleBoxFlat[]   _hotbarStyles  = null!;
+    private Panel[]          _hotbarIcons   = null!;  // 物品色塊縮圖
+    private StyleBoxFlat[]   _iconStyles    = null!;
+    private Label[]          _hotbarCounts  = null!;  // 右下角數量
+    private PanelContainer   _tooltip       = null!;  // 懸停提示框
+    private Label            _tooltipLabel  = null!;
+    private float            _placeCooldown = 0f;
+    private Label            _paintModeLabel = null!;
 
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
@@ -204,42 +208,86 @@ public partial class Main : Node
     private void BuildHotbar(CanvasLayer hud)
     {
         const int   count  = Inventory.HotbarSize;
-        const float slotW  = 46f;
-        const float slotH  = 36f;
+        const float slotW  = 48f;
+        const float slotH  = 48f;
         const float gap    = 3f;
         const float startX = 10f;
-        const float startY = -120f; // HP 標籤上方
+        const float startY = -132f; // HP 標籤上方
 
         _hotbarPanels = new Panel[count];
-        _hotbarLabels = new Label[count];
         _hotbarStyles = new StyleBoxFlat[count];
+        _hotbarIcons  = new Panel[count];
+        _iconStyles   = new StyleBoxFlat[count];
+        _hotbarCounts = new Label[count];
 
         for (int i = 0; i < count; i++)
         {
-            var style = new StyleBoxFlat();
-            style.BgColor     = new Color(0.10f, 0.10f, 0.15f);
-            style.BorderWidthTop = style.BorderWidthBottom =
-            style.BorderWidthLeft = style.BorderWidthRight = 1;
-            style.BorderColor = new Color(0.30f, 0.30f, 0.40f);
-            _hotbarStyles[i] = style;
+            // ── 槽位外框 ──────────────────────────────────────────
+            var slotStyle = new StyleBoxFlat();
+            slotStyle.BgColor     = new Color(0.10f, 0.10f, 0.15f);
+            slotStyle.BorderWidthTop = slotStyle.BorderWidthBottom =
+            slotStyle.BorderWidthLeft = slotStyle.BorderWidthRight = 1;
+            slotStyle.BorderColor = new Color(0.30f, 0.30f, 0.40f);
+            _hotbarStyles[i] = slotStyle;
 
             var panel = new Panel();
             panel.AnchorTop  = panel.AnchorBottom = 1f;
             panel.AnchorLeft = panel.AnchorRight  = 0f;
             panel.Position   = new Vector2(startX + i * (slotW + gap), startY);
             panel.Size       = new Vector2(slotW, slotH);
-            panel.AddThemeStyleboxOverride("panel", style);
+            panel.AddThemeStyleboxOverride("panel", slotStyle);
             hud.AddChild(panel);
             _hotbarPanels[i] = panel;
 
-            var lbl = new Label();
-            lbl.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-            lbl.HorizontalAlignment = HorizontalAlignment.Center;
-            lbl.VerticalAlignment   = VerticalAlignment.Center;
-            lbl.AddThemeFontSizeOverride("font_size", 9);
-            panel.AddChild(lbl);
-            _hotbarLabels[i] = lbl;
+            // ── 物品色塊縮圖 ──────────────────────────────────────
+            var iconStyle = new StyleBoxFlat { BgColor = new Color(0.18f, 0.18f, 0.22f) };
+            _iconStyles[i] = iconStyle;
+
+            var icon = new Panel();
+            icon.Position    = new Vector2(6f, 6f);
+            icon.Size        = new Vector2(36f, 28f);
+            icon.AddThemeStyleboxOverride("panel", iconStyle);
+            icon.MouseFilter = Control.MouseFilterEnum.Ignore; // 不攔截滑鼠，讓事件傳到父槽
+            panel.AddChild(icon);
+            _hotbarIcons[i] = icon;
+
+            // ── 右下角數量標籤 ────────────────────────────────────
+            var countLbl = new Label();
+            countLbl.Position = new Vector2(28f, 34f);
+            countLbl.Size     = new Vector2(18f, 12f);
+            countLbl.HorizontalAlignment = HorizontalAlignment.Right;
+            countLbl.AddThemeFontSizeOverride("font_size", 9);
+            countLbl.AddThemeColorOverride("font_color", new Color(1f, 1f, 0.85f));
+            countLbl.MouseFilter = Control.MouseFilterEnum.Ignore;
+            panel.AddChild(countLbl);
+            _hotbarCounts[i] = countLbl;
+
+            // ── 懸停事件 → 顯示/隱藏提示框 ───────────────────────
+            int idx = i;
+            panel.MouseEntered += () => ShowTooltip(idx);
+            panel.MouseExited  += HideTooltip;
         }
+
+        // ── 提示框（PanelContainer 自動依文字寬度縮放）───────────
+        var tipStyle = new StyleBoxFlat { BgColor = new Color(0.08f, 0.08f, 0.18f, 0.95f) };
+        tipStyle.BorderWidthTop = tipStyle.BorderWidthBottom =
+        tipStyle.BorderWidthLeft = tipStyle.BorderWidthRight = 1;
+        tipStyle.BorderColor = new Color(0.50f, 0.50f, 0.75f);
+        tipStyle.ContentMarginLeft = tipStyle.ContentMarginRight = 8f;
+        tipStyle.ContentMarginTop  = tipStyle.ContentMarginBottom = 5f;
+
+        _tooltip = new PanelContainer();
+        _tooltip.AnchorTop  = _tooltip.AnchorBottom = 1f;
+        _tooltip.AnchorLeft = _tooltip.AnchorRight  = 0f;
+        _tooltip.AddThemeStyleboxOverride("panel", tipStyle);
+        _tooltip.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _tooltip.Visible     = false;
+        hud.AddChild(_tooltip);
+
+        _tooltipLabel = new Label();
+        _tooltipLabel.AddThemeFontSizeOverride("font_size", 11);
+        _tooltipLabel.AddThemeColorOverride("font_color", new Color(0.90f, 0.90f, 0.95f));
+        _tooltip.AddChild(_tooltipLabel);
     }
 
     // ── 每幀更新 ───────────────────────────────────────────────────
@@ -414,29 +462,61 @@ public partial class Main : Node
         for (int i = 0; i < Inventory.HotbarSize; i++)
         {
             bool active = i == _player.Inventory.ActiveHotbarIndex;
-            var  style  = _hotbarStyles[i];
 
-            style.BgColor     = active ? new Color(0.20f, 0.20f, 0.30f) : new Color(0.10f, 0.10f, 0.15f);
-            style.BorderColor = active ? new Color(0.95f, 0.80f, 0.20f) : new Color(0.30f, 0.30f, 0.40f);
-            style.BorderWidthTop = style.BorderWidthBottom =
-            style.BorderWidthLeft = style.BorderWidthRight = active ? 2 : 1;
+            // 槽位外框
+            var slotStyle = _hotbarStyles[i];
+            slotStyle.BgColor = active ? new Color(0.18f, 0.18f, 0.28f) : new Color(0.10f, 0.10f, 0.15f);
+            slotStyle.BorderColor = active ? new Color(0.95f, 0.80f, 0.20f) : new Color(0.30f, 0.30f, 0.40f);
+            slotStyle.BorderWidthTop = slotStyle.BorderWidthBottom =
+            slotStyle.BorderWidthLeft = slotStyle.BorderWidthRight = active ? 2 : 1;
 
+            // 色塊縮圖 + 數量
             var stack = _player.Inventory.Slots[i];
             if (stack.IsEmpty)
             {
-                _hotbarLabels[i].Text = $"{i + 1}";
-                _hotbarLabels[i].AddThemeColorOverride("font_color", new Color(0.35f, 0.35f, 0.40f));
+                _iconStyles[i].BgColor  = new Color(0.18f, 0.18f, 0.22f); // 空槽暗色
+                _hotbarCounts[i].Text   = "";
             }
             else
             {
-                var data = ItemRegistry.Get(stack.ItemId);
-                _hotbarLabels[i].Text = stack.Count > 1
-                    ? $"{data.DisplayName}\n×{stack.Count}"
-                    : data.DisplayName;
-                _hotbarLabels[i].AddThemeColorOverride("font_color",
-                    active ? new Color(1.0f, 1.0f, 0.9f) : new Color(0.75f, 0.75f, 0.80f));
+                _iconStyles[i].BgColor  = GetItemIconColor(stack.ItemId);
+                _hotbarCounts[i].Text   = stack.Count > 1 ? $"×{stack.Count}" : "";
             }
         }
+    }
+
+    // 滑鼠移入槽位 → 顯示提示框
+    private void ShowTooltip(int slotIndex)
+    {
+        var stack = _player.Inventory.Slots[slotIndex];
+        if (stack.IsEmpty) { HideTooltip(); return; }
+
+        _tooltipLabel.Text = ItemRegistry.Get(stack.ItemId).DisplayName;
+
+        const float slotW  = 48f;
+        const float gap    = 3f;
+        const float startX = 10f;
+        const float startY = -132f;
+
+        float slotLeft = startX + slotIndex * (slotW + gap);
+        _tooltip.Position = new Vector2(slotLeft, startY - 30f); // 槽位上方
+        _tooltip.Visible  = true;
+    }
+
+    private void HideTooltip() => _tooltip.Visible = false;
+
+    // 依 ItemId 決定縮圖顏色：方塊物品取材質基礎色；工具用固定色
+    private static Color GetItemIconColor(ItemId id)
+    {
+        var data = ItemRegistry.Get(id);
+        if (data.IsPlaceable && data.PlaceAs.HasValue)
+            return MaterialRegistry.Get(data.PlaceAs.Value).BaseColor;
+        return id switch
+        {
+            ItemId.ToolBasicPick => new Color(0.75f, 0.75f, 0.82f), // 銀灰
+            ItemId.ToolBasicAxe  => new Color(0.58f, 0.38f, 0.16f), // 木棕
+            _                    => new Color(0.85f, 0.75f, 0.15f), // 金色通用
+        };
     }
 
     private void SpawnEnemies(List<(GridPos Pos, EnemyType Type)> spawns)
