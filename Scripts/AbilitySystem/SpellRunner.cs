@@ -20,7 +20,7 @@ using SkillCreator.World;
 // ─────────────────────────────────────────────────────────────────────────────
 public sealed class SpellRunner
 {
-    private const int MaxComboDepth = 5;
+    // MaxComboDepth 統一定義於 SafetyGuard.MaxComboDepth
 
     private sealed class ActiveSpell
     {
@@ -64,6 +64,8 @@ public sealed class SpellRunner
         if (blocks.Count == 0) return;
 
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        if (enemies != null)
+            ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);
         var loop = new ExecutionLoop(new SafetyGuard());
         var slotByRef = SpellCaster.BuildSlotLookup(spell);
 
@@ -98,18 +100,24 @@ public sealed class SpellRunner
             s.Loop.Step(s.Ctx, stepDelta);
             stepDelta = 0f;
 
-            // Wait 等待中：本幀停止推進，下幀繼續
-            if (s.Ctx.State == ExecutionState.Waiting) break;
+            // Wait / OnReceive 等待中：本幀停止推進，下幀繼續
+            if (s.Ctx.State == ExecutionState.Waiting ||
+                s.Ctx.State == ExecutionState.WaitingSignal) break;
 
-            // InvokeTotem：呼叫方（SpellCaster）處理後繼續執行
+            // InvokeTotem：ForEach body 自動定位到目標實體位置
             if (s.Ctx.PendingInvokeTotem != null)
             {
                 string name = s.Ctx.PendingInvokeTotem;
                 s.Ctx.PendingInvokeTotem = null;
+                var savedPos = s.Player.Position;
+                if (s.Ctx.CurrentIterEntity.HasValue)
+                    s.Player.Position = s.Ctx.CurrentIterEntity.Value.Position;
                 if (s.SlotByRef.TryGetValue(name, out var slot))
-                    SpellCaster.ResolveTotem(name, slot, s.Ctx, s.Player, s.World, s.AtHitPoint);
+                    SpellCaster.ResolveTotem(name, slot, s.Ctx, s.Player, s.World,
+                        atHitPoint: s.Ctx.CurrentIterEntity.HasValue || s.AtHitPoint);
                 else
                     s.Ctx.DoneTotems.Add(name);
+                s.Player.Position = savedPos;
                 continue;
             }
 
@@ -122,6 +130,29 @@ public sealed class SpellRunner
                 continue;
             }
 
+            // SetEntityProp 扣血
+            if (s.Ctx.PendingEntityDamageIdx >= 0)
+            {
+                int   idx = s.Ctx.PendingEntityDamageIdx;
+                float dmg = s.Ctx.PendingEntityDamageAmount;
+                s.Ctx.PendingEntityDamageIdx    = -1;
+                s.Ctx.PendingEntityDamageAmount = 0f;
+                if (s.Enemies != null && idx >= 0 && idx < s.Enemies.Enemies.Count)
+                {
+                    s.Enemies.Enemies[idx].TakeDamage(dmg);
+                    // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
+                    if (s.Ctx.CurrentIterEntity.HasValue && s.Ctx.CurrentIterEntity.Value.Index == idx)
+                    {
+                        var e = s.Ctx.CurrentIterEntity.Value;
+                        var updated = new EntityInfo(e.Index, e.Position,
+                            s.Enemies.Enemies[idx].Hp, e.MaxHp);
+                        s.Ctx.CurrentIterEntity = updated;
+                        s.Ctx.InstanceVars["_e.hp"] = updated.Hp;
+                    }
+                }
+                continue;
+            }
+
             // 沒有 pending → 下一輪 Step 繼續或已完成
         }
     }
@@ -130,7 +161,7 @@ public sealed class SpellRunner
 
     private void TriggerCombo(string spellName, ActiveSpell src)
     {
-        if (src.Loadout is null || src.ComboDepth >= MaxComboDepth) return;
+        if (src.Loadout is null || src.ComboDepth >= SafetyGuard.MaxComboDepth) return;
 
         SpellArray? next = null;
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)

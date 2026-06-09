@@ -1,5 +1,7 @@
 namespace SkillCreator.AbilitySystem.VM;
 
+using Godot;
+
 // 將 BlockNode AST 編譯成扁平指令序列（方便 Wait 在任意深度暫停執行）
 public static class SpellCompiler
 {
@@ -54,7 +56,75 @@ public static class SpellCompiler
                 break;
             }
 
-            // 其餘 BlockType 在 Phase 1 未實作，略過即可
+            case BlockType.RepeatWhile:
+            {
+                int loopStart = code.Count;
+                var whileCheck = new Instruction(OpCode.WhileCheck, new(block.Params));
+                code.Add(whileCheck);
+                EmitList(block.LoopBody, code);
+                code.Add(new Instruction(OpCode.Jump,
+                    new() { ["__target"] = (object?)loopStart }));
+                // patch：條件不成立時跳到迴圈結尾
+                whileCheck.Params["__loopEnd"] = (object?)code.Count;
+                break;
+            }
+
+            case BlockType.Compare:
+                code.Add(new Instruction(OpCode.StoreCompare, new(block.Params)));
+                break;
+
+            case BlockType.ForEachNearby:
+            {
+                int loopStart = code.Count;
+                var forStart = new Instruction(OpCode.ForEachStart, new(block.Params));
+                code.Add(forStart);
+                EmitList(block.LoopBody, code);
+                code.Add(new Instruction(OpCode.ForEachStep,
+                    new() { ["__loopStart"] = (object?)loopStart }));
+                forStart.Params["__loopEnd"] = (object?)code.Count;
+                break;
+            }
+
+            case BlockType.QueryNearest:
+                code.Add(new Instruction(OpCode.QueryNearest, new(block.Params)));
+                break;
+
+            case BlockType.GetEntityProp:
+                code.Add(new Instruction(OpCode.GetEntityProp, new(block.Params)));
+                break;
+
+            case BlockType.SetEntityProp:
+                code.Add(new Instruction(OpCode.StoreEntityProp, new(block.Params)));
+                break;
+
+            case BlockType.ListCreate:
+                code.Add(new Instruction(OpCode.ListCreate, new(block.Params)));
+                break;
+
+            case BlockType.ListAppend:
+                code.Add(new Instruction(OpCode.ListAppend, new(block.Params)));
+                break;
+
+            case BlockType.ListPop:
+                code.Add(new Instruction(OpCode.ListPop, new(block.Params)));
+                break;
+
+            case BlockType.ListGet:
+                code.Add(new Instruction(OpCode.ListGet, new(block.Params)));
+                break;
+
+            case BlockType.Broadcast:
+            case BlockType.BroadcastAndWait: // 本版行為同 Broadcast
+                code.Add(new Instruction(OpCode.Broadcast, new(block.Params)));
+                break;
+
+            case BlockType.OnReceive:
+                code.Add(new Instruction(OpCode.OnReceive, new(block.Params)));
+                break;
+
+            default:
+                GD.PushWarning($"[SpellCompiler] 未處理的 BlockType: {block.Type}");
+                break;
         }
     }
 

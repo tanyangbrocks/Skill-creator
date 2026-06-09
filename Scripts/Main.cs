@@ -1,5 +1,6 @@
 using Godot;
 using SkillCreator.AbilitySystem;
+using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.UI;
 using SkillCreator.World;
@@ -24,12 +25,20 @@ public partial class Main : Node
 
     public override void _Ready()
     {
+        // 場景重啟時清除跨局狀態
+        VmContext.GlobalVars.Clear();
+        VmContext.GlobalLists.Clear();
+        EventBus.ClearAll();
+
         // ── 世界渲染器 ──────────────────────────────────────────
         _world = new TileWorldRenderer();
         AddChild(_world);
 
+        // ── 程序生成地圖 ───────────────────────────────────────
+        var spawnData = MapGenerator.Generate(_world.World);
+
         // ── 玩家 ───────────────────────────────────────────────
-        _player = new PlayerController(new GridPos(100, 130));
+        _player = new PlayerController(spawnData.PlayerSpawn);
         _world.Player      = _player;
         _world.Enemies     = _enemies;
         _world.Projectiles = _projectiles;
@@ -37,7 +46,7 @@ public partial class Main : Node
         _world.World.OnExplosion += (center, radius) =>
             _enemies.ApplyExplosionDamage(center, radius, 40f);
 
-        SpawnEnemies();
+        SpawnEnemies(spawnData.EnemySpawns);
 
         // ── HUD ────────────────────────────────────────────────
         var hud = new CanvasLayer();
@@ -160,6 +169,7 @@ public partial class Main : Node
     public override void _Process(double delta)
     {
         float dt = (float)delta;
+        EventBus.ClearFrame(); // 清除上一幀的廣播訊號
 
         // 標籤永遠更新
         _hpLabel.Text = $"HP  {_player.Hp:F0} / {PlayerController.MaxHp:F0}";
@@ -241,13 +251,10 @@ public partial class Main : Node
         }
     }
 
-    private void SpawnEnemies()
+    private void SpawnEnemies(List<(GridPos Pos, EnemyType Type)> spawns)
     {
-        _enemies.Spawn(new GridPos( 40, 128), EnemyType.Patrol);  // 左側：巡邏衛兵（藍紫）
-        _enemies.Spawn(new GridPos( 75, 128), EnemyType.Melee);   // 中左：標準近戰（紅）
-        _enemies.Spawn(new GridPos(118, 128), EnemyType.Ranged);  // 中：遠程弓手（橙）
-        _enemies.Spawn(new GridPos(148, 128), EnemyType.Melee);   // 中右：標準近戰（紅）
-        _enemies.Spawn(new GridPos(170, 128), EnemyType.Heavy);   // 右側：重裝（暗紅 2×2）
+        foreach (var (pos, type) in spawns)
+            _enemies.Spawn(pos, type);
     }
 
     private void ToggleEditor()

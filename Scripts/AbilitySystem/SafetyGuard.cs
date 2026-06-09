@@ -6,6 +6,12 @@ public class SafetyGuard
     // 每 tick 積木執行上限，防止無限連段卡死
     public const int MaxExecutionsPerTick = 50;
 
+    // RepeatWhile 每次施放的總迭代上限（條件永遠為真時 Fizzle）
+    public const int MaxWhileIterations = 500;
+
+    // InvokeSpell 連段最深層數（SpellCaster / SpellRunner 共用）
+    public const int MaxComboDepth = 5;
+
     // 場上存活實體上限（⚠️ 數值待調整）
     public const int MaxEntityCount = 100;
 

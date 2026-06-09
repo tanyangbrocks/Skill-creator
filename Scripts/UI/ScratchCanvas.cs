@@ -26,9 +26,7 @@ public partial class ScratchCanvas : Control
 
     private VBoxContainer _list = null!;
 
-    // ── 靜態：拖拉狀態 ─────────────────────────────────────────────
-    private static int            _dragSrcIdx  = -1;
-    private static ScratchCanvas? _dragSrcCanvas;
+    // 拖拉狀態由 BlockDrag 靜態類別統一管理（見檔案末尾）
 
     // ══════════════════════════════════════════════════════════════
     //  公開 API
@@ -156,11 +154,16 @@ public partial class ScratchCanvas : Control
 
         outer.AddChild(card);
 
-        // ── 巢狀容器（If / RepeatN）──────────────────────────────
+        // ── 巢狀容器（If / RepeatN / RepeatWhile）────────────────
         if (block.Type == BlockType.If)
+        {
             outer.AddChild(BuildBranch(block.ThenBranch, "THEN", indent + 1));
+            outer.AddChild(BuildBranch(block.ElseBranch, "ELSE", indent + 1));
+        }
 
-        if (block.Type == BlockType.RepeatN)
+        if (block.Type == BlockType.RepeatN   ||
+            block.Type == BlockType.RepeatWhile ||
+            block.Type == BlockType.ForEachNearby)
             outer.AddChild(BuildBranch(block.LoopBody, "LOOP", indent + 1));
 
         // 間距
@@ -244,31 +247,23 @@ public partial class ScratchCanvas : Control
         s.CornerRadiusTopLeft = s.CornerRadiusBottomLeft = 4;
         handle.AddThemeStyleboxOverride("panel", s);
 
-        // 拖拉資料
         var captIdx    = idx;
         var captParent = parent;
-        var captCanvas = this;
 
-        // 用 GrabFocus 觸發拖拉
         handle.GuiInput += (InputEvent e) =>
         {
             if (e is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
             {
-                _dragSrcIdx    = captIdx;
-                _dragSrcCanvas = captCanvas;
-
-                // 建立拖拉資料（Godot native drag）
+                BlockDrag.BeginMove(captIdx, captParent, captParent[captIdx]);
                 var preview = BuildDragPreview(captParent[captIdx]);
                 handle.SetDragPreview(preview);
-                handle.ForceDrag(
-                    new Godot.Collections.Dictionary { ["scratch"] = captIdx },
-                    preview);
+                handle.ForceDrag(new Godot.Collections.Dictionary { ["scratch"] = captIdx }, preview);
             }
         };
         return handle;
     }
 
-    private static Control BuildDragPreview(BlockNode block)
+    internal static Control BuildDragPreview(BlockNode block)
     {
         var p = new Panel();
         p.CustomMinimumSize = new Vector2(140, 28);
@@ -310,40 +305,43 @@ public partial class ScratchCanvas : Control
 
         zone.MouseEntered += () =>
         {
-            if (_dragSrcIdx >= 0)
+            if (BlockDrag.Active)
                 lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 1f);
         };
         zone.MouseExited += () => lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 0f);
 
-        // 接受 drop
-        // 使用 Godot native drag-drop callbacks 需要 C# override，
-        // 此處改用 GuiInput 偵測 mouse_release 在 zone 上方
         zone.GuiInput += (InputEvent e) =>
         {
-            if (e is InputEventMouseButton mb && !mb.Pressed &&
-                mb.ButtonIndex == MouseButton.Left &&
-                _dragSrcIdx >= 0 && _dragSrcCanvas == this)
+            if (e is not InputEventMouseButton mb ||
+                mb.Pressed ||
+                mb.ButtonIndex != MouseButton.Left ||
+                !BlockDrag.Active) return;
+
+            var block    = BlockDrag.Block!;
+            int insertAt = captInsert;
+
+            if (BlockDrag.SourceList != null)
             {
-                int from = _dragSrcIdx;
-                int to   = captInsert;
-                _dragSrcIdx = -1;
-                if (from != to && from != to - 1 && captParent == _blocks)
-                    ReorderBlock(from, to);
+                var srcList = BlockDrag.SourceList;
+                int srcIdx  = BlockDrag.SourceIdx;
+                // 同一個列表移動：插入點要補償移除造成的偏移
+                if (ReferenceEquals(srcList, captParent) && srcIdx < insertAt)
+                    insertAt--;
+                // 移到原位，忽略
+                if (ReferenceEquals(srcList, captParent) && insertAt == srcIdx)
+                {
+                    BlockDrag.Clear();
+                    return;
+                }
+                srcList.RemoveAt(srcIdx);
             }
+
+            captParent.Insert(Math.Clamp(insertAt, 0, captParent.Count), block);
+            BlockDrag.Clear();
+            OnChanged();
         };
 
         return zone;
-    }
-
-    private void ReorderBlock(int fromIdx, int insertBefore)
-    {
-        if (fromIdx < 0 || fromIdx >= _blocks.Count) return;
-        var block = _blocks[fromIdx];
-        _blocks.RemoveAt(fromIdx);
-        int target = insertBefore > fromIdx ? insertBefore - 1 : insertBefore;
-        target = Math.Clamp(target, 0, _blocks.Count);
-        _blocks.Insert(target, block);
-        OnChanged();
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -365,10 +363,21 @@ public partial class ScratchCanvas : Control
 
             case BlockType.If:
             {
-                string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare" };
-                string[] labels = { "已執行",    "命中",      "Fizzle",      "比較" };
-                row.AddChild(SmallDrop(block, "conditionType", types, labels, 58));
-                row.AddChild(SlotPicker(block, "totemName"));
+                string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
+                string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
+                row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
+                string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
+                if (cType == "compare")
+                {
+                    row.AddChild(SmallEdit(block, "left", "L", 44));
+                    string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
+                    row.AddChild(SmallDrop(block, "op", ops, ops, 40));
+                    row.AddChild(SmallEdit(block, "right", "R", 44));
+                }
+                else if (cType == "varBool")
+                    row.AddChild(SmallEdit(block, "varName", "變數名", 72));
+                else
+                    row.AddChild(SlotPicker(block, "totemName"));
                 break;
             }
 
@@ -402,12 +411,31 @@ public partial class ScratchCanvas : Control
                 string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
                 row.AddChild(SmallDrop(block, "op", ops, ops, 40));
                 row.AddChild(SmallEdit(block, "right", "R", 44));
+                row.AddChild(TinyLbl("→"));
+                row.AddChild(SmallEdit(block, "resultVar", "結果", 56));
+                row.AddChild(CheckBox(block, "global", "全域"));
                 break;
             }
 
             case BlockType.RepeatWhile:
-                row.AddChild(SmallEdit(block, "condition", "條件名", 80));
+            {
+                string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
+                string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
+                row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
+                string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
+                if (cType == "compare")
+                {
+                    row.AddChild(SmallEdit(block, "left", "L", 44));
+                    string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
+                    row.AddChild(SmallDrop(block, "op", ops, ops, 40));
+                    row.AddChild(SmallEdit(block, "right", "R", 44));
+                }
+                else if (cType == "varBool")
+                    row.AddChild(SmallEdit(block, "varName", "變數名", 72));
+                else
+                    row.AddChild(SlotPicker(block, "totemName"));
                 break;
+            }
 
             case BlockType.DetectHpThreshold:
             case BlockType.DetectMpThreshold:
@@ -444,6 +472,60 @@ public partial class ScratchCanvas : Control
             case BlockType.ForEachNearby:
                 row.AddChild(SmallSpin(block, "radius", 1f, 30f, 1f, 40));
                 row.AddChild(TinyLbl("格"));
+                break;
+
+            case BlockType.QueryNearest:
+                row.AddChild(SmallSpin(block, "radius", 1f, 30f, 1f, 40));
+                row.AddChild(TinyLbl("格 →"));
+                row.AddChild(SmallEdit(block, "resultVar", "前綴", 60));
+                break;
+
+            case BlockType.GetEntityProp:
+            {
+                string[] props  = { "hp", "maxhp", "x", "y" };
+                string[] plbls  = { "HP", "MaxHP", "X", "Y" };
+                row.AddChild(SmallDrop(block, "property", props, plbls, 52));
+                row.AddChild(TinyLbl("→"));
+                row.AddChild(SmallEdit(block, "resultVar", "變數名", 64));
+                break;
+            }
+
+            case BlockType.SetEntityProp:
+            {
+                string[] props = { "hp" };
+                string[] plbls = { "HP" };
+                row.AddChild(SmallDrop(block, "property", props, plbls, 44));
+                row.AddChild(TinyLbl("減"));
+                row.AddChild(SmallSpin(block, "damage", 1f, 999f, 1f, 52));
+                break;
+            }
+
+            case BlockType.ListCreate:
+                row.AddChild(SmallEdit(block, "name", "列表名", 72));
+                row.AddChild(CheckBox(block, "global", "全域"));
+                break;
+
+            case BlockType.ListAppend:
+                row.AddChild(SmallEdit(block, "name", "列表名", 64));
+                row.AddChild(TinyLbl("+"));
+                row.AddChild(SmallEdit(block, "value", "值/變數", 60));
+                row.AddChild(CheckBox(block, "global", "全域"));
+                break;
+
+            case BlockType.ListPop:
+                row.AddChild(SmallEdit(block, "name", "列表名", 64));
+                row.AddChild(TinyLbl("→"));
+                row.AddChild(SmallEdit(block, "resultVar", "結果", 56));
+                row.AddChild(CheckBox(block, "global", "全域"));
+                break;
+
+            case BlockType.ListGet:
+                row.AddChild(SmallEdit(block, "name", "列表名", 64));
+                row.AddChild(TinyLbl("["));
+                row.AddChild(SmallEdit(block, "index", "索引", 40));
+                row.AddChild(TinyLbl("]→"));
+                row.AddChild(SmallEdit(block, "resultVar", "結果", 52));
+                row.AddChild(CheckBox(block, "global", "全域"));
                 break;
 
             case BlockType.RandomChoice:
@@ -588,6 +670,11 @@ public partial class ScratchCanvas : Control
         BlockType.SetVar or BlockType.GetVar or BlockType.SetVarBool or
         BlockType.GetVarBool or BlockType.Compare
             => new Color(1.0f,  0.88f, 0.28f),  // 黃
+        BlockType.ListCreate or BlockType.ListAppend or BlockType.ListPop or
+        BlockType.ListGet    or BlockType.ListDequeue or BlockType.ListSet or
+        BlockType.ListLength or BlockType.ListContains or BlockType.ListRemoveAt or
+        BlockType.ListClear
+            => new Color(1.0f,  0.65f, 0.20f),  // 橘
         BlockType.QueryNear or BlockType.GetEntityProp or BlockType.SetEntityProp
             => new Color(0.55f, 0.80f, 1.0f),   // 藍
         BlockType.Broadcast or BlockType.BroadcastAndWait or BlockType.OnReceive
@@ -632,6 +719,16 @@ public partial class ScratchCanvas : Control
         BlockType.TaskCounterAdd    => "CTR ADD",
         BlockType.TaskCounterOnReach=> "CTR REACH",
         BlockType.TaskCounterReset  => "CTR RESET",
+        BlockType.ListCreate        => "LIST NEW",
+        BlockType.ListAppend        => "LIST ADD",
+        BlockType.ListPop           => "LIST POP",
+        BlockType.ListGet           => "LIST GET",
+        BlockType.ListDequeue       => "LIST DEQUEUE",
+        BlockType.ListSet           => "LIST SET",
+        BlockType.ListLength        => "LIST LEN",
+        BlockType.ListContains      => "LIST HAS",
+        BlockType.ListRemoveAt      => "LIST DEL",
+        BlockType.ListClear         => "LIST CLEAR",
         _                           => t.ToString(),
     };
 
@@ -641,15 +738,22 @@ public partial class ScratchCanvas : Control
         BlockType.InvokeSpell    => B(type, ("spellName", "")),
         BlockType.If             => B(type, ("conditionType", "totemDone"), ("totemName", "")),
         BlockType.RepeatN        => B(type, ("count", 2f)),
-        BlockType.RepeatWhile    => B(type, ("condition", "")),
+        BlockType.RepeatWhile    => B(type, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
         BlockType.RandomChoice   => B(type, ("count", 2f)),
         BlockType.ForEachNearby  => B(type, ("radius", 5f)),
+        BlockType.QueryNearest   => B(type, ("radius", 5f), ("resultVar", "nearest")),
+        BlockType.GetEntityProp  => B(type, ("property", "hp"), ("resultVar", "e_hp")),
+        BlockType.SetEntityProp  => B(type, ("property", "hp"), ("damage", 10f)),
+        BlockType.ListCreate     => B(type, ("name", "list"), ("global", false)),
+        BlockType.ListAppend     => B(type, ("name", "list"), ("value", "0"),   ("global", false)),
+        BlockType.ListPop        => B(type, ("name", "list"), ("resultVar", "v"), ("global", false)),
+        BlockType.ListGet        => B(type, ("name", "list"), ("index", "1"),   ("resultVar", "v"), ("global", false)),
         BlockType.Wait           => B(type, ("duration", 1f)),
         BlockType.SetVar         => B(type, ("name", "x"), ("value", "0"), ("global", false)),
         BlockType.GetVar         => B(type, ("name", "x")),
         BlockType.SetVarBool     => B(type, ("name", "b"), ("value", "true"), ("global", false)),
         BlockType.GetVarBool     => B(type, ("name", "b")),
-        BlockType.Compare        => B(type, ("left", "x"), ("op", "="), ("right", "0")),
+        BlockType.Compare        => B(type, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
         BlockType.RisingEdge or BlockType.FallingEdge or BlockType.SinglePulse
                                  => B(type, ("totemName", "")),
         BlockType.DetectHpThreshold or BlockType.DetectMpThreshold
@@ -671,4 +775,23 @@ public partial class ScratchCanvas : Control
         foreach (var (k, v) in ps) d[k] = v;
         return new BlockNode { Type = t, Params = d };
     }
+}
+
+// ── 積木拖拉共享狀態（ScratchCanvas drop 與 AbilityEditorUI palette 共用）──────
+internal static class BlockDrag
+{
+    public static BlockNode?       Block      { get; private set; }
+    public static List<BlockNode>? SourceList { get; private set; }
+    public static int              SourceIdx  { get; private set; } = -1;
+
+    // 從現有積木序列拖出（移動）
+    public static void BeginMove(int idx, List<BlockNode> src, BlockNode block)
+    { Block = block; SourceList = src; SourceIdx = idx; }
+
+    // 從 palette 拖出（新增）
+    public static void BeginNew(BlockNode block)
+    { Block = block; SourceList = null; SourceIdx = -1; }
+
+    public static void Clear() { Block = null; SourceList = null; SourceIdx = -1; }
+    public static bool Active  => Block != null;
 }

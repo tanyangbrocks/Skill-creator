@@ -8,7 +8,7 @@ using SkillCreator.World.Materials;
 // 施放法陣：透過 VM 執行積木序列，每個 InvokeTotem 導向對應圖騰效果
 public static class SpellCaster
 {
-    private const int MaxComboDepth = 5;   // 防止無限連段
+    // MaxComboDepth 統一定義於 SafetyGuard.MaxComboDepth
     private const int MeleeRange    = 3;   // Contact 容器掃描格數
 
     // 施放結果（成功 + 可能產生的投射物）
@@ -106,17 +106,25 @@ public static class SpellCaster
 
         var slotByRef = BuildSlotLookup(spell);
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        if (enemies != null)
+            ctx.EntityQuery = r => QueryEnemies(enemies, player, r);
         var loop = new ExecutionLoop(new SafetyGuard());
         loop.ResetTick();
 
         int safety = 0;
         while (!ctx.IsFinished && safety++ < 300)
         {
-            // 同步執行模式：強制跳過 Wait（結構正確，計時不生效；真實計時需 SpellRunner，Phase 3）
+            // 同步執行模式：強制跳過 Wait / WaitingSignal（真實語意需 SpellRunner）
             if (ctx.State == ExecutionState.Waiting)
             {
                 ctx.WaitRemaining = 0f;
-                ctx.PC++;           // 推進 PC 跳過 Wait 指令
+                ctx.PC++;
+                ctx.State = ExecutionState.Running;
+            }
+            if (ctx.State == ExecutionState.WaitingSignal)
+            {
+                ctx.WaitingSignalName = null;
+                ctx.PC++;
                 ctx.State = ExecutionState.Running;
             }
 
@@ -126,10 +134,16 @@ public static class SpellCaster
             {
                 string name = ctx.PendingInvokeTotem;
                 ctx.PendingInvokeTotem = null;
+                // ForEach body：效果在目標實體位置執行（同 ExecuteContactHit 手法）
+                var savedPos = player.Position;
+                if (ctx.CurrentIterEntity.HasValue)
+                    player.Position = ctx.CurrentIterEntity.Value.Position;
                 if (slotByRef.TryGetValue(name, out var slot))
-                    ResolveTotem(name, slot, ctx, player, world, atHitPoint);
+                    ResolveTotem(name, slot, ctx, player, world,
+                        atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint);
                 else
                     ctx.DoneTotems.Add(name);
+                player.Position = savedPos;
             }
 
             if (ctx.PendingInvokeSpell != null)
@@ -137,6 +151,27 @@ public static class SpellCaster
                 string nextName = ctx.PendingInvokeSpell;
                 ctx.PendingInvokeSpell = null;
                 TriggerCombo(nextName, player, world, enemies, loadout, comboDepth);
+            }
+
+            if (ctx.PendingEntityDamageIdx >= 0)
+            {
+                int   idx = ctx.PendingEntityDamageIdx;
+                float dmg = ctx.PendingEntityDamageAmount;
+                ctx.PendingEntityDamageIdx    = -1;
+                ctx.PendingEntityDamageAmount = 0f;
+                if (enemies != null && idx < enemies.Enemies.Count)
+                {
+                    enemies.Enemies[idx].TakeDamage(dmg);
+                    // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
+                    if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Index == idx)
+                    {
+                        var e = ctx.CurrentIterEntity.Value;
+                        var updated = new EntityInfo(e.Index, e.Position,
+                            enemies.Enemies[idx].Hp, e.MaxHp);
+                        ctx.CurrentIterEntity = updated;
+                        ctx.InstanceVars["_e.hp"] = updated.Hp;
+                    }
+                }
             }
         }
     }
@@ -146,7 +181,7 @@ public static class SpellCaster
     private static void TriggerCombo(string name, PlayerController player, TileWorld world,
         EnemyManager? enemies, SpellLoadout? loadout, int depth)
     {
-        if (loadout is null || depth >= MaxComboDepth) return;
+        if (loadout is null || depth >= SafetyGuard.MaxComboDepth) return;
 
         // 在 loadout 中找名稱匹配的法陣
         SpellArray? next = null;
@@ -163,6 +198,20 @@ public static class SpellCaster
         player.Mp -= cost;
         player.SetCastCooldown(next.CastDelay);
         ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
+    }
+
+    // ── 實體查詢（ForEachNearby / QueryNearest 共用）──────────────
+
+    internal static List<EntityInfo> QueryEnemies(
+        EnemyManager enemies, PlayerController player, float radius)
+    {
+        return enemies.Enemies
+            .Select((e, i) => (e, i))
+            .Where(x => x.e.IsAlive &&
+                        x.e.Position.DistanceTo(player.Position) <= radius)
+            .OrderBy(x => x.e.Position.DistanceTo(player.Position))
+            .Select(x => new EntityInfo(x.i, x.e.Position, x.e.Hp, x.e.MaxHp))
+            .ToList();
     }
 
     // ── 建立插槽參考對照表 ─────────────────────────────────────────
