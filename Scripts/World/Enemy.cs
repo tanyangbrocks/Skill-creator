@@ -14,6 +14,9 @@ public enum EnemyType
 
 public class Enemy
 {
+    private static int _nextId = 0;
+
+    public int        Id       { get; } = ++_nextId; // 場景內不重複的穩定 ID
     public GridPos    Position { get; set; }
     public GridPos    SpawnPos { get; }
     public EnemyType  Type     { get; }

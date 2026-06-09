@@ -140,8 +140,11 @@ public static class SpellCaster
                 TriggerCombo(nextName, player, world, enemies, loadout, comboDepth);
             }
 
-            if (ctx.PendingEntityDamageIdx >= 0)
+            if (ctx.PendingEntityDamageId >= 0)
                 ConsumeEntityDamage(ctx, enemies);
+
+            if (ctx.PendingEntityMoveId >= 0)
+                ConsumeEntityMove(ctx, enemies);
         }
     }
 
@@ -189,23 +192,41 @@ public static class SpellCaster
         ctx.EffectOriginOverride = null;
     }
 
+    internal static void ConsumeEntityMove(ExecutionContext ctx, EnemyManager? enemies)
+    {
+        int     id  = ctx.PendingEntityMoveId;
+        GridPos pos = ctx.PendingEntityMovePos;
+        ctx.PendingEntityMoveId = -1;
+        if (enemies == null) return;
+        var enemy = enemies.Enemies.Find(e => e.Id == id);
+        if (enemy == null) return;
+        enemy.Position = pos;
+        // 同步更新快照
+        if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Id == id)
+        {
+            var e = ctx.CurrentIterEntity.Value;
+            ctx.CurrentIterEntity    = new EntityInfo(e.Id, pos, e.Hp, e.MaxHp);
+            ctx.InstanceVars["_e.x"] = pos.X;
+            ctx.InstanceVars["_e.y"] = pos.Y;
+        }
+    }
+
     internal static void ConsumeEntityDamage(ExecutionContext ctx, EnemyManager? enemies)
     {
-        int   idx = ctx.PendingEntityDamageIdx;
+        int   id  = ctx.PendingEntityDamageId;
         float dmg = ctx.PendingEntityDamageAmount;
-        ctx.PendingEntityDamageIdx    = -1;
+        ctx.PendingEntityDamageId     = -1;
         ctx.PendingEntityDamageAmount = 0f;
-        if (enemies != null && idx < enemies.Enemies.Count)
+        if (enemies == null) return;
+        var enemy = enemies.Enemies.Find(e => e.Id == id);
+        if (enemy == null) return;
+        enemy.TakeDamage(dmg);
+        // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
+        if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Id == id)
         {
-            enemies.Enemies[idx].TakeDamage(dmg);
-            if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Index == idx)
-            {
-                var e = ctx.CurrentIterEntity.Value;
-                var updated = new EntityInfo(e.Index, e.Position,
-                    enemies.Enemies[idx].Hp, e.MaxHp);
-                ctx.CurrentIterEntity  = updated;
-                ctx.InstanceVars["_e.hp"] = updated.Hp;
-            }
+            var e = ctx.CurrentIterEntity.Value;
+            ctx.CurrentIterEntity     = new EntityInfo(e.Id, e.Position, enemy.Hp, e.MaxHp);
+            ctx.InstanceVars["_e.hp"] = enemy.Hp;
         }
     }
 
@@ -216,10 +237,10 @@ public static class SpellCaster
     {
         var origin = player.Position;
         return enemies.Enemies
-            .Select((e, i) => (e, i, dist: e.IsAlive ? e.Position.DistanceTo(origin) : float.MaxValue))
+            .Select(e => (e, dist: e.IsAlive ? e.Position.DistanceTo(origin) : float.MaxValue))
             .Where(x => x.e.IsAlive && x.dist <= radius)
             .OrderBy(x => x.dist)
-            .Select(x => new EntityInfo(x.i, x.e.Position, x.e.Hp, x.e.MaxHp))
+            .Select(x => new EntityInfo(x.e.Id, x.e.Position, x.e.Hp, x.e.MaxHp))
             .ToList();
     }
 

@@ -26,8 +26,9 @@ public class ExecutionContext
     // RepeatN 嵌套計數器堆疊（支援巢狀循環）
     public Stack<int> LoopCounters { get; } = new();
 
-    // RepeatWhile 安全計數器（防止條件永遠為真時無限執行）
-    public int WhileIterationsTotal { get; set; } = 0;
+    // RepeatWhile 安全計數器：key = WhileCheck 指令的 PC，value = 該迴圈已跑次數
+    // 各迴圈獨立計數，支援巢狀 while（每個 WhileCheck 有自己的上限）
+    public Dictionary<int, int> WhileIterCounters { get; } = new();
 
     // ── ForEachNearby / QueryNearest ────────────────────────────
     // 實體查詢代理（SpellCaster / SpellRunner 建立 ctx 時注入）
@@ -39,9 +40,13 @@ public class ExecutionContext
     // 當前迭代實體（InvokeTotem 時 SpellCaster 用來定位效果）
     public EntityInfo? CurrentIterEntity { get; set; }
 
-    // SetEntityProp 扣血：SpellCaster/SpellRunner 消費後清除
-    public int   PendingEntityDamageIdx    { get; set; } = -1;
+    // SetEntityProp 扣血：SpellCaster/SpellRunner 消費後清除（儲存敵人穩定 Id，非列表索引）
+    public int   PendingEntityDamageId     { get; set; } = -1;
     public float PendingEntityDamageAmount { get; set; } = 0f;
+
+    // SetEntityProp x/y：傳送敵人到指定格座標（SpellCaster/Runner 消費後清除）
+    public int      PendingEntityMoveId  { get; set; } = -1;
+    public GridPos  PendingEntityMovePos { get; set; }
 
     // OnReceive 等待中的訊號名稱（WaitingSignal 狀態時有效）
     public string? WaitingSignalName { get; set; }
@@ -93,8 +98,8 @@ public class ExecutionContext
     }
 }
 
-// 迭代中的實體快照（引擎無關，用 Index 對應 EnemyManager.Enemies）
-public readonly record struct EntityInfo(int Index, GridPos Position, float Hp, float MaxHp);
+// 迭代中的實體快照（引擎無關，Id 對應 Enemy.Id 穩定識別碼）
+public readonly record struct EntityInfo(int Id, GridPos Position, float Hp, float MaxHp);
 
 // ForEachNearby 迭代器堆疊元素
 public readonly record struct EntityIterState(List<EntityInfo> Entities, int CurrentIndex);

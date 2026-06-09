@@ -609,11 +609,20 @@ public partial class ScratchCanvas : Control
         { BlockType.SetEntityProp,new(CBlue, "SET PROP", () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", 10f)),
             (r, b, _) =>
             {
-                string[] props = { "hp" };
-                string[] plbls = { "HP" };
+                string[] props = { "hp", "x", "y" };
+                string[] plbls = { "HP", "X", "Y" };
                 r.AddChild(SmallDrop(b, "property", props, plbls, 44));
-                r.AddChild(TinyLbl("減"));
-                r.AddChild(SmallSpin(b, "damage", 1f, 999f, 1f, 52));
+                string prop = b.Params.TryGetValue("property", out var pv) ? pv?.ToString() ?? "hp" : "hp";
+                if (prop == "hp")
+                {
+                    r.AddChild(TinyLbl("減"));
+                    r.AddChild(SmallSpin(b, "damage", 1f, 999f, 1f, 52));
+                }
+                else
+                {
+                    r.AddChild(TinyLbl("="));
+                    r.AddChild(SmallEdit(b, "value", "值/變數", 60));
+                }
             }) },
 
         // ── 廣播 ──────────────────────────────────────────────────────

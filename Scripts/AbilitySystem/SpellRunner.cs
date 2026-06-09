@@ -121,9 +121,16 @@ public sealed class SpellRunner
             }
 
             // SetEntityProp 扣血
-            if (s.Ctx.PendingEntityDamageIdx >= 0)
+            if (s.Ctx.PendingEntityDamageId >= 0)
             {
                 SpellCaster.ConsumeEntityDamage(s.Ctx, s.Enemies);
+                continue;
+            }
+
+            // SetEntityProp x/y 位移
+            if (s.Ctx.PendingEntityMoveId >= 0)
+            {
+                SpellCaster.ConsumeEntityMove(s.Ctx, s.Enemies);
                 continue;
             }
 
