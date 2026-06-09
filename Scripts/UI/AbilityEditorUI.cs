@@ -31,7 +31,7 @@ public partial class AbilityEditorUI : Control
     private ProgressBar   _apBar     = null!;
     private Label         _mpValue   = null!;
     private Label         _status    = null!;
-    private VBoxContainer _blockList = null!;
+    private ScratchCanvas _canvas = null!;
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
@@ -319,7 +319,7 @@ public partial class AbilityEditorUI : Control
                 btn.CustomMinimumSize = new Vector2(0, 24);
                 btn.AddThemeFontSizeOverride("font_size", 11);
                 btn.AddThemeColorOverride("font_color", BlockTypeColor(bt));
-                btn.Pressed += () => { _spell.Blocks.Add(MakeDefaultBlock(captBt)); RebuildBlockList(); };
+                btn.Pressed += () => { _spell.Blocks.Add(ScratchCanvas.MakeDefaultBlock(captBt)); SyncCanvas(); };
                 vbox.AddChild(btn);
             }
         }
@@ -393,22 +393,16 @@ public partial class AbilityEditorUI : Control
 
         var bClrBtn = Btn("清除", new Color(0.30f, 0.12f, 0.12f));
         bClrBtn.CustomMinimumSize = new Vector2(44, 22);
-        bClrBtn.Pressed += () => { _spell.Blocks.Clear(); RebuildBlockList(); };
+        bClrBtn.Pressed += () => { _spell.Blocks.Clear(); SyncCanvas(); };
         bhdr.AddChild(bClrBtn);
         HSpacer(bhdr, 8);
         vbox.AddChild(bhdr);
 
-        var blScroll = new ScrollContainer();
-        blScroll.CustomMinimumSize   = new Vector2(0, 130);
-        blScroll.VerticalScrollMode   = ScrollContainer.ScrollMode.Auto;
-        blScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-        _blockList = new VBoxContainer();
-        _blockList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        _blockList.AddThemeConstantOverride("separation", 2);
-        blScroll.AddChild(_blockList);
-        vbox.AddChild(blScroll);
-
-        // 積木類型已移至左側面板（▶ 積木庫），此處保留清除與自動填入控制
+        _canvas = new ScratchCanvas();
+        _canvas.CustomMinimumSize = new Vector2(0, 180);
+        _canvas.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _canvas.Changed += () => RefreshCost();
+        vbox.AddChild(_canvas);
 
         VSpacer(vbox, 6);
     }
@@ -503,7 +497,7 @@ public partial class AbilityEditorUI : Control
         RefreshSlots();
         RefreshCost();
         RefreshStatus();
-        RebuildBlockList();
+        SyncCanvas();
     }
 
     private void RefreshSlots()
@@ -584,7 +578,7 @@ public partial class AbilityEditorUI : Control
         {
             if (captSlot < _spell.Slots.Count)
                 _spell.Slots[captSlot].Name = text;
-            RebuildBlockList();
+            SyncCanvas();
         };
         vbox.AddChild(nameLE);
 
@@ -800,24 +794,13 @@ public partial class AbilityEditorUI : Control
     {
         _spell.Blocks.Clear();
         _spell.Blocks.AddRange(BlockAutoGenerator.Generate(_spell));
-        RebuildBlockList();
+        SyncCanvas();
     }
 
-    private void RebuildBlockList()
+    private void SyncCanvas()
     {
-        if (_blockList is null) return;
-        foreach (var child in _blockList.GetChildren().ToArray())
-            child.QueueFree();
-
-        if (_spell.Blocks.Count == 0)
-        {
-            _blockList.AddChild(Lbl("（空）施放時依插槽順序直接執行。按上方按鈕加入積木或自動填入。",
-                10, new Color(0.38f, 0.38f, 0.42f)));
-            return;
-        }
-
-        for (int i = 0; i < _spell.Blocks.Count; i++)
-            _blockList.AddChild(BuildBlockRow(i, _spell.Blocks[i], _spell.Blocks, isTop: true));
+        if (_canvas is null) return;
+        _canvas.SyncFrom(_spell.Blocks, GetSlotOptions);
     }
 
     private Control BuildBlockRow(int idx, BlockNode block, List<BlockNode> parentList, bool isTop)
@@ -1067,7 +1050,7 @@ public partial class AbilityEditorUI : Control
         rmBtn.AddThemeFontSizeOverride("font_size", 9);
         int captIdx = idx;
         var captList = parentList;
-        rmBtn.Pressed += () => { captList.RemoveAt(captIdx); RebuildBlockList(); };
+        rmBtn.Pressed += () => { captList.RemoveAt(captIdx); SyncCanvas(); };
         row.AddChild(rmBtn);
 
         container.AddChild(row);
@@ -1086,7 +1069,7 @@ public partial class AbilityEditorUI : Control
             addSubBtn.AddThemeColorOverride("font_color", new Color(0.4f, 0.7f, 0.4f));
             addSubBtn.AddThemeFontSizeOverride("font_size", 10);
             var captBlock = block;
-            addSubBtn.Pressed += () => { captBlock.ThenBranch.Add(MakeDefaultBlock(BlockType.InvokeTotem)); RebuildBlockList(); };
+            addSubBtn.Pressed += () => { captBlock.ThenBranch.Add(MakeDefaultBlock(BlockType.InvokeTotem)); SyncCanvas(); };
             thenVBox.AddChild(addSubBtn);
             container.AddChild(thenVBox);
         }
