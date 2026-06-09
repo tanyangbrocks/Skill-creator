@@ -2,6 +2,7 @@ namespace SkillCreator.World;
 
 using Godot;
 using SkillCreator.AbilitySystem;
+using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
 // Godot Node2D：渲染 TileWorld 並處理滑鼠繪製輸入
@@ -11,9 +12,10 @@ public partial class TileWorldRenderer : Node2D
 
     public TileWorld      World    { get; } = new TileWorld(200, 150);
     public MaterialType   SelectedMaterial { get; set; } = MaterialType.Sand;
-    public PlayerController? Player    { get; set; }
-    public EnemyManager?     Enemies   { get; set; }
+    public PlayerController?    Player      { get; set; }
+    public EnemyManager?        Enemies     { get; set; }
     public List<SpellProjectile>? Projectiles { get; set; }
+    public DroppedItemManager?  DroppedItems { get; set; }
 
     // 開啟編輯器時暫停物理模擬
     public bool Paused { get; set; } = false;
@@ -23,7 +25,8 @@ public partial class TileWorldRenderer : Node2D
     private Sprite2D _sprite = null!;
     private readonly byte[] _renderBuf = new byte[200 * 150 * 3];
 
-    public int SimStepsPerFrame { get; set; } = 1;
+    public int  SimStepsPerFrame { get; set; } = 1;
+    public bool PaintingEnabled  { get; set; } = true;
 
     public override void _Ready()
     {
@@ -68,6 +71,25 @@ public partial class TileWorldRenderer : Node2D
             _renderBuf[i]     = (byte)(c.R * 255f);
             _renderBuf[i + 1] = (byte)(c.G * 255f);
             _renderBuf[i + 2] = (byte)(c.B * 255f);
+        }
+
+        // 採掘進度 overlay：目標格依進度比例逐漸變暗
+        if (Player?.MiningTarget.HasValue == true && Player.MiningProgress > 0f)
+        {
+            var mt      = Player.MiningTarget.Value;
+            var matData = MaterialRegistry.Get(World.TypeAt(mt.X, mt.Y));
+            if (matData.Hardness > 0)
+            {
+                float pct = Math.Clamp(Player.MiningProgress / matData.Hardness, 0f, 1f);
+                int   mi  = (mt.Y * w + mt.X) * 3;
+                if (mi >= 0 && mi + 2 < _renderBuf.Length)
+                {
+                    byte dark = (byte)(pct * 130);
+                    _renderBuf[mi]     = (byte)Math.Max(0, _renderBuf[mi]     - dark);
+                    _renderBuf[mi + 1] = (byte)Math.Max(0, _renderBuf[mi + 1] - dark);
+                    _renderBuf[mi + 2] = (byte)Math.Max(0, _renderBuf[mi + 2] - dark);
+                }
+            }
         }
 
         // 投射物：青白色
@@ -161,6 +183,21 @@ public partial class TileWorldRenderer : Node2D
                 _renderBuf[bi + 2] = 20;
             }
         }
+
+        // 掉落物：亮金色
+        if (DroppedItems != null)
+        {
+            foreach (var drop in DroppedItems.Items)
+            {
+                if (!drop.IsAlive) continue;
+                var dp = drop.Position;
+                int di = (dp.Y * w + dp.X) * 3;
+                if (di < 0 || di + 2 >= _renderBuf.Length) continue;
+                _renderBuf[di]     = 255;
+                _renderBuf[di + 1] = 220;
+                _renderBuf[di + 2] = 40;
+            }
+        }
     }
 
     // ── 滑鼠繪製 ──────────────────────────────────────────────────
@@ -188,6 +225,7 @@ public partial class TileWorldRenderer : Node2D
 
     public override void _Input(InputEvent e)
     {
+        if (!PaintingEnabled) return;
         if (e is InputEventMouseButton mb)
         {
             if (mb.ButtonIndex == MouseButton.Left)  _painting = mb.Pressed;

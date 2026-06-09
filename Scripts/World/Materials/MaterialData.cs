@@ -1,6 +1,7 @@
 namespace SkillCreator.World.Materials;
 
 using Godot;
+using SkillCreator.World.Items;
 
 public record MaterialData(
     MaterialType Type,
@@ -11,4 +12,17 @@ public record MaterialData(
     float Density,          // 密度（越大越沉）
     int BurnDurationMin,    // 燃燒最少幀數（0 = 不可燃燒）
     int BurnDurationMax     // 燃燒最多幀數
-);
+)
+{
+    // ── 採掘屬性 ──────────────────────────────────────────────────
+    public bool  IsMineable       { get; init; } = false; // 可否被採掘
+    public int   Hardness         { get; init; } = 0;     // 基礎採掘幀數（0 = 不適用）
+    public int   RequiredToolTier { get; init; } = 0;     // 0 = 徒手；1 = 基礎工具；以此類推
+
+    // ── 預留抗性（暫不使用，供未來爆炸/魔法系統讀取）────────────
+    public float BlastResistance  { get; init; } = 1.0f;  // 爆炸傷害係數（1 = 標準）
+    public float MagicResistance  { get; init; } = 1.0f;  // 魔法傷害係數（1 = 標準）
+
+    // ── 採掘掉落表 ─────────────────────────────────────────────
+    public ItemDrop[] DefaultDrops { get; init; } = Array.Empty<ItemDrop>();
+}

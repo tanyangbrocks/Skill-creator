@@ -219,6 +219,15 @@ public static class MapGenerator
             world.Set(x, y, MaterialType.Stone);
     }
 
+    private static void SealWalls(TileWorld world, int W, int H)
+    {
+        for (int y = 0; y < H; y++)
+        {
+            world.Set(0,     y, MaterialType.Stone);
+            world.Set(W - 1, y, MaterialType.Stone);
+        }
+    }
+
     // ════════════════════════════════════════════════════════════
     //  Step 6 — 裝飾
     // ════════════════════════════════════════════════════════════

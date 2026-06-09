@@ -1,5 +1,6 @@
 namespace SkillCreator.World;
 
+using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
 public class PlayerController
@@ -9,6 +10,9 @@ public class PlayerController
     public GridPos Facing       { get; private set; } = new GridPos(1, 0);
     // 滑鼠對應的世界格座標（由 Main._Process 每幀更新）
     public GridPos MouseGridPos { get; set; }
+
+    public Inventory Inventory { get; } = new Inventory();
+    public const float MiningRange = 5f; // 採掘/放置最大距離（格數）
 
     public float Hp { get; set; }
     public const float MaxHp = 100f;
@@ -104,4 +108,46 @@ public class PlayerController
     }
 
     public void SetCastCooldown(float seconds) => _castCooldown = seconds;
+
+    // ── 採掘 ──────────────────────────────────────────────────────
+
+    public GridPos? MiningTarget   { get; private set; }
+    public float    MiningProgress { get; private set; }
+
+    public void CancelMining()
+    {
+        MiningTarget   = null;
+        MiningProgress = 0f;
+    }
+
+    // 回傳 true 代表本幀破壞了方塊
+    public bool TickMining(TileWorld world, GridPos target, float delta)
+    {
+        var mat  = world.TypeAt(target.X, target.Y);
+        var data = MaterialRegistry.Get(mat);
+
+        if (!data.IsMineable || data.RequiredToolTier > Inventory.ActiveToolTier)
+        {
+            CancelMining();
+            return false;
+        }
+
+        // 換了目標 → 重置進度
+        if (MiningTarget != target)
+        {
+            MiningTarget   = target;
+            MiningProgress = 0f;
+        }
+
+        // 累加採掘進度（以 60fps 為基準，乘上工具速度倍率）
+        MiningProgress += Inventory.ActiveMiningSpeedMult * delta * 60f;
+
+        if (MiningProgress >= data.Hardness)
+        {
+            world.DestroyTile(target);
+            CancelMining();
+            return true;
+        }
+        return false;
+    }
 }
