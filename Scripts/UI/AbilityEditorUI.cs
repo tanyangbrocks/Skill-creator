@@ -37,6 +37,21 @@ public partial class AbilityEditorUI : Control
     public override void _Ready()
     {
         for (int i = 0; i < _spells.Length; i++) _spells[i] = new SpellArray();
+
+        // 讀取上次存檔
+        var totemMap   = TotemLibrary.AllTotems.ToDictionary(t => t.Id);
+        var engraveMap = TotemLibrary.AllEngravings.ToDictionary(e => e.Id);
+        var (saved, savedActive) = SaveSystem.Load(totemMap, engraveMap);
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+        {
+            if (saved[i] is { } s)
+            {
+                _spells[i] = s;
+                Loadout.SetSlot(i, s);
+            }
+        }
+        _activeEditorSlot = savedActive;
+
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         BuildUI();
         RefreshAll();
@@ -1217,6 +1232,13 @@ public partial class AbilityEditorUI : Control
             return;
         }
         Loadout.SetSlot(_activeEditorSlot, _spell);
+
+        // 寫入磁碟
+        var allSpells = Enumerable.Range(0, SpellLoadout.MaxSlots)
+                                  .Select(i => Loadout.GetSlot(i))
+                                  .ToArray();
+        SaveSystem.Save(allSpells, _activeEditorSlot);
+
         GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 法陣「{_spell.Name}」  " +
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
                  $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}  " +

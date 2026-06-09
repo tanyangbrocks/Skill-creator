@@ -13,6 +13,8 @@ public class SpellProjectile
     private readonly GridPos          _dir;
     private readonly SpellArray       _spell;
     private readonly PlayerController _caster;
+    private readonly EnemyManager?    _enemies;  // 連段/命中傷害用
+    private readonly SpellLoadout?    _loadout;  // 連段用
 
     private float _moveTimer      = 0f;
     private int   _remainingTiles;
@@ -20,12 +22,15 @@ public class SpellProjectile
     private const float MoveInterval = 0.06f;
     private const int   MaxRange     = 55;
 
-    public SpellProjectile(GridPos start, GridPos dir, SpellArray spell, PlayerController caster)
+    public SpellProjectile(GridPos start, GridPos dir, SpellArray spell, PlayerController caster,
+        EnemyManager? enemies = null, SpellLoadout? loadout = null)
     {
         Position       = start;
         _dir           = new GridPos(dir.X == 0 ? 1 : Math.Sign(dir.X), 0);
         _spell         = spell;
         _caster        = caster;
+        _enemies       = enemies;
+        _loadout       = loadout;
         _remainingTiles= MaxRange;
     }
 
@@ -68,7 +73,7 @@ public class SpellProjectile
         // 臨時把施法者位置移到命中點，效果在該點爆發
         var orig = _caster.Position;
         _caster.Position = pos;
-        SpellCaster.ExecuteEffects(_spell, _caster, world);
+        SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout);
         _caster.Position = orig;
         IsAlive = false;
     }

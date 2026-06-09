@@ -8,6 +8,9 @@ using SkillCreator.World.Materials;
 // 施放法陣：透過 VM 執行積木序列，每個 InvokeTotem 導向對應圖騰效果
 public static class SpellCaster
 {
+    private const int MaxComboDepth = 5;   // 防止無限連段
+    private const int MeleeRange    = 3;   // Contact 容器掃描格數
+
     // 施放結果（成功 + 可能產生的投射物）
     public readonly struct SpellCastResult
     {
@@ -16,7 +19,8 @@ public static class SpellCaster
         public static SpellCastResult Failed => default;
     }
 
-    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world)
+    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
+        EnemyManager? enemies = null, SpellLoadout? loadout = null)
     {
         if (!player.CanCast) return SpellCastResult.Failed;
 
@@ -26,24 +30,65 @@ public static class SpellCaster
         player.Mp -= mpCost;
         player.SetCastCooldown(spell.CastDelay);
 
-        // 投射物容器：生成投射物，命中時再執行效果
-        if (spell.Container == ContainerType.Projectile)
+        switch (spell.Container)
         {
-            var start = new GridPos(player.Position.X + player.Facing.X * 2, player.Position.Y);
-            return new SpellCastResult
+            case ContainerType.Projectile:
             {
-                Ok         = true,
-                Projectile = new SpellProjectile(start, player.Facing, spell, player),
-            };
-        }
+                var start = new GridPos(player.Position.X + player.Facing.X * 2, player.Position.Y);
+                return new SpellCastResult
+                {
+                    Ok         = true,
+                    Projectile = new SpellProjectile(start, player.Facing, spell, player, enemies, loadout),
+                };
+            }
+            case ContainerType.Contact:
+                ExecuteContactHit(spell, player, world, enemies, loadout);
+                return new SpellCastResult { Ok = true };
 
-        // 接觸容器：Phase 3 實作，暫時同 PlayerBody 執行
-        ExecuteEffects(spell, player, world);
-        return new SpellCastResult { Ok = true };
+            default:
+                ExecuteEffects(spell, player, world, enemies, loadout);
+                return new SpellCastResult { Ok = true };
+        }
     }
 
-    // 直接執行效果（投射物命中時、接觸觸發時皆可呼叫）
-    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world)
+    // ── Contact 容器：近戰範圍命中 ────────────────────────────────
+
+    private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld world,
+        EnemyManager? enemies, SpellLoadout? loadout)
+    {
+        int fx = player.Facing.X;
+
+        // 掃描前方最多 MeleeRange 格找第一個敵人
+        if (enemies is not null)
+        {
+            for (int d = 1; d <= MeleeRange; d++)
+            {
+                var checkPos = new GridPos(player.Position.X + fx * d, player.Position.Y);
+                var target = enemies.Enemies.Find(e => e.IsAlive && e.Position == checkPos);
+                if (target is not null)
+                {
+                    target.TakeDamage(20f);   // 直接接觸傷害（獨立於技能效果）
+                    var orig = player.Position;
+                    player.Position = checkPos;
+                    ExecuteEffects(spell, player, world, enemies, loadout);
+                    player.Position = orig;
+                    return;
+                }
+            }
+        }
+
+        // 未命中敵人：在正前方 2 格執行（AoE 效果仍可擊中範圍內目標）
+        var meleePt = new GridPos(player.Position.X + fx * 2, player.Position.Y);
+        var origPos = player.Position;
+        player.Position = meleePt;
+        ExecuteEffects(spell, player, world, enemies, loadout);
+        player.Position = origPos;
+    }
+
+    // ── 直接執行效果（PlayerBody / Contact 命中 / 投射物命中時皆可呼叫）────
+
+    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world,
+        EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0)
     {
         var blocks = spell.Blocks.Count > 0
             ? spell.Blocks
@@ -78,8 +123,36 @@ public static class SpellCaster
             }
 
             if (ctx.PendingInvokeSpell != null)
-                ctx.PendingInvokeSpell = null; // TODO Phase 3：連段
+            {
+                string nextName = ctx.PendingInvokeSpell;
+                ctx.PendingInvokeSpell = null;
+                TriggerCombo(nextName, player, world, enemies, loadout, comboDepth);
+            }
         }
+    }
+
+    // ── 連段執行 ─────────────────────────────────────────────────
+
+    private static void TriggerCombo(string name, PlayerController player, TileWorld world,
+        EnemyManager? enemies, SpellLoadout? loadout, int depth)
+    {
+        if (loadout is null || depth >= MaxComboDepth) return;
+
+        // 在 loadout 中找名稱匹配的法陣
+        SpellArray? next = null;
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+        {
+            var s = loadout.GetSlot(i);
+            if (s?.Name == name) { next = s; break; }
+        }
+        if (next is null) return;
+
+        float cost = AbilityPointCalculator.CalculateMpCost(next);
+        if (!SafetyGuard.HasMp(player.Mp, cost)) return;
+
+        player.Mp -= cost;
+        player.SetCastCooldown(next.CastDelay);
+        ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
     }
 
     // ── 建立插槽參考對照表 ─────────────────────────────────────────

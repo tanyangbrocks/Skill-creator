@@ -213,7 +213,7 @@ public partial class Main : Node
                 var spell = _editor.Loadout.ActiveSpell;
                 if (spell != null)
                 {
-                    var result = SpellCaster.TryCast(spell, _player, _world.World);
+                    var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout);
                     if (!result.Ok)
                         GD.Print("[施放] 失敗：MP 不足或冷卻中");
                     else if (result.Projectile != null)
