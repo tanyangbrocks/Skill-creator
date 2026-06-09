@@ -106,7 +106,7 @@ public partial class TileWorldRenderer : Node2D
             }
         }
 
-        // 敵人：亮紅→暗紅依 HP
+        // 敵人：依類型上色，HP 影響亮度
         if (Enemies != null)
         {
             foreach (var e in Enemies.Enemies)
@@ -116,9 +116,49 @@ public partial class TileWorldRenderer : Node2D
                 int ei = (ep.Y * w + ep.X) * 3;
                 if (ei < 0 || ei + 2 >= _renderBuf.Length) continue;
                 float r = e.Hp / e.MaxHp;
-                _renderBuf[ei]     = (byte)(80 + (int)(140 * r));
-                _renderBuf[ei + 1] = (byte)(20 + (int)(40  * r));
-                _renderBuf[ei + 2] = 20;
+                switch (e.Type)
+                {
+                    case EnemyType.Melee:   // 紅
+                        _renderBuf[ei]     = (byte)(80 + (int)(150 * r));
+                        _renderBuf[ei + 1] = (byte)(10 + (int)(30  * r));
+                        _renderBuf[ei + 2] = 10;
+                        break;
+                    case EnemyType.Ranged:  // 橙黃
+                        _renderBuf[ei]     = (byte)(180 + (int)(60 * r));
+                        _renderBuf[ei + 1] = (byte)(100 + (int)(80 * r));
+                        _renderBuf[ei + 2] = 10;
+                        break;
+                    case EnemyType.Patrol:  // 藍紫
+                        _renderBuf[ei]     = (byte)(80 + (int)(80 * r));
+                        _renderBuf[ei + 1] = (byte)(20 + (int)(40 * r));
+                        _renderBuf[ei + 2] = (byte)(160 + (int)(80 * r));
+                        break;
+                    case EnemyType.Heavy:   // 暗紅棕（畫 2×2 強調體型大）
+                        for (int oy = 0; oy <= 1; oy++)
+                        for (int ox = 0; ox <= 1; ox++)
+                        {
+                            int hx = ep.X + ox, hy = ep.Y + oy;
+                            if (hx >= w || hy >= h) continue;
+                            int hi = (hy * w + hx) * 3;
+                            if (hi < 0 || hi + 2 >= _renderBuf.Length) continue;
+                            _renderBuf[hi]     = (byte)(140 + (int)(80 * r));
+                            _renderBuf[hi + 1] = (byte)(20  + (int)(20 * r));
+                            _renderBuf[hi + 2] = (byte)(20  + (int)(10 * r));
+                        }
+                        break;
+                }
+            }
+
+            // 敵方投射物：橘色
+            foreach (var b in Enemies.EnemyProjectiles)
+            {
+                if (!b.IsAlive) continue;
+                var bp = b.Position;
+                int bi = (bp.Y * w + bp.X) * 3;
+                if (bi < 0 || bi + 2 >= _renderBuf.Length) continue;
+                _renderBuf[bi]     = 255;
+                _renderBuf[bi + 1] = 140;
+                _renderBuf[bi + 2] = 20;
             }
         }
     }

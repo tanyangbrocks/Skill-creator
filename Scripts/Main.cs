@@ -241,10 +241,11 @@ public partial class Main : Node
 
     private void SpawnEnemies()
     {
-        _enemies.Spawn(new GridPos( 45, 128));
-        _enemies.Spawn(new GridPos( 82, 128));
-        _enemies.Spawn(new GridPos(145, 128));
-        _enemies.Spawn(new GridPos(175, 128));
+        _enemies.Spawn(new GridPos( 40, 128), EnemyType.Patrol);  // 左側：巡邏衛兵（藍紫）
+        _enemies.Spawn(new GridPos( 75, 128), EnemyType.Melee);   // 中左：標準近戰（紅）
+        _enemies.Spawn(new GridPos(118, 128), EnemyType.Ranged);  // 中：遠程弓手（橙）
+        _enemies.Spawn(new GridPos(148, 128), EnemyType.Melee);   // 中右：標準近戰（紅）
+        _enemies.Spawn(new GridPos(170, 128), EnemyType.Heavy);   // 右側：重裝（暗紅 2×2）
     }
 
     private void ToggleEditor()

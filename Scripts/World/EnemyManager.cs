@@ -6,21 +6,24 @@ public class EnemyManager
 {
     public List<Enemy> Enemies { get; } = new();
 
+    private readonly List<EnemyProjectile> _bolts = new();
+    public IReadOnlyList<EnemyProjectile> EnemyProjectiles => _bolts;
+
     private const float FireDps = 25f;
     private const float LavaDps = 40f;
+    private const float BoltDamage = 12f;
 
-    public void Spawn(GridPos pos, float maxHp = 50f)
-        => Enemies.Add(new Enemy(pos, maxHp));
+    public void Spawn(GridPos pos, EnemyType type = EnemyType.Melee, float maxHp = -1f)
+        => Enemies.Add(new Enemy(pos, type, maxHp));
 
     public void Update(TileWorld world, PlayerController player, float delta)
     {
+        // ── 敵人更新 ────────────────────────────────────────────
         foreach (var e in Enemies)
         {
             if (!e.IsAlive)
             {
-                // 死亡倒數，時間到時重生回出生點
-                if (e.TickRespawn(delta))
-                    e.Respawn();
+                if (e.TickRespawn(delta)) e.Respawn();
                 continue;
             }
 
@@ -30,9 +33,17 @@ public class EnemyManager
             if      (mat == MaterialType.Fire) e.TakeDamage(FireDps * delta);
             else if (mat == MaterialType.Lava) e.TakeDamage(LavaDps * delta);
 
-            // 剛死亡：啟動重生倒數
-            if (!e.IsAlive) e.StartRespawn();
+            if (!e.IsAlive) { e.StartRespawn(); continue; }
+
+            // 遠程敵人想要發射
+            if (e.WantsToFire)
+                _bolts.Add(new EnemyProjectile(e.Position, e.FacingX, BoltDamage));
         }
+
+        // ── 敵方投射物更新 ─────────────────────────────────────
+        _bolts.RemoveAll(b => !b.IsAlive);
+        foreach (var b in _bolts)
+            b.Update(world, player, delta);
     }
 
     public void ApplyExplosionDamage(GridPos center, int radius, float damage)
