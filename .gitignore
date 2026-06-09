@@ -1,0 +1,11 @@
+# Godot
+.godot/
+*.uid
+
+# C# / .NET
+.vs/
+obj/
+bin/
+*.user
+*.suo
+.idea/
