@@ -1,6 +1,7 @@
 namespace SkillCreator.World.Materials;
 
 using Godot;
+using SkillCreator.AbilitySystem.Data;
 using SkillCreator.World.Items;
 
 public record MaterialData(
@@ -25,4 +26,11 @@ public record MaterialData(
 
     // ── 採掘掉落表 ─────────────────────────────────────────────
     public ItemDrop[] DefaultDrops { get; init; } = Array.Empty<ItemDrop>();
+
+    // ── 元素屬性（W-3 元素碰撞系統）───────────────────────────
+    /// <summary>
+    /// 材質格天生帶有的元素屬性（永久，不被消耗）。
+    /// None = 無元素性（如空氣、灰燼）。
+    /// </summary>
+    public ElementType NativeElement { get; init; } = ElementType.None;
 }

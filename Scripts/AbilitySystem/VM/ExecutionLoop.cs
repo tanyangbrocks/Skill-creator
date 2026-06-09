@@ -901,6 +901,51 @@ public class ExecutionLoop
                 ctx.PC++;
                 break;
             }
+
+            // ── Phase 4：行動攔截鉤子 ────────────────────────────────
+            case OpCode.RegisterFilter:
+            {
+                string filterType = Param<string>(instr, "filterType", "damageShield");
+                bool   oneShot    = Param<bool>  (instr, "oneShot",    true);
+                string tag        = Param<string>(instr, "tag",        "");
+
+                switch (filterType)
+                {
+                    case "damageShield":
+                    {
+                        string mode      = Param<string>(instr, "mode",      "cancel");
+                        float  threshold = Param<float> (instr, "threshold", 0f);
+                        ActionBus.Register(action =>
+                        {
+                            if (action is not PlayerDamageAction pda) return action;
+                            if (pda.Amount < threshold) return action; // 低於門檻不觸發
+                            return mode switch
+                            {
+                                "cancel" => null,                                        // 完全免傷
+                                "halve"  => pda with { Amount = pda.Amount * 0.5f },    // 減半
+                                "cap"    => pda with { Amount = MathF.Min(pda.Amount,   // 傷害封頂
+                                                Param<float>(instr, "capValue", 1f)) },
+                                _        => null,
+                            };
+                        }, oneShot: oneShot, tag: tag.Length > 0 ? tag : null);
+                        break;
+                    }
+                    case "deathGuard":
+                    {
+                        ActionBus.Register(action =>
+                        {
+                            if (action is not PlayerDeathAction) return action;
+                            return null; // 取消死亡 → 存活 1 HP
+                        }, oneShot: oneShot, tag: tag.Length > 0 ? tag : null);
+                        break;
+                    }
+                    default:
+                        Godot.GD.PushWarning($"[ActionBus] 未知 filterType: {filterType}");
+                        break;
+                }
+                ctx.PC++;
+                break;
+            }
         }
     }
 

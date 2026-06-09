@@ -1,10 +1,19 @@
 namespace SkillCreator.World;
 
+using SkillCreator.AbilitySystem;
+using SkillCreator.AbilitySystem.Elemental;
 using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
-public class PlayerController
+public class PlayerController : IElementalTarget
 {
+    // ── IElementalTarget 實作（W-3）─────────────────────────────────
+    int  IElementalTarget.EntityId => -1;  // 玩家固定 -1
+    void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
+
+    /// <summary>玩家身上的元素 Aura 與元素狀態效果管理器。</summary>
+    public ElementalAuraComponent Aura { get; } = new();
+
     public GridPos Position     { get; set; }
     // Facing 只追蹤水平方向，確保投射物永遠往左/右打
     public GridPos Facing       { get; private set; } = new GridPos(1, 0);
@@ -103,9 +112,41 @@ public class PlayerController
 
     public void TakeDamage(float amount)
     {
-        float reduced = Math.Max(0f, amount - Equipment.TotalDefFlat);
-        Hp = Math.Max(0f, Hp - reduced);
-        CombatState.OnPlayerTookDamage();
+        // ── 元素狀態效果修改（W-3）────────────────────────────────────
+        // 鏽化：防禦力降低，等效 DefFlat × (1 - DefensePenalty)
+        float effectiveDefFlat = Equipment.TotalDefFlat * (1f - Aura.DefensePenalty);
+        float reduced = Math.Max(0f, amount - effectiveDefFlat);
+        // ──────────────────────────────────────────────────────────────
+
+        // ── 行動攔截鉤子：傷害層（Phase 4 第三層）────────────────────
+        var dmgResult = ActionBus.Dispatch(new PlayerDamageAction(reduced));
+        if (dmgResult == null) return; // 攔截：傷害取消（完全免傷）
+        float intercepted = dmgResult is PlayerDamageAction pda ? pda.Amount : reduced;
+        // ──────────────────────────────────────────────────────────────
+
+        // ── 元素狀態效果修改（W-3）────────────────────────────────────
+        // 結凍：期間受傷害加成
+        float finalDmg = intercepted * (1f + Aura.DamageTakenBonus);
+        // ──────────────────────────────────────────────────────────────
+
+        float newHp = Math.Max(0f, Hp - finalDmg);
+
+        // ── 行動攔截鉤子：死亡層（死亡替代）────────────────────────
+        if (newHp <= 0f && IsAlive)
+        {
+            var deathResult = ActionBus.Dispatch(new PlayerDeathAction());
+            if (deathResult == null)
+            {
+                // 攔截：取消死亡，玩家存活於 1 HP
+                Hp = 1f;
+                CombatState.OnPlayerTookDamage();
+                return;
+            }
+        }
+        // ──────────────────────────────────────────────────────────────
+
+        Hp = newHp;
+        if (finalDmg > 0f) CombatState.OnPlayerTookDamage();
     }
 
     public PlayerController(GridPos startPos)
@@ -117,6 +158,7 @@ public class PlayerController
 
     public void Tick(float delta)
     {
+        Aura.Process(delta, this);
         if (_moveCooldown > 0f) _moveCooldown -= delta;
         if (_castCooldown > 0f) _castCooldown -= delta;
         Mp = MathF.Min(MaxMp, Mp + MpRegen * delta);
@@ -126,13 +168,13 @@ public class PlayerController
     // 水平移動（A/D），同時更新朝向
     public bool TryMove(TileWorld world, int dx, int dy)
     {
-        if (!CanMove) return false;
+        if (!CanMove || Aura.IsImmobilized) return false;
         var next = new GridPos(Position.X + dx, Position.Y + dy);
         if (world.TypeAt(next.X, next.Y) != MaterialType.Air) return false;
 
         Position = next;
         if (dx != 0) Facing = new GridPos(Math.Sign(dx), 0); // 只有水平移動才更新 Facing
-        _moveCooldown = MoveInterval;
+        _moveCooldown = MoveInterval * (1f + Aura.SpeedPenalty);  // 元素移速懲罰
         return true;
     }
 

@@ -72,4 +72,7 @@ public enum OpCode
     TaskCounterGet,    // 讀取任務計數器 → resultVar
     TaskCounterOnReach,// 到達閾值一次性觸發，否則跳到 __target
     TaskCounterReset,  // 計數器歸零並解鎖對應 OnReach 鎖定
+
+    // ── Phase 4：行動攔截鉤子 ────────────────────────────────────────
+    RegisterFilter,    // 向 ActionBus 登記動作過濾器（DamageShield / DeathGuard）
 }

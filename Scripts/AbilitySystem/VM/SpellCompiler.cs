@@ -332,6 +332,22 @@ public static class SpellCompiler
                 break;
             }
 
+            // ── Phase 4：行動攔截積木 ─────────────────────────────────
+            case BlockType.DamageShield:
+            {
+                var p = new Dictionary<string, object?>(block.Params);
+                p["filterType"] = "damageShield";
+                code.Add(new Instruction(OpCode.RegisterFilter, p));
+                break;
+            }
+            case BlockType.DeathGuard:
+            {
+                var p = new Dictionary<string, object?>(block.Params);
+                p["filterType"] = "deathGuard";
+                code.Add(new Instruction(OpCode.RegisterFilter, p));
+                break;
+            }
+
             default:
                 GD.PushWarning($"[SpellCompiler] 未處理的 BlockType: {block.Type}");
                 break;

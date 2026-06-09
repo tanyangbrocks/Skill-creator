@@ -62,6 +62,7 @@ public partial class Main : Node
         VmContext.TaskCounters.Clear();
         VmContext.TaskCounterReached.Clear();
         EventBus.ClearAll();
+        ActionBus.ClearAll();
         GameClock.Reset();
         CombatState.Reset();
 

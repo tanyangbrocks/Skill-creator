@@ -1,5 +1,7 @@
 namespace SkillCreator.World;
 
+using SkillCreator.AbilitySystem.Data;
+using SkillCreator.AbilitySystem.Elemental;
 using SkillCreator.World.Materials;
 
 // 細胞自動機世界模擬（純 C#，無 Godot 依賴）
@@ -133,6 +135,9 @@ public class TileWorld : IWorldInterface
         // 岩漿：點燃相鄰可燃物
         if (mat == MaterialType.Lava)
             TryIgniteAround(x, y, chance: 0.1f);
+
+        // W-3b：元素 CA 反應
+        CheckElementalCaReactions(x, y);
     }
 
     // ── 氣體（火 / 蒸汽）───────────────────────────────────────
@@ -264,6 +269,90 @@ public class TileWorld : IWorldInterface
                 wc.Type  = MaterialType.Steam;
                 wc.Timer = (short)_rng.Next(60, 120);
             }
+        }
+    }
+
+    // ── W-3b 元素 CA 反應 ─────────────────────────────────────────────
+
+    // 液體格每幀觸發元素 CA 的機率（⚠️ 待平衡）
+    private const double CaChanceSlow = 0.005;  // 水+土→流沙（緩慢侵蝕）
+    private const double CaChanceFast = 0.03;   // 岩漿+水→沸騰（快速反應）
+
+    /// <summary>
+    /// 檢查液體格與相鄰格的元素組合，觸發材質轉換型 CA 效果。
+    /// 目前實作：水+土→流沙（Dirt→Sand）、岩漿+水→沸騰（Lava→Stone, Water→Steam）。
+    /// </summary>
+    private void CheckElementalCaReactions(int x, int y)
+    {
+        var mat      = TypeAt(x, y);
+        var matData  = MaterialRegistry.Get(mat);
+        if (matData.NativeElement == ElementType.None) return;
+
+        Span<(int, int)> dirs = stackalloc (int, int)[] { (0,-1),(0,1),(-1,0),(1,0) };
+        foreach (var (dx, dy) in dirs)
+        {
+            int nx = x + dx, ny = y + dy;
+            if (!InBounds(nx, ny)) continue;
+            var nMat     = TypeAt(nx, ny);
+            var nMatData = MaterialRegistry.Get(nMat);
+            if (nMatData.NativeElement == ElementType.None) continue;
+
+            // 水 + 土 → 流沙：水侵蝕 Dirt，轉換為可流動的 Sand
+            if (matData.NativeElement == ElementType.Water
+                && nMat == MaterialType.Dirt
+                && _rng.NextDouble() < CaChanceSlow)
+            {
+                Set(nx, ny, MaterialType.Sand);
+                _updated[Idx(nx, ny)] = true;  // 本幀不再讓這塊沙流動
+            }
+
+            // 岩漿（Fire 元素）+ 水 → 沸騰：岩漿固化為石，水蒸發
+            if (mat == MaterialType.Lava
+                && nMatData.NativeElement == ElementType.Water
+                && _rng.NextDouble() < CaChanceFast)
+            {
+                Set(x, y, MaterialType.Stone);     // 岩漿固化
+                Set(nx, ny, MaterialType.Steam);   // 水蒸發
+                _updated[Idx(nx, ny)] = true;
+                return;  // 本格已轉換，停止掃描
+            }
+        }
+    }
+
+    /// <summary>
+    /// W-3c：技能投射物命中材質格時呼叫。
+    /// 根據技能元素與目標格元素查詢 CA 效果，執行材質轉換。
+    /// </summary>
+    public void ApplyElementalImpact(int x, int y, ElementType impactElement)
+    {
+        if (!InBounds(x, y) || impactElement == ElementType.None) return;
+        var tileData = MaterialRegistry.Get(TypeAt(x, y));
+        var tileElem = tileData.NativeElement;
+        if (tileElem == ElementType.None) return;
+
+        var reaction = ElementalReactionTable.Lookup(impactElement, tileElem);
+        if (reaction == null) return;
+
+        switch (reaction.Name)
+        {
+            case "沸騰":   // Fire 技能 + Water 格 → Steam
+                if (tileElem == ElementType.Water)
+                    Set(x, y, MaterialType.Steam);
+                break;
+
+            case "流沙":   // Water 技能 + Earth 格 → Sand
+                if (TypeAt(x, y) == MaterialType.Dirt)
+                    Set(x, y, MaterialType.Sand);
+                break;
+
+            case "燃燒":   // Fire 技能 + Wood 格 → 點燃
+                IgniteMaterial(x, y);
+                break;
+
+            case "融化":   // Fire 技能 + Ice 格 → Water（Ice 材質未來才有）
+                break;
+
+            // 其餘反應的 CA 效果留待 W-3b 後續補充
         }
     }
 

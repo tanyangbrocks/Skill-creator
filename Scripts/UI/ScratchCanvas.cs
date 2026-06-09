@@ -694,6 +694,27 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
         { BlockType.TaskCounterReset, new(CLvnd, "計數器歸零",    () => B(BlockType.TaskCounterReset,  ("name", "c")),
             (r, b, _) => r.AddChild(SmallEdit(b, "name", "計數器名", 64))) },
+
+        // ── Phase 4：行動攔截積木 ────────────────────────────────────
+        { BlockType.DamageShield, new(new Color(0.35f, 0.78f, 0.95f), "攔截下一次受傷",
+            () => B(BlockType.DamageShield, ("mode", "cancel"), ("threshold", 0f), ("oneShot", true)),
+            (r, b, _) => {
+                string[] modes  = { "cancel", "halve", "cap" };
+                string[] labels = { "完全免傷", "減半", "傷害封頂" };
+                r.AddChild(SmallDrop(b, "mode", modes, labels, 72));
+                string m = b.Params.TryGetValue("mode", out var mv) ? mv?.ToString() ?? "cancel" : "cancel";
+                if (m == "cap")
+                {
+                    r.AddChild(TinyLbl("封頂值"));
+                    r.AddChild(SmallSpin(b, "capValue", 1f, 9999f, 1f, 52));
+                }
+                r.AddChild(TinyLbl("門檻≥"));
+                r.AddChild(SmallSpin(b, "threshold", 0f, 9999f, 1f, 52));
+                r.AddChild(CheckBox(b, "oneShot", "一次性"));
+            }) },
+        { BlockType.DeathGuard, new(new Color(0.35f, 0.78f, 0.95f), "攔截下一次死亡（存活 1HP）",
+            () => B(BlockType.DeathGuard, ("oneShot", true)),
+            (r, b, _) => r.AddChild(CheckBox(b, "oneShot", "一次性"))) },
     };
 
     // ── 統一查表的三個舊介面（保持對外 API 不變）─────────────────

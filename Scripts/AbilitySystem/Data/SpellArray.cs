@@ -34,4 +34,21 @@ public class SpellArray
     public int SceneUseLimit { get; set; } = 0;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(Name) && Slots.Any(s => !s.IsEmpty);
+
+    /// <summary>
+    /// W-3c：法陣攜帶的主要元素屬性（供投射物 Apply Aura 使用）。
+    /// 優先取 GlobalEngravings，再掃各插槽 LocalEngravings；無則回傳 None。
+    /// </summary>
+    public ElementType PrimaryElement
+    {
+        get
+        {
+            foreach (var e in GlobalEngravings)
+                if (e.Element != ElementType.None) return e.Element;
+            foreach (var slot in Slots)
+                foreach (var e in slot.LocalEngravings)
+                    if (e.Element != ElementType.None) return e.Element;
+            return ElementType.None;
+        }
+    }
 }

@@ -1,6 +1,7 @@
 namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.AbilitySystem.Elemental;
 using SkillCreator.World;
 using SkillCreator.World.Materials;
 
@@ -15,6 +16,7 @@ public class SpellProjectile
     private readonly PlayerController _caster;
     private readonly EnemyManager?    _enemies;  // 連段/命中傷害用
     private readonly SpellLoadout?    _loadout;  // 連段用
+    private readonly SpellRunner?     _runner;   // 跨幀執行（Wait 真實計時）
 
     private float _moveTimer      = 0f;
     private int   _remainingTiles;
@@ -23,7 +25,7 @@ public class SpellProjectile
     private const int   MaxRange     = 55;
 
     public SpellProjectile(GridPos start, GridPos dir, SpellArray spell, PlayerController caster,
-        EnemyManager? enemies = null, SpellLoadout? loadout = null)
+        EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
         Position       = start;
         _dir           = new GridPos(dir.X == 0 ? 1 : Math.Sign(dir.X), 0);
@@ -31,6 +33,7 @@ public class SpellProjectile
         _caster        = caster;
         _enemies       = enemies;
         _loadout       = loadout;
+        _runner        = runner;
         _remainingTiles= MaxRange;
     }
 
@@ -49,6 +52,11 @@ public class SpellProjectile
         // 命中非空氣地塊
         if (world.TypeAt(next.X, next.Y) != MaterialType.Air)
         {
+            // W-3c：技能元素作用於命中的材質格
+            var tileElem = _spell.PrimaryElement;
+            if (tileElem != ElementType.None)
+                world.ApplyElementalImpact(next.X, next.Y, tileElem);
+
             HitAt(next, world, enemies);
             return;
         }
@@ -59,6 +67,13 @@ public class SpellProjectile
             if (e.IsAlive && (e.Position == next || e.Position == Position))
             {
                 e.TakeDamage(25f);
+                CombatState.OnPlayerDealtDamage(25f);
+
+                // W-3c：技能元素作用於命中的敵人（Apply Aura）
+                var hitElem = _spell.PrimaryElement;
+                if (hitElem != ElementType.None)
+                    e.Aura.ApplyImmediate(hitElem, ElementalAuraComponent.DefaultAuraDuration, e);
+
                 HitAt(next, world, enemies);
                 return;
             }
@@ -70,11 +85,17 @@ public class SpellProjectile
 
     private void HitAt(GridPos pos, TileWorld world, EnemyManager enemies)
     {
-        // 臨時把施法者位置移到命中點，效果在該點爆發
-        var orig = _caster.Position;
-        _caster.Position = pos;
-        SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout, atHitPoint: true);
-        _caster.Position = orig;
+        if (_runner != null)
+        {
+            _runner.Submit(_spell, _caster, world, _enemies, _loadout, fixedOrigin: pos);
+        }
+        else
+        {
+            var orig = _caster.Position;
+            _caster.Position = pos;
+            SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout, atHitPoint: true);
+            _caster.Position = orig;
+        }
         IsAlive = false;
     }
 }

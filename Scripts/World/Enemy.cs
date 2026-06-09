@@ -1,5 +1,7 @@
 namespace SkillCreator.World;
 
+using SkillCreator.AbilitySystem;
+using SkillCreator.AbilitySystem.Elemental;
 using SkillCreator.World.Materials;
 
 public enum EnemyState { Idle, Chase, Attack }
@@ -12,11 +14,16 @@ public enum EnemyType
     Heavy,   // 重裝：高 HP、緩慢、重擊
 }
 
-public class Enemy
+public class Enemy : IElementalTarget
 {
     private static int _nextId = 0;
 
     public int        Id       { get; } = ++_nextId; // 場景內不重複的穩定 ID
+    int IElementalTarget.EntityId => Id;             // IElementalTarget 實作
+    void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
+
+    // ── 元素系統（W-3）────────────────────────────────────────────────
+    public ElementalAuraComponent Aura { get; } = new();
     public GridPos    Position { get; set; }
     public GridPos    SpawnPos { get; }
     public EnemyType  Type     { get; }
@@ -42,13 +49,16 @@ public class Enemy
     private const float GravityInterval = 0.25f;
     private const int   PatrolRange     = 12;   // Patrol 離出生點最遠距離
 
-    private float MoveInterval => Type switch
+    private float BaseMoveInterval => Type switch
     {
         EnemyType.Heavy  => 0.60f,
         EnemyType.Ranged => 0.45f,
         EnemyType.Patrol => 0.40f,
         _                => 0.35f,
     };
+
+    // 套用元素移速懲罰後的實際移動間隔（值越大越慢）
+    private float MoveInterval => BaseMoveInterval * (1f + Aura.SpeedPenalty);
 
     private float AttackInterval => Type switch
     {
@@ -116,12 +126,14 @@ public class Enemy
         _attackTimer  = 0f;
         _respawnTimer = 0f;
         _patrolDir    = 1;
+        Aura.Reset();
     }
 
     // ── 每幀更新 ──────────────────────────────────────────────────
 
     public void Update(TileWorld world, PlayerController player, float delta)
     {
+        Aura.Process(delta, this);
         ApplyGravity(world, delta);
         WantsToFire = false;
 
@@ -154,7 +166,7 @@ public class Enemy
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveX(world, dx);
             }
         }
         else if (State == EnemyState.Attack)
@@ -207,7 +219,7 @@ public class Enemy
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveX(world, dx);
             }
         }
     }
@@ -234,7 +246,7 @@ public class Enemy
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveX(world, dx);
             }
         }
         else
@@ -245,16 +257,19 @@ public class Enemy
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                var next = new GridPos(Position.X + _patrolDir, Position.Y);
-                if (world.TypeAt(next.X, next.Y) == MaterialType.Air)
+                if (!Aura.IsImmobilized)
                 {
-                    Position = next;
-                    if (Math.Abs(Position.X - SpawnPos.X) >= PatrolRange)
+                    var next = new GridPos(Position.X + _patrolDir, Position.Y);
+                    if (world.TypeAt(next.X, next.Y) == MaterialType.Air)
+                    {
+                        Position = next;
+                        if (Math.Abs(Position.X - SpawnPos.X) >= PatrolRange)
+                            _patrolDir = -_patrolDir;
+                    }
+                    else
+                    {
                         _patrolDir = -_patrolDir;
-                }
-                else
-                {
-                    _patrolDir = -_patrolDir;
+                    }
                 }
             }
         }
@@ -275,7 +290,7 @@ public class Enemy
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveX(world, dx);
             }
         }
         else if (State == EnemyState.Attack)
@@ -317,5 +332,17 @@ public class Enemy
         _                => 10f,
     };
 
-    public void TakeDamage(float amount) => Hp = Math.Max(0f, Hp - amount);
+    public void TakeDamage(float amount)
+    {
+        // ── 元素狀態效果修改（W-3：鏽化防禦懲罰 + 結凍受傷加成）────
+        float modified = amount * (1f + Aura.DefensePenalty) * (1f + Aura.DamageTakenBonus);
+        // ──────────────────────────────────────────────────────────────
+
+        // ── 行動攔截鉤子（Phase 4 第三層）────────────────────────────
+        var result = ActionBus.Dispatch(new EntityDamageAction(Id, modified));
+        if (result == null) return; // 攔截：傷害取消
+        float finalDmg = result is EntityDamageAction eda ? eda.Amount : modified;
+        // ──────────────────────────────────────────────────────────────
+        Hp = Math.Max(0f, Hp - finalDmg);
+    }
 }
