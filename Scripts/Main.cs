@@ -429,6 +429,7 @@ public partial class Main : Node
             return;
         }
 
+        _player.UpdateEnvironment(_world.World);  // W-5b：設置氧氣/環境溫度旗標
         _player.Tick(dt);
         _enemies.Update(_world.World, _player, dt);
         _runner.Update(dt);

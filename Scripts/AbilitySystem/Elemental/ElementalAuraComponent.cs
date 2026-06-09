@@ -42,6 +42,18 @@ public sealed class ElementalAuraComponent
     /// <summary>防禦力懲罰加總（0–1）；0 = 正常，0.10 = 防禦降 10%。</summary>
     public float DefensePenalty   { get; private set; }
 
+    /// <summary>
+    /// 元素 Aura 對環境溫度的總偏移（°C）；由 PlayerController.UpdateEnvironment 讀取後疊加至基礎環境溫度。
+    /// Fire +15 / Ice -20 / Water -8 每層；上限 ±AuraTempShiftMax。
+    /// </summary>
+    public float AuraTemperatureShift { get; private set; }
+
+    // ── 元素 Aura 溫度偏移常數（W-5b 體溫系統連接）─────────────────
+    public const float FireAuraTempShift  = +15f;  // ⚠️ 待平衡
+    public const float IceAuraTempShift   = -20f;  // ⚠️ 待平衡
+    public const float WaterAuraTempShift =  -8f;  // ⚠️ 待平衡
+    public const float AuraTempShiftMax   =  50f;  // 偏移上下限（°C）
+
     // ── 主要 API ──────────────────────────────────────────────────────────
 
     /// <summary>
@@ -152,7 +164,7 @@ public sealed class ElementalAuraComponent
 
     private void Recompute()
     {
-        float spd = 0f, dmgBonus = 0f, defPen = 0f;
+        float spd = 0f, dmgBonus = 0f, defPen = 0f, tempShift = 0f;
         bool  immob = false;
         foreach (var e in _effects)
         {
@@ -161,9 +173,20 @@ public sealed class ElementalAuraComponent
             defPen   += e.DefensePenalty;
             immob    |= e.Immobilizes;
         }
-        SpeedPenalty     = spd;
-        DamageTakenBonus = dmgBonus;
-        DefensePenalty   = MathF.Min(1f, defPen);  // 最多降到 0 防禦
-        IsImmobilized    = immob;
+        foreach (var a in _auras)
+        {
+            tempShift += a.Element switch
+            {
+                ElementType.Fire  => FireAuraTempShift,
+                ElementType.Ice   => IceAuraTempShift,
+                ElementType.Water => WaterAuraTempShift,
+                _                 => 0f,
+            };
+        }
+        SpeedPenalty         = spd;
+        DamageTakenBonus     = dmgBonus;
+        DefensePenalty       = MathF.Min(1f, defPen);  // 最多降到 0 防禦
+        IsImmobilized        = immob;
+        AuraTemperatureShift = Math.Clamp(tempShift, -AuraTempShiftMax, AuraTempShiftMax);
     }
 }

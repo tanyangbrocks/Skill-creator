@@ -164,10 +164,24 @@ public class PlayerController : IElementalTarget
         Mp = MaxMp;
     }
 
+    /// <summary>
+    /// 每幀由 Main._Process 在 Tick() 之前呼叫：設置環境依賴的生存狀態旗標。
+    /// · 氧氣：站在 Water 格 → 缺氧
+    /// · 體溫：基礎室溫 + 元素 Aura 溫度偏移（Fire 加熱 / Ice‧Water 降溫）
+    /// </summary>
+    public void UpdateEnvironment(TileWorld world)
+    {
+        var tile = world.TypeAt(Position.X, Position.Y);
+        State.IsOxygenDeprived  = tile == MaterialType.Water;
+        State.AmbientTemperature = CharacterState.DefaultAmbientTemp + Aura.AuraTemperatureShift;
+    }
+
     public void Tick(float delta)
     {
         Aura.Process(delta, this);
-        State.Tick(delta, CombatState.InCombat);  // W-5b：體力/精力/心情更新
+        // W-5b：生存傷害直接扣血，繞過防禦管線
+        float survivalDmg = State.Tick(delta, CombatState.InCombat);
+        if (survivalDmg > 0f) Hp = MathF.Max(0f, Hp - survivalDmg);
         if (_moveCooldown > 0f) _moveCooldown -= delta;
         if (_castCooldown > 0f) _castCooldown -= delta;
         Mp = MathF.Min(MaxMp, Mp + Stats.MpRegenRate * delta);  // W-5a：MpRegen 來自 Stats
