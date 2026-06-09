@@ -232,6 +232,35 @@ public static class SpellCompiler
                 }));
                 break;
 
+            // ── 邊緣觸發 ───────────────────────────────────────────────
+            case BlockType.RisingEdge:
+                code.Add(new Instruction(OpCode.EdgeRising, new(block.Params)));
+                break;
+
+            case BlockType.FallingEdge:
+                code.Add(new Instruction(OpCode.EdgeFalling, new(block.Params)));
+                break;
+
+            case BlockType.SinglePulse:
+            {
+                var jif = new Instruction(OpCode.EdgeSinglePulse, new(block.Params));
+                code.Add(jif);
+                EmitList(block.ThenBranch, code);
+                jif.Params["__target"] = (object?)code.Count;
+                break;
+            }
+
+            case BlockType.DetectEntityEnter:
+            {
+                float radius = block.Params.TryGetValue("radius", out var rv) && rv is float rf ? rf : 5f;
+                code.Add(new Instruction(OpCode.WaitCondition, new()
+                {
+                    ["condKey"]   = (object?)"entityInRange",
+                    ["threshold"] = (object?)radius,
+                }));
+                break;
+            }
+
             // ── 布林變數 ───────────────────────────────────────────────
             case BlockType.SetVarBool:
             {

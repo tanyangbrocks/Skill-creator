@@ -178,6 +178,9 @@ public partial class ScratchCanvas : Control
         if (block.Type == BlockType.TaskCounterOnReach)
             outer.AddChild(BuildBranch(block.ThenBranch, "到達時執行（僅一次）", indent + 1));
 
+        if (block.Type == BlockType.SinglePulse)
+            outer.AddChild(BuildBranch(block.ThenBranch, "條件首次成立時執行", indent + 1));
+
         // 間距
         outer.AddChild(Spacer(0, 3));
         return outer;
@@ -481,12 +484,15 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "frames", 1f, 300f, 1f, 44)); r.AddChild(TinyLbl("幀")); }) },
 
         // ── 觸發時機 ──────────────────────────────────────────────────
-        { BlockType.RisingEdge,   new(CCyan, "開始觸發",    () => B(BlockType.RisingEdge,  ("totemName", "")),
-            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
-        { BlockType.FallingEdge,  new(CCyan, "結束觸發",    () => B(BlockType.FallingEdge, ("totemName", "")),
-            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
-        { BlockType.SinglePulse,  new(CCyan, "僅觸發一次",  () => B(BlockType.SinglePulse, ("totemName", "")),
-            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+        { BlockType.RisingEdge,   new(CCyan, "條件成立時（邊緣）",
+            () => B(BlockType.RisingEdge,  ("conditionType","compare"),("left","x"),("op",">"),("right","0")),
+            ConditionUI) },
+        { BlockType.FallingEdge,  new(CCyan, "條件結束時（邊緣）",
+            () => B(BlockType.FallingEdge, ("conditionType","compare"),("left","x"),("op",">"),("right","0")),
+            ConditionUI) },
+        { BlockType.SinglePulse,  new(CCyan, "條件首次成立時",
+            () => B(BlockType.SinglePulse, ("conditionType","compare"),("left","x"),("op",">"),("right","0")),
+            ConditionUI) },
 
         // ── 變數 ──────────────────────────────────────────────────────
         { BlockType.SetVar,       new(CYlw,  "設定變數",    () => B(BlockType.SetVar, ("name", "x"), ("value", "0"), ("global", false)),
@@ -658,7 +664,8 @@ public partial class ScratchCanvas : Control
         { BlockType.DetectMpThreshold,new(CRed, "魔力值低於 N%",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
         { BlockType.DetectHitReceived, new(CRed, "偵測到受到攻擊",  () => B(BlockType.DetectHitReceived)) },
-        { BlockType.DetectEntityEnter, new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
+        { BlockType.DetectEntityEnter, new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內有敵人")); }) },
 
         // ── 戰鬥統計查詢 ───────────────────────────────────────────────
         { BlockType.GetBattleStat, new(new Color(0.15f,0.55f,0.55f), "本場戰鬥統計",

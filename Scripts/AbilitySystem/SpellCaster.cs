@@ -4,6 +4,7 @@ using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.VM;
 using SkillCreator.World;
 using SkillCreator.World.Materials;
+using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 
 // 施放法陣：透過 VM 執行積木序列，每個 InvokeTotem 導向對應圖騰效果
 public static class SpellCaster
@@ -31,6 +32,7 @@ public static class SpellCaster
 
         player.Mp -= mpCost;
         player.SetCastCooldown(spell.CastDelay);
+        CombatState.OnSpellCast();
 
         switch (spell.Container)
         {
@@ -40,11 +42,11 @@ public static class SpellCaster
                 return new SpellCastResult
                 {
                     Ok         = true,
-                    Projectile = new SpellProjectile(start, player.Facing, spell, player, enemies, loadout),
+                    Projectile = new SpellProjectile(start, player.Facing, spell, player, enemies, loadout, runner),
                 };
             }
             case ContainerType.Contact:
-                ExecuteContactHit(spell, player, world, enemies, loadout);
+                ExecuteContactHit(spell, player, world, enemies, loadout, runner);
                 return new SpellCastResult { Ok = true };
 
             default:
@@ -59,7 +61,7 @@ public static class SpellCaster
     // ── Contact 容器：近戰範圍命中 ────────────────────────────────
 
     private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld world,
-        EnemyManager? enemies, SpellLoadout? loadout)
+        EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
     {
         int fx = player.Facing.X;
 
@@ -73,10 +75,18 @@ public static class SpellCaster
                 if (target is not null)
                 {
                     target.TakeDamage(20f);   // 直接接觸傷害（獨立於技能效果）
-                    var orig = player.Position;
-                    player.Position = checkPos;
-                    ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
-                    player.Position = orig;
+                    CombatState.OnPlayerDealtDamage(20f);
+                    if (runner != null)
+                    {
+                        runner.Submit(spell, player, world, enemies, loadout, fixedOrigin: checkPos);
+                    }
+                    else
+                    {
+                        var orig = player.Position;
+                        player.Position = checkPos;
+                        ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
+                        player.Position = orig;
+                    }
                     return;
                 }
             }
@@ -84,10 +94,17 @@ public static class SpellCaster
 
         // 未命中敵人：在正前方 2 格執行（AoE 效果仍可擊中範圍內目標）
         var meleePt = new GridPos(player.Position.X + fx * 2, player.Position.Y);
-        var origPos = player.Position;
-        player.Position = meleePt;
-        ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
-        player.Position = origPos;
+        if (runner != null)
+        {
+            runner.Submit(spell, player, world, enemies, loadout, fixedOrigin: meleePt);
+        }
+        else
+        {
+            var origPos = player.Position;
+            player.Position = meleePt;
+            ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
+            player.Position = origPos;
+        }
     }
 
     // ── 直接執行效果（PlayerBody / Contact 命中 / 投射物命中時皆可呼叫）────
@@ -108,15 +125,23 @@ public static class SpellCaster
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
         if (enemies != null)
             ctx.EntityQuery = r => QueryEnemies(enemies, player, r);
-        ctx.RaycastQuery    = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
-        ctx.FocalPointQuery = () => player.MouseGridPos;
+        ctx.RaycastQuery     = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
+        ctx.FocalPointQuery  = () => player.MouseGridPos;
+        ctx.PlayerStatsQuery = key => key switch
+        {
+            "hp"    => player.Hp,
+            "mp"    => player.Mp,
+            "hpPct" => player.Hp / PlayerController.MaxHp,
+            "mpPct" => player.Mp / PlayerController.MaxMp,
+            _       => 0f,
+        };
         var loop = new ExecutionLoop(new SafetyGuard());
         loop.ResetTick();
 
         int safety = 0;
         while (!ctx.IsFinished && safety++ < SafetyGuard.MaxStepsPerCast)
         {
-            // 同步執行模式：強制跳過 Wait / WaitingSignal（真實語意需 SpellRunner）
+            // 同步執行模式：強制跳過 Wait / WaitingSignal / WaitingCondition
             if (ctx.State == ExecutionState.Waiting)
             {
                 ctx.WaitRemaining = 0f;
@@ -126,6 +151,19 @@ public static class SpellCaster
             if (ctx.State == ExecutionState.WaitingSignal)
             {
                 ctx.WaitingSignalName = null;
+                ctx.PC++;
+                ctx.State = ExecutionState.Running;
+            }
+            if (ctx.State == ExecutionState.WaitingCondition)
+            {
+                ctx.WaitingConditionKey = null;
+                ctx.PC++;
+                ctx.State = ExecutionState.Running;
+            }
+            if (ctx.State == ExecutionState.WaitingRisingEdge ||
+                ctx.State == ExecutionState.WaitingFallingEdge)
+            {
+                ctx.WaitingEdgePC = -1;
                 ctx.PC++;
                 ctx.State = ExecutionState.Running;
             }
@@ -185,10 +223,10 @@ public static class SpellCaster
         // 以 EffectOriginOverride 取代 player.Position 暫改，避免競態風險
         ctx.EffectOriginOverride = ctx.CurrentIterEntity.HasValue
             ? ctx.CurrentIterEntity.Value.Position
-            : (GridPos?)null;
+            : ctx.FixedOrigin;
         if (slotByRef.TryGetValue(name, out var slot))
             ResolveTotem(name, slot, ctx, player, world,
-                atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint);
+                atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint || ctx.FixedOrigin.HasValue);
         else
             ctx.DoneTotems.Add(name);
         ctx.EffectOriginOverride = null;
@@ -223,6 +261,7 @@ public static class SpellCaster
         var enemy = enemies.Enemies.Find(e => e.Id == id);
         if (enemy == null) return;
         enemy.TakeDamage(dmg);
+        CombatState.OnPlayerDealtDamage(dmg);
         // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
         if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Id == id)
         {

@@ -64,6 +64,9 @@ public enum OpCode
     // ── 補完實作 ──────────────────────────────────────────────────
     QueryNearCount,    // 查詢半徑內敵人數量 → resultVar
     RandomJump,        // 隨機跳轉到 N 個目標地址之一（__target_0 / __target_1...）
+    EdgeRising,        // 等待條件 false→true（同 WaitingRisingEdge 狀態）
+    EdgeFalling,       // 等待條件 true→false（同 WaitingFallingEdge 狀態）
+    EdgeSinglePulse,   // 條件首次成立時執行 ThenBranch（__target 指向結尾）
     TaskCounterSet,    // 設定任務計數器值（全域）
     TaskCounterAdd,    // 增加任務計數器
     TaskCounterGet,    // 讀取任務計數器 → resultVar

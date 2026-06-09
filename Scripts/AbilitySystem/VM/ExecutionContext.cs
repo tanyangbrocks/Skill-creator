@@ -8,9 +8,11 @@ public enum ExecutionState
     Waiting,          // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
     WaitingFrames,    // Sleep 積木暫停；每幀遞減 WaitFramesRemaining，歸零後前進
     WaitingSignal,    // OnReceive 暫停；等到訊號被廣播後由 Step 頂部恢復
-    WaitingCondition, // DetectHp/Mp/Hit 暫停；每幀 Step 頂部檢查玩家狀態條件
+    WaitingCondition,   // DetectHp/Mp/Hit/EntityEnter 暫停；每幀 Step 頂部檢查條件
+    WaitingRisingEdge,  // RisingEdge 暫停；等待條件從 false 轉 true
+    WaitingFallingEdge, // FallingEdge 暫停；等待條件從 true 轉 false
     Completed,
-    Fizzled,          // 執行途中目標消失（MP 不退還）
+    Fizzled,            // 執行途中目標消失（MP 不退還）
 }
 
 public class ExecutionContext
@@ -71,9 +73,15 @@ public class ExecutionContext
     public GridPos? FixedOrigin { get; set; }
 
     // 被動觸發條件（WaitingCondition 狀態時有效）
-    // key: "hpPct" / "mpPct" / "damaged"；threshold: 觸發閾值（hpPct/mpPct 為 0–1 比例）
+    // key: "hpPct"/"mpPct"/"damaged"/"entityInRange"；threshold: 閾值或半徑
     public string? WaitingConditionKey       { get; set; }
     public float   WaitingConditionThreshold { get; set; }
+
+    // 邊緣觸發（WaitingRisingEdge / WaitingFallingEdge 狀態時有效）
+    // EdgeState[pc] = 上幀條件求值結果；PulseArmed 追蹤 SinglePulse 就緒狀態
+    public int                  WaitingEdgePC { get; set; } = -1;
+    public Dictionary<int, bool> EdgeState    { get; } = new();
+    public HashSet<int>          PulseArmed   { get; } = new();
 
     // 玩家狀態查詢代理（SpellCaster / SpellRunner 建立 ctx 時注入）
     // 查詢鍵："hp" / "mp" / "hpPct" / "mpPct"

@@ -56,7 +56,7 @@ public sealed class SpellRunner
 
     public void Submit(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null,
-        int comboDepth = 0, bool atHitPoint = false)
+        int comboDepth = 0, bool atHitPoint = false, GridPos? fixedOrigin = null)
     {
         var blocks = spell.Blocks.Count > 0
             ? spell.Blocks
@@ -66,13 +66,23 @@ public sealed class SpellRunner
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
         if (enemies != null)
             ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);
-        ctx.RaycastQuery    = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
-        ctx.FocalPointQuery = () => player.MouseGridPos;
+        ctx.RaycastQuery     = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
+        ctx.FocalPointQuery  = () => player.MouseGridPos;
+        ctx.PlayerStatsQuery = key => key switch
+        {
+            "hp"    => player.Hp,
+            "mp"    => player.Mp,
+            "hpPct" => player.Hp / PlayerController.MaxHp,
+            "mpPct" => player.Mp / PlayerController.MaxMp,
+            _       => 0f,
+        };
+        ctx.FixedOrigin     = fixedOrigin;
         var loop = new ExecutionLoop(new SafetyGuard());
         var slotByRef = SpellCaster.BuildSlotLookup(spell);
 
         _active.Add(new ActiveSpell(ctx, loop, slotByRef,
-            player, world, enemies, loadout, comboDepth, atHitPoint));
+            player, world, enemies, loadout, comboDepth,
+            atHitPoint: atHitPoint || fixedOrigin.HasValue));
     }
 
     // ── 每幀驅動（Main._Process 呼叫）────────────────────────────
@@ -102,9 +112,12 @@ public sealed class SpellRunner
             s.Loop.Step(s.Ctx, stepDelta);
             stepDelta = 0f;
 
-            // Wait / OnReceive 等待中：本幀停止推進，下幀繼續
-            if (s.Ctx.State == ExecutionState.Waiting ||
-                s.Ctx.State == ExecutionState.WaitingSignal) break;
+            // Wait / OnReceive / WaitingCondition / EdgeTrigger 等待中：本幀停止推進，下幀繼續
+            if (s.Ctx.State == ExecutionState.Waiting            ||
+                s.Ctx.State == ExecutionState.WaitingSignal       ||
+                s.Ctx.State == ExecutionState.WaitingCondition    ||
+                s.Ctx.State == ExecutionState.WaitingRisingEdge   ||
+                s.Ctx.State == ExecutionState.WaitingFallingEdge) break;
 
             // InvokeTotem：共用 helper 自動處理 ForEach 定位（EffectOriginOverride）
             if (s.Ctx.PendingInvokeTotem != null)

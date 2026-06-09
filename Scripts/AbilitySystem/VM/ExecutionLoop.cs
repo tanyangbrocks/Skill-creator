@@ -52,22 +52,43 @@ public class ExecutionLoop
         {
             bool met;
             if (ctx.WaitingConditionKey == "damaged")
-            {
                 met = CombatState.TookDamageThisFrame;
-            }
+            else if (ctx.WaitingConditionKey == "entityInRange")
+                met = ctx.EntityQuery != null && ctx.EntityQuery(ctx.WaitingConditionThreshold).Count > 0;
             else if (ctx.PlayerStatsQuery != null)
             {
                 float val = ctx.PlayerStatsQuery(ctx.WaitingConditionKey!);
                 met = val < ctx.WaitingConditionThreshold;
             }
             else
-            {
                 met = true; // 無代理（同步路徑）→ 直接通過
-            }
             if (!met) return true;
             ctx.WaitingConditionKey = null;
             ctx.State = ExecutionState.Running;
             ctx.PC++;   // 跳過已通過的 WaitCondition 指令
+        }
+
+        // 邊緣觸發等待：每幀重新求值條件，偵測到對應邊緣才繼續
+        if (ctx.State == ExecutionState.WaitingRisingEdge ||
+            ctx.State == ExecutionState.WaitingFallingEdge)
+        {
+            int epc = ctx.WaitingEdgePC;
+            if (epc >= 0 && epc < ctx.Code.Count)
+            {
+                bool cur  = EvalCondition(ctx.Code[epc], ctx);
+                bool prev = ctx.EdgeState.TryGetValue(epc, out bool p) && p;
+                ctx.EdgeState[epc] = cur;
+                bool edgeMet = ctx.State == ExecutionState.WaitingRisingEdge
+                    ? (!prev && cur)   // false → true
+                    : (prev && !cur);  // true → false
+                if (edgeMet)
+                {
+                    ctx.WaitingEdgePC = -1;
+                    ctx.State = ExecutionState.Running;
+                    ctx.PC = epc + 1;
+                }
+            }
+            return true;
         }
 
         while (ctx.State == ExecutionState.Running && ctx.PC < ctx.Code.Count)
@@ -759,6 +780,47 @@ public class ExecutionLoop
             }
 
             // ── 補完實作 ──────────────────────────────────────────────
+            // ── 邊緣觸發 ─────────────────────────────────────────────
+            case OpCode.EdgeRising:
+            {
+                // 初次進入：記錄當前狀態，進入等待（不立刻觸發）
+                ctx.EdgeState[ctx.PC] = EvalCondition(instr, ctx);
+                ctx.WaitingEdgePC = ctx.PC;
+                ctx.State = ExecutionState.WaitingRisingEdge;
+                // PC 不前進：由 Step 頂部偵測到邊緣後前進
+                break;
+            }
+
+            case OpCode.EdgeFalling:
+            {
+                ctx.EdgeState[ctx.PC] = EvalCondition(instr, ctx);
+                ctx.WaitingEdgePC = ctx.PC;
+                ctx.State = ExecutionState.WaitingFallingEdge;
+                break;
+            }
+
+            case OpCode.EdgeSinglePulse:
+            {
+                int  pc      = ctx.PC;
+                bool current = EvalCondition(instr, ctx);
+                bool armed   = ctx.PulseArmed.Contains(pc);
+                if (!current)
+                {
+                    ctx.PulseArmed.Add(pc);                              // 重置就緒
+                    ctx.PC = Param<int>(instr, "__target", pc + 1);      // 跳過 ThenBranch
+                }
+                else if (armed)
+                {
+                    ctx.PulseArmed.Remove(pc);                           // 消耗一次觸發
+                    ctx.PC++;                                             // 進入 ThenBranch
+                }
+                else
+                {
+                    ctx.PC = Param<int>(instr, "__target", pc + 1);      // 已觸發，跳過
+                }
+                break;
+            }
+
             case OpCode.QueryNearCount:
             {
                 float  radius    = Param<float> (instr, "radius",    5f);
