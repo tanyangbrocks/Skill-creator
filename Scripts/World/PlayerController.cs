@@ -23,21 +23,66 @@ public class PlayerController
     private const float MpRegen   = 8f;
     public float MaxMp => BaseMaxMp + Equipment.TotalMpBonus;
 
-    // ── XP / 等級 ──────────────────────────────────────────────
+    // ── XP / 等級 / 境界（星盟通用戰力等級）──────────────────────
     public int   Level { get; private set; } = 1;
     public float Xp    { get; private set; } = 0f;
 
+    // Main.cs 每幀讀取後清除；true = 本幀剛突破境界
+    public bool JustBrokeThrough { get; set; }
+
     public static int XpRequired(int level) => level * 100;
+
+    public static string GetTierName(int level) => level switch
+    {
+        < 10  => "學徒",
+        < 20  => "超凡",
+        < 35  => "征戰",
+        < 50  => "主將",
+        < 65  => "群星",
+        < 80  => "耀日",
+        < 100 => "巔峰",
+        _     => "特異",
+    };
+
+    // AP 上限對應境界（⚠️ 數值暫定，待平衡）
+    public static int TierApCap(int level) => level switch
+    {
+        < 10  =>   50,
+        < 20  =>  120,
+        < 35  =>  200,
+        < 50  =>  350,
+        < 65  =>  500,
+        < 80  =>  700,
+        < 100 =>  900,
+        _     => 1500,
+    };
+
+    // 境界徽章顏色（for HUD）
+    public static (float R, float G, float B) GetTierColor(int level) => level switch
+    {
+        < 10  => (0.65f, 0.65f, 0.65f), // 灰
+        < 20  => (0.55f, 0.60f, 0.75f), // 深藍灰
+        < 35  => (0.30f, 0.82f, 0.38f), // 綠
+        < 50  => (0.28f, 0.58f, 0.95f), // 藍
+        < 65  => (0.95f, 0.85f, 0.18f), // 黃
+        < 80  => (0.95f, 0.32f, 0.25f), // 紅
+        < 100 => (0.80f, 0.28f, 0.95f), // 紫
+        _     => (1.00f, 1.00f, 1.00f), // 白（特異以上）
+    };
+
+    public string TierName => GetTierName(Level);
 
     public void GainXp(float amount)
     {
         if (!IsAlive) return;
+        string tierBefore = TierName;
         Xp += amount;
         while (Xp >= XpRequired(Level))
         {
             Xp -= XpRequired(Level);
             Level++;
         }
+        if (TierName != tierBefore) JustBrokeThrough = true;
     }
 
     private float _moveCooldown = 0f;

@@ -1,6 +1,7 @@
 namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.World;
 
 public static class AbilityPointCalculator
 {
@@ -41,17 +42,7 @@ public static class AbilityPointCalculator
     public static float LinearEffect(float points, float baseValue, float k)
         => baseValue + points * k;
 
-    // 判斷法陣能力點是否超過等級上限（⚠️ 數值待調整）
+    // 判斷法陣能力點是否超過境界上限（數值定義於 PlayerController.TierApCap）
     public static bool ExceedsLevelCap(SpellArray spell, int playerLevel)
-    {
-        int cap = playerLevel switch
-        {
-            < 20  => 50,
-            < 30  => 120,
-            < 50  => 250,
-            < 70  => 500,
-            _     => 900,
-        };
-        return CalculateTotalCost(spell) > cap;
-    }
+        => CalculateTotalCost(spell) > PlayerController.TierApCap(playerLevel);
 }

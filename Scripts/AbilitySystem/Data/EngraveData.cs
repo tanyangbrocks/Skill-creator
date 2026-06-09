@@ -22,6 +22,9 @@ public class EngraveData
     // 解鎖所需玩家等級（0 = 無門檻）
     public int RequiredPlayerLevel { get; init; } = 0;
 
+    // 屬性元素（Elemental 刻印專用；None = 非屬性刻印）
+    public ElementType Element { get; init; } = ElementType.None;
+
     // 是否為限制型（黃色）：加入後回收能力點，而非消耗
     public bool IsRestriction { get; init; } = false;
 

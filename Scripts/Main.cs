@@ -35,12 +35,16 @@ public partial class Main : Node
     private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
     private Label            _paintModeLabel  = null!;
 
-    // 等級 / XP / 裝備 HUD
-    private Label         _lvLabel      = null!;
-    private Label         _xpLabel      = null!;
-    private Panel         _xpBarFill    = null!;
-    private StyleBoxFlat  _xpFillStyle  = null!;
-    private Label         _equipLabel   = null!;
+    // 等級 / XP / 境界 / 裝備 HUD
+    private Label         _lvLabel           = null!;
+    private Label         _tierLabel         = null!;
+    private Label         _xpLabel           = null!;
+    private Panel         _xpBarFill         = null!;
+    private StyleBoxFlat  _xpFillStyle       = null!;
+    private Label         _equipLabel        = null!;
+    private Label         _breakthroughLabel = null!;
+    private float         _breakthroughTimer = 0f;
+    private string        _lastTierName      = "學徒";
 
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
@@ -329,10 +333,18 @@ public partial class Main : Node
         _lvLabel.AddThemeFontSizeOverride("font_size", 13);
         hud.AddChild(_lvLabel);
 
-        // XP 數字標籤（等級標籤右側）
+        // 境界標籤（等級右側，顏色隨境界動態更新）
+        _tierLabel = new Label();
+        _tierLabel.AnchorTop = _tierLabel.AnchorBottom = 1f;
+        _tierLabel.Position  = new Vector2(58f, -170f);
+        _tierLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.65f));
+        _tierLabel.AddThemeFontSizeOverride("font_size", 13);
+        hud.AddChild(_tierLabel);
+
+        // XP 數字標籤（境界標籤右側）
         _xpLabel = new Label();
         _xpLabel.AnchorTop = _xpLabel.AnchorBottom = 1f;
-        _xpLabel.Position  = new Vector2(62f, -169f);
+        _xpLabel.Position  = new Vector2(120f, -169f);
         _xpLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
         _xpLabel.AddThemeFontSizeOverride("font_size", 11);
         hud.AddChild(_xpLabel);
@@ -353,6 +365,15 @@ public partial class Main : Node
         _xpBarFill.Size     = new Vector2(0f, 7f);
         _xpBarFill.AddThemeStyleboxOverride("panel", _xpFillStyle);
         xpBg.AddChild(_xpBarFill);
+
+        // 境界突破通知（畫面中央，短暫顯示後淡出）
+        _breakthroughLabel = new Label();
+        _breakthroughLabel.AnchorLeft  = _breakthroughLabel.AnchorRight  = 0.5f;
+        _breakthroughLabel.AnchorTop   = _breakthroughLabel.AnchorBottom = 0.5f;
+        _breakthroughLabel.Position    = new Vector2(-120f, -60f);
+        _breakthroughLabel.AddThemeFontSizeOverride("font_size", 20);
+        _breakthroughLabel.Visible     = false;
+        hud.AddChild(_breakthroughLabel);
     }
 
     // ── 每幀更新 ───────────────────────────────────────────────────
@@ -370,6 +391,30 @@ public partial class Main : Node
         RefreshHotbar();
         RefreshLevelHUD();
         _paintModeLabel.Visible = _world.PaintingEnabled;
+
+        // 境界門檻同步至刻印庫（讓鎖定狀態即時反映）
+        _editor.PlayerLevel = _player.Level;
+
+        // 境界突破通知
+        if (_player.JustBrokeThrough)
+        {
+            _player.JustBrokeThrough = false;
+            _lastTierName = _player.TierName;
+            var (r, g, b) = PlayerController.GetTierColor(_player.Level);
+            _breakthroughLabel.Text    = $"⬆ 境界突破：{_player.TierName}";
+            _breakthroughLabel.AddThemeColorOverride("font_color", new Color(r, g, b));
+            _breakthroughLabel.Visible = true;
+            _breakthroughTimer         = 3f;
+        }
+        if (_breakthroughTimer > 0f)
+        {
+            _breakthroughTimer -= dt;
+            float alpha = Math.Clamp(_breakthroughTimer / 1f, 0f, 1f); // 最後 1 秒淡出
+            var col = _breakthroughLabel.GetThemeColor("font_color");
+            _breakthroughLabel.AddThemeColorOverride("font_color",
+                new Color(col.R, col.G, col.B, alpha));
+            if (_breakthroughTimer <= 0f) _breakthroughLabel.Visible = false;
+        }
 
         // 滑鼠世界格座標（FocalPoint 積木用）
         var mp = _world.GetLocalMousePosition();
@@ -591,6 +636,11 @@ public partial class Main : Node
         _xpLabel.Text  = $"{_player.Xp:F0} / {xpReq} XP";
         float ratio    = xpReq > 0 ? Math.Clamp(_player.Xp / xpReq, 0f, 1f) : 1f;
         _xpBarFill.Size = new Vector2(200f * ratio, 7f);
+
+        // 境界名稱 + 顏色
+        _tierLabel.Text = $"【{_player.TierName}】";
+        var (r, g, b) = PlayerController.GetTierColor(_player.Level);
+        _tierLabel.AddThemeColorOverride("font_color", new Color(r, g, b));
 
         var eq = _player.Equipment;
         string wn  = eq.WeaponId    != ItemId.None ? ItemRegistry.Get(eq.WeaponId).DisplayName    : "─";

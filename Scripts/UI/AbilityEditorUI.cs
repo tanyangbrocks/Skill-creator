@@ -4,6 +4,7 @@ using Godot;
 using SkillCreator.AbilitySystem;
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.VM;
+using SkillCreator.World;
 
 public partial class AbilityEditorUI : Control
 {
@@ -22,7 +23,8 @@ public partial class AbilityEditorUI : Control
     private TotemData? _pendingTotem;
     private int       _activeSlot   = -1;
     private const int MaxSlots      = 8;
-    private const int PlayerLv      = 1;
+    // 由 Main.cs 每幀更新，用於刻印庫境界門檻顯示
+    public  int       PlayerLevel   { get; set; } = 1;
 
     // ── UI 節點引用 ───────────────────────────────────────────────
     private LineEdit      _nameInput = null!;
@@ -241,11 +243,17 @@ public partial class AbilityEditorUI : Control
                 lastClr = eng.Color;
             }
             var e = eng;
-            string costTag = eng.IsRestriction ? $"+{eng.BaseCost}pt" : $"{eng.BaseCost}pt";
-            var btn = Btn($"  {eng.DisplayName}  {costTag}", new Color(0.18f, 0.20f, 0.20f));
+            bool locked = eng.RequiredPlayerLevel > PlayerLevel;
+            string costTag  = eng.IsRestriction ? $"+{eng.BaseCost}pt" : $"{eng.BaseCost}pt";
+            string lockTag  = locked
+                ? $"  🔒{PlayerController.GetTierName(eng.RequiredPlayerLevel)}"
+                : "";
+            var btn = Btn($"  {eng.DisplayName}  {costTag}{lockTag}", new Color(0.18f, 0.20f, 0.20f));
             btn.Alignment = HorizontalAlignment.Left;
             btn.CustomMinimumSize = new Vector2(0, 26);
-            btn.AddThemeColorOverride("font_color", EngraveClr(eng.Color));
+            btn.Disabled = locked;
+            btn.AddThemeColorOverride("font_color",
+                locked ? new Color(0.40f, 0.40f, 0.42f) : EngraveClr(eng.Color));
             btn.Pressed += () => AttachEngrave(e);
             vbox.AddChild(btn);
         }
@@ -439,7 +447,7 @@ public partial class AbilityEditorUI : Control
         // AP 上限說明
         var capRow = new HBoxContainer();
         HSpacer(capRow, 8);
-        var capLbl = Lbl($"上限（LV{PlayerLv}）：{LvCap(PlayerLv)} 點");
+        var capLbl = Lbl($"上限（LV{PlayerLevel}）：{LvCap(PlayerLevel)} 點");
         capLbl.AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.55f));
         capRow.AddChild(capLbl);
         vbox.AddChild(capRow);
@@ -447,7 +455,7 @@ public partial class AbilityEditorUI : Control
         // AP 進度條
         _apBar = new ProgressBar();
         _apBar.MinValue = 0;
-        _apBar.MaxValue = LvCap(PlayerLv);
+        _apBar.MaxValue = LvCap(PlayerLevel);
         _apBar.Value = 0;
         _apBar.CustomMinimumSize = new Vector2(0, 14);
         var barMargin = new MarginContainer();
@@ -513,8 +521,8 @@ public partial class AbilityEditorUI : Control
     {
         int ap   = AbilityPointCalculator.CalculateTotalCost(_spell);
         float mp = AbilityPointCalculator.CalculateMpCost(_spell);
-        bool over = AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLv);
-        int cap = LvCap(PlayerLv);
+        bool over = AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel);
+        int cap = LvCap(PlayerLevel);
 
         _apValue.Text = $"{ap} 點";
         _apValue.AddThemeColorOverride("font_color", over
@@ -886,7 +894,7 @@ public partial class AbilityEditorUI : Control
             _status.Text = "⚠ 請先填寫法陣名稱！";
             return;
         }
-        if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLv))
+        if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel))
         {
             _status.Text = "⚠ 能力點超過上限，無法儲存！";
             return;
