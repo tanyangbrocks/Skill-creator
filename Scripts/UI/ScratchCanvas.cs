@@ -238,30 +238,7 @@ public partial class ScratchCanvas : Control
     // ══════════════════════════════════════════════════════════════
 
     private Panel MakeDragHandle(int idx, List<BlockNode> parent, Color clr)
-    {
-        var handle = new Panel();
-        handle.CustomMinimumSize = new Vector2(8, 0);
-        handle.SizeFlagsVertical = SizeFlags.ExpandFill;
-        handle.MouseDefaultCursorShape = CursorShape.Drag;
-        var s = new StyleBoxFlat { BgColor = clr };
-        s.CornerRadiusTopLeft = s.CornerRadiusBottomLeft = 4;
-        handle.AddThemeStyleboxOverride("panel", s);
-
-        var captIdx    = idx;
-        var captParent = parent;
-
-        handle.GuiInput += (InputEvent e) =>
-        {
-            if (e is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
-            {
-                BlockDrag.BeginMove(captIdx, captParent, captParent[captIdx]);
-                var preview = BuildDragPreview(captParent[captIdx]);
-                handle.SetDragPreview(preview);
-                handle.ForceDrag(new Godot.Collections.Dictionary { ["scratch"] = captIdx }, preview);
-            }
-        };
-        return handle;
-    }
+        => new DragHandle(idx, parent, parent[idx], clr);
 
     internal static Control BuildDragPreview(BlockNode block)
     {
@@ -283,66 +260,7 @@ public partial class ScratchCanvas : Control
     }
 
     private Control BuildDropZone(int insertAt, List<BlockNode> parent)
-    {
-        // 細線，hover 時變亮
-        var zone = new Control();
-        zone.CustomMinimumSize = new Vector2(0, 6);
-        zone.MouseFilter       = MouseFilterEnum.Stop;
-
-        // 視覺指示線（預設透明）
-        var line = new Panel();
-        line.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        line.OffsetTop    =  2;
-        line.OffsetBottom = -2;
-        var lineStyle = new StyleBoxFlat { BgColor = new Color(0.4f, 0.8f, 0.4f, 0f) };
-        lineStyle.CornerRadiusTopLeft = lineStyle.CornerRadiusTopRight =
-        lineStyle.CornerRadiusBottomLeft = lineStyle.CornerRadiusBottomRight = 2;
-        line.AddThemeStyleboxOverride("panel", lineStyle);
-        zone.AddChild(line);
-
-        var captInsert = insertAt;
-        var captParent = parent;
-
-        zone.MouseEntered += () =>
-        {
-            if (BlockDrag.Active)
-                lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 1f);
-        };
-        zone.MouseExited += () => lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 0f);
-
-        zone.GuiInput += (InputEvent e) =>
-        {
-            if (e is not InputEventMouseButton mb ||
-                mb.Pressed ||
-                mb.ButtonIndex != MouseButton.Left ||
-                !BlockDrag.Active) return;
-
-            var block    = BlockDrag.Block!;
-            int insertAt = captInsert;
-
-            if (BlockDrag.SourceList != null)
-            {
-                var srcList = BlockDrag.SourceList;
-                int srcIdx  = BlockDrag.SourceIdx;
-                // 同一個列表移動：插入點要補償移除造成的偏移
-                if (ReferenceEquals(srcList, captParent) && srcIdx < insertAt)
-                    insertAt--;
-                // 移到原位，忽略
-                if (ReferenceEquals(srcList, captParent) && insertAt == srcIdx)
-                {
-                    BlockDrag.Clear();
-                    return;
-                }
-                srcList.RemoveAt(srcIdx);
-            }
-
-            captParent.Insert(Math.Clamp(insertAt, 0, captParent.Count), block);
-            BlockDrag.Clear();
-            OnChanged();
-        };
-
-        return zone;
-    }
+        => new DropZone(insertAt, parent, OnChanged);
 
     // ══════════════════════════════════════════════════════════════
     //  積木參數區（統一查 BlockDescriptor）
@@ -664,6 +582,92 @@ public partial class ScratchCanvas : Control
         var d = new Dictionary<string, object?>();
         foreach (var (k, v) in ps) d[k] = v;
         return new BlockNode { Type = t, Params = d };
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  DragHandle — 使用 Godot 原生 _GetDragData 繞過 ScrollContainer
+    // ══════════════════════════════════════════════════════════════
+
+    private sealed partial class DragHandle : Panel
+    {
+        private readonly int             _idx;
+        private readonly List<BlockNode> _parent;
+        private readonly BlockNode       _block;
+
+        public DragHandle(int idx, List<BlockNode> parent, BlockNode block, Color clr)
+        {
+            _idx = idx; _parent = parent; _block = block;
+            CustomMinimumSize = new Vector2(8, 0);
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            MouseDefaultCursorShape = CursorShape.Drag;
+            var s = new StyleBoxFlat { BgColor = clr };
+            s.CornerRadiusTopLeft = s.CornerRadiusBottomLeft = 4;
+            AddThemeStyleboxOverride("panel", s);
+        }
+
+        public override Variant _GetDragData(Vector2 atPosition)
+        {
+            SetDragPreview(BuildDragPreview(_block));
+            BlockDrag.BeginMove(_idx, _parent, _block);
+            return new Godot.Collections.Dictionary { ["scratch"] = _idx };
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  DropZone — 使用 _CanDropData / _DropData 接受原生拖放
+    // ══════════════════════════════════════════════════════════════
+
+    private sealed partial class DropZone : Control
+    {
+        private readonly int             _insertAt;
+        private readonly List<BlockNode> _parent;
+        private readonly Action          _onChanged;
+        private readonly StyleBoxFlat    _lineStyle;
+
+        public DropZone(int insertAt, List<BlockNode> parent, Action onChanged)
+        {
+            _insertAt = insertAt; _parent = parent; _onChanged = onChanged;
+            CustomMinimumSize = new Vector2(0, 6);
+            MouseFilter = MouseFilterEnum.Stop;
+
+            var line = new Panel();
+            line.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            line.OffsetTop = 2; line.OffsetBottom = -2;
+            _lineStyle = new StyleBoxFlat { BgColor = new Color(0.4f, 0.8f, 0.4f, 0f) };
+            _lineStyle.CornerRadiusTopLeft = _lineStyle.CornerRadiusTopRight =
+            _lineStyle.CornerRadiusBottomLeft = _lineStyle.CornerRadiusBottomRight = 2;
+            line.AddThemeStyleboxOverride("panel", _lineStyle);
+            AddChild(line);
+
+            MouseEntered += () => { if (BlockDrag.Active) _lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 1f); };
+            MouseExited  += () => _lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 0f);
+        }
+
+        public override bool _CanDropData(Vector2 atPosition, Variant data)
+            => BlockDrag.Active && data.AsGodotDictionary().ContainsKey("scratch");
+
+        public override void _DropData(Vector2 atPosition, Variant data)
+        {
+            _lineStyle.BgColor = new Color(0.4f, 0.8f, 0.4f, 0f);
+            if (!BlockDrag.Active) return;
+
+            var block    = BlockDrag.Block!;
+            int insertAt = _insertAt;
+
+            if (BlockDrag.SourceList != null)
+            {
+                var srcList = BlockDrag.SourceList;
+                int srcIdx  = BlockDrag.SourceIdx;
+                if (ReferenceEquals(srcList, _parent) && srcIdx < insertAt) insertAt--;
+                if (ReferenceEquals(srcList, _parent) && insertAt == srcIdx)
+                { BlockDrag.Clear(); return; }
+                srcList.RemoveAt(srcIdx);
+            }
+
+            _parent.Insert(Math.Clamp(insertAt, 0, _parent.Count), block);
+            BlockDrag.Clear();
+            _onChanged();
+        }
     }
 }
 
