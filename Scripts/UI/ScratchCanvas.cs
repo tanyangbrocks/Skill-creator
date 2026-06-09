@@ -154,12 +154,15 @@ public partial class ScratchCanvas : Control
 
         outer.AddChild(card);
 
-        // ── 巢狀容器（If / RepeatN / RepeatWhile）────────────────
+        // ── 巢狀容器（If / Evaluate / RepeatN / RepeatWhile）────────
         if (block.Type == BlockType.If)
         {
             outer.AddChild(BuildBranch(block.ThenBranch, "成立時執行", indent + 1));
             outer.AddChild(BuildBranch(block.ElseBranch, "不成立時執行", indent + 1));
         }
+
+        if (block.Type == BlockType.Evaluate)
+            outer.AddChild(BuildBranch(block.ThenBranch, "條件成立時執行", indent + 1));
 
         if (block.Type == BlockType.RepeatN   ||
             block.Type == BlockType.RepeatWhile ||
@@ -405,6 +408,7 @@ public partial class ScratchCanvas : Control
     private static readonly Color CPurp  = new(0.80f, 0.38f, 1.00f); // 紫   Broadcast
     private static readonly Color CRed   = new(1.00f, 0.42f, 0.42f); // 紅   Detect
     private static readonly Color CLvnd  = new(0.95f, 0.65f, 0.95f); // 淡紫 TaskCounter
+    private static readonly Color CVec   = new(0.30f, 0.88f, 0.80f); // 青綠 Vector
     private static readonly Color CGray  = new(0.75f, 0.75f, 0.75f); // 灰   fallback
 
     // 積木描述器（顏色、UI 名稱、預設積木工廠、參數 UI 建構器）
@@ -456,10 +460,16 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "count", 2f, 8f, 1f, 36)); r.AddChild(TinyLbl("支")); }) },
         { BlockType.ForEachNearby,new(CFlow, "對每個附近敵人", () => B(BlockType.ForEachNearby, ("radius", 5f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
+        { BlockType.Evaluate,     new(CFlow, "條件執行",     () => B(BlockType.Evaluate, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
+            ConditionUI) },
+        { BlockType.Die,          new(CRed,  "終止法陣",     () => B(BlockType.Die),
+            null) },
 
         // ── 時序 ──────────────────────────────────────────────────────
         { BlockType.Wait,         new(CGrn,  "等待",        () => B(BlockType.Wait, ("duration", 1f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "duration", 0.1f, 30f, 0.1f, 42)); r.AddChild(TinyLbl("秒")); }) },
+        { BlockType.Sleep,        new(CGrn,  "等待 N 幀",   () => B(BlockType.Sleep, ("frames", 1f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "frames", 1f, 300f, 1f, 44)); r.AddChild(TinyLbl("幀")); }) },
 
         // ── 觸發時機 ──────────────────────────────────────────────────
         { BlockType.RisingEdge,   new(CCyan, "開始觸發",    () => B(BlockType.RisingEdge,  ("totemName", "")),
@@ -489,6 +499,12 @@ public partial class ScratchCanvas : Control
                 r.AddChild(CheckBox(b, "global", "全域"));
             }) },
 
+        // ── 執行追蹤 ──────────────────────────────────────────────────
+        { BlockType.LoopcastIndex,new(CYlw,  "本陣觸發次數", () => B(BlockType.LoopcastIndex, ("resultVar", "loop_idx"), ("global", false)),
+            (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.SuccessCount, new(CYlw,  "命中圖騰數",  () => B(BlockType.SuccessCount,  ("resultVar", "hit_count"), ("global", false)),
+            (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+
         // ── 列表 ──────────────────────────────────────────────────────
         { BlockType.ListCreate,   new(COrnD, "建立列表",        () => B(BlockType.ListCreate, ("name", "list"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 72)); r.AddChild(CheckBox(b, "global", "全域")); }) },
@@ -502,12 +518,25 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("第"));
                            r.AddChild(SmallEdit(b, "index", "N", 40)); r.AddChild(TinyLbl("項→"));
                            r.AddChild(SmallEdit(b, "resultVar", "存入變數", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.ListDequeue,  new(COrnD, "取出列表第一項",  () => B(BlockType.ListDequeue)) },
-        { BlockType.ListSet,      new(COrnD, "修改列表第 N 項", () => B(BlockType.ListSet)) },
-        { BlockType.ListLength,   new(COrnD, "取得列表長度",    () => B(BlockType.ListLength)) },
-        { BlockType.ListContains, new(COrnD, "列表是否包含",    () => B(BlockType.ListContains)) },
-        { BlockType.ListRemoveAt, new(COrnD, "刪除列表第 N 項", () => B(BlockType.ListRemoveAt)) },
-        { BlockType.ListClear,    new(COrnD, "清空列表",        () => B(BlockType.ListClear)) },
+        { BlockType.ListDequeue,  new(COrnD, "取出列表第一項",  () => B(BlockType.ListDequeue, ("name", "list"), ("resultVar", "v"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListSet,      new(COrnD, "修改列表第 N 項", () => B(BlockType.ListSet,     ("name", "list"), ("index", "1"), ("value", "0"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("第"));
+                           r.AddChild(SmallEdit(b, "index", "N", 36)); r.AddChild(TinyLbl("項="));
+                           r.AddChild(SmallEdit(b, "value", "值/變數", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListLength,   new(COrnD, "取得列表長度",    () => B(BlockType.ListLength,  ("name", "list"), ("resultVar", "len"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("長度→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListContains, new(COrnD, "列表是否包含",    () => B(BlockType.ListContains,("name", "list"), ("value", "0"), ("resultVar", "found"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("含"));
+                           r.AddChild(SmallEdit(b, "value", "值/變數", 56)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "結果變數", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListRemoveAt, new(COrnD, "刪除列表第 N 項", () => B(BlockType.ListRemoveAt,("name", "list"), ("index", "1"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("刪第"));
+                           r.AddChild(SmallEdit(b, "index", "N", 40)); r.AddChild(TinyLbl("項")); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListClear,    new(COrnD, "清空列表",        () => B(BlockType.ListClear,   ("name", "list"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 72)); r.AddChild(CheckBox(b, "global", "全域")); }) },
 
         // ── 敵人查詢 ──────────────────────────────────────────────────
         { BlockType.QueryNear,    new(CBlue, "查詢附近敵人",    () => B(BlockType.QueryNear, ("radius", 5f)),
@@ -550,6 +579,62 @@ public partial class ScratchCanvas : Control
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
         { BlockType.OnReceive,       new(CPurp, "收到訊號時",          () => B(BlockType.OnReceive,       ("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
+
+        // ── 向量運算 ──────────────────────────────────────────────────
+        { BlockType.VecMake,      new(CVec, "建立向量",     () => B(BlockType.VecMake,      ("name","v"),("x","0"),("y","0"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"name","向量名",52)); r.AddChild(TinyLbl("=("));
+                           r.AddChild(SmallEdit(b,"x","x",40)); r.AddChild(TinyLbl(","));
+                           r.AddChild(SmallEdit(b,"y","y",40)); r.AddChild(TinyLbl(")"));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecGetComp,   new(CVec, "取向量分量",   () => B(BlockType.VecGetComp,   ("name","v"),("comp","x"),("resultVar","val"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"name","向量名",52)); r.AddChild(TinyLbl("."));
+                           r.AddChild(SmallDrop(b,"comp",new[]{"x","y"},new[]{"x","y"},36));
+                           r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"resultVar","存入",48));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecAdd,       new(CVec, "向量加法",     () => B(BlockType.VecAdd,       ("vecA","a"),("vecB","b"),("result","r"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"vecA","A",44)); r.AddChild(TinyLbl("+"));
+                           r.AddChild(SmallEdit(b,"vecB","B",44)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b,"result","結果",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecSub,       new(CVec, "向量減法",     () => B(BlockType.VecSub,       ("vecA","a"),("vecB","b"),("result","r"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"vecA","A",44)); r.AddChild(TinyLbl("−"));
+                           r.AddChild(SmallEdit(b,"vecB","B",44)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b,"result","結果",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecScale,     new(CVec, "向量縮放",     () => B(BlockType.VecScale,     ("vec","v"),("scalar","1"),("result","r"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"vec","向量",48)); r.AddChild(TinyLbl("×"));
+                           r.AddChild(SmallEdit(b,"scalar","純量",40)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b,"result","結果",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecNegate,    new(CVec, "向量反向",     () => B(BlockType.VecNegate,    ("vec","v"),("result","r"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("−")); r.AddChild(SmallEdit(b,"vec","向量",48));
+                           r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"result","結果",48));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecNorm,      new(CVec, "向量正規化（轉為單位向量）", () => B(BlockType.VecNorm, ("vec","v"),("result","r"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("norm(")); r.AddChild(SmallEdit(b,"vec","向量",48));
+                           r.AddChild(TinyLbl(")→")); r.AddChild(SmallEdit(b,"result","結果",48));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecLength,    new(CVec, "向量長度",     () => B(BlockType.VecLength,    ("vec","v"),("resultVar","len"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("|")); r.AddChild(SmallEdit(b,"vec","向量",48));
+                           r.AddChild(TinyLbl("|→")); r.AddChild(SmallEdit(b,"resultVar","存入",48));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecDot,       new(CVec, "向量點積（內積）", () => B(BlockType.VecDot,    ("vecA","a"),("vecB","b"),("resultVar","dot"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"vecA","A",44)); r.AddChild(TinyLbl("·"));
+                           r.AddChild(SmallEdit(b,"vecB","B",44)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b,"resultVar","存入",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecCross,     new(CVec, "向量叉積（外積）", () => B(BlockType.VecCross,  ("vecA","a"),("vecB","b"),("resultVar","cross"),("global",false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b,"vecA","A",44)); r.AddChild(TinyLbl("×"));
+                           r.AddChild(SmallEdit(b,"vecB","B",44)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b,"resultVar","存入",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.VecFromEntity,new(CVec, "實體位置→向量", () => B(BlockType.VecFromEntity, ("result","e_pos"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"result","結果向量",64));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.FocalPoint,   new(CVec, "焦點位置（滑鼠）", () => B(BlockType.FocalPoint, ("result","focal"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"result","結果向量",64));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
+        { BlockType.Raycast,      new(CVec, "射線投射",     () => B(BlockType.Raycast, ("startVec","pos"),("dirVec","dir"),("maxDist","20"),("resultVec","ray"),("global",false)),
+            (r, b, _) => { r.AddChild(TinyLbl("從")); r.AddChild(SmallEdit(b,"startVec","起點向量",52));
+                           r.AddChild(TinyLbl("向")); r.AddChild(SmallEdit(b,"dirVec","方向向量",52));
+                           r.AddChild(TinyLbl("射")); r.AddChild(SmallEdit(b,"maxDist","最遠格數",44));
+                           r.AddChild(TinyLbl("格→")); r.AddChild(SmallEdit(b,"resultVec","結果前綴",48));
+                           r.AddChild(CheckBox(b,"global","全域")); }) },
 
         // ── 偵測條件 ──────────────────────────────────────────────────
         { BlockType.DetectHpThreshold,new(CRed, "生命值低於 N%",  () => B(BlockType.DetectHpThreshold, ("percent", 30f)),

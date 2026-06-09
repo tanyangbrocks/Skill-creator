@@ -66,6 +66,8 @@ public sealed class SpellRunner
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
         if (enemies != null)
             ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);
+        ctx.RaycastQuery    = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
+        ctx.FocalPointQuery = () => player.MouseGridPos;
         var loop = new ExecutionLoop(new SafetyGuard());
         var slotByRef = SpellCaster.BuildSlotLookup(spell);
 

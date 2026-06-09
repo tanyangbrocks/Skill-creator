@@ -6,6 +6,7 @@ public enum ExecutionState
 {
     Running,
     Waiting,        // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
+    WaitingFrames,  // Sleep 積木暫停；每幀遞減 WaitFramesRemaining，歸零後前進
     WaitingSignal,  // OnReceive 暫停；等到訊號被廣播後由 Step 頂部恢復
     Completed,
     Fizzled,        // 執行途中目標消失（MP 不退還）
@@ -19,9 +20,13 @@ public class ExecutionContext
     // 程式計數器（當前指令索引）
     public int PC { get; set; } = 0;
 
-    public ExecutionState State          { get; set; } = ExecutionState.Running;
-    public float          WaitRemaining  { get; set; } = 0f;
-    public float          MpConsumed     { get; set; } = 0f;
+    public ExecutionState State              { get; set; } = ExecutionState.Running;
+    public float          WaitRemaining     { get; set; } = 0f;
+    public int            WaitFramesRemaining { get; set; } = 0;
+    public float          MpConsumed        { get; set; } = 0f;
+
+    // 執行追蹤（由 SpellRunner / SpellCaster 在每次觸發時遞增）
+    public int LoopcastIndex { get; set; } = 0;
 
     // RepeatN 嵌套計數器堆疊（支援巢狀循環）
     public Stack<int> LoopCounters { get; } = new();
@@ -33,6 +38,12 @@ public class ExecutionContext
     // ── ForEachNearby / QueryNearest ────────────────────────────
     // 實體查詢代理（SpellCaster / SpellRunner 建立 ctx 時注入）
     public Func<float, List<EntityInfo>>? EntityQuery { get; set; }
+
+    // 射線投射代理：(start, dirX, dirY, maxDist) → (hit, matId, didHit)
+    public Func<GridPos, float, float, float, (GridPos Hit, int MatId, bool DidHit)>? RaycastQuery { get; set; }
+
+    // 焦點位置代理：() → 滑鼠世界格座標（3D 後改為準心碰撞點）
+    public Func<GridPos>? FocalPointQuery { get; set; }
 
     // 迭代器堆疊（支援巢狀 ForEach）
     public Stack<EntityIterState> EntityIterators { get; } = new();

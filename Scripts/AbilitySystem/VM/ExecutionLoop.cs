@@ -1,5 +1,6 @@
 namespace SkillCreator.AbilitySystem.VM;
 
+using System.Linq;
 using SkillCreator.AbilitySystem;
 using SkillCreator.World;
 
@@ -24,6 +25,15 @@ public class ExecutionLoop
             if (ctx.WaitRemaining > 0f) return true;
             ctx.State = ExecutionState.Running;
             ctx.PC++;   // 跳過已完成的 Wait 指令
+        }
+
+        // Sleep 幀計時：每幀遞減一次
+        if (ctx.State == ExecutionState.WaitingFrames)
+        {
+            ctx.WaitFramesRemaining--;
+            if (ctx.WaitFramesRemaining > 0) return true;
+            ctx.State = ExecutionState.Running;
+            ctx.PC++;
         }
 
         // OnReceive 等待：每幀頂部重新檢查 EventBus
@@ -377,6 +387,323 @@ public class ExecutionLoop
                 }
                 break;
             }
+
+            // ── Group 1：進階控制流 ───────────────────────────────────
+
+            case OpCode.Die:
+                ctx.State = ExecutionState.Completed;
+                break;
+
+            case OpCode.SleepFrames:
+            {
+                int frames = Math.Max(1, (int)Param<float>(instr, "frames", 1f));
+                ctx.WaitFramesRemaining = frames;
+                ctx.State = ExecutionState.WaitingFrames;
+                // PC 不前進：等 Step 頂部遞減到 0 後 PC++
+                break;
+            }
+
+            // ── Group 2：執行追蹤 ─────────────────────────────────────
+
+            case OpCode.ReadExecStat:
+            {
+                string stat      = Param<string>(instr, "stat",      "");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                float val = stat switch
+                {
+                    "loopcastIndex" => ctx.LoopcastIndex,
+                    "successCount"  => ctx.HitTotems.Count,
+                    _               => 0f,
+                };
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    if (global) ExecutionContext.GlobalVars[resultVar] = val;
+                    else        ctx.InstanceVars[resultVar] = val;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            // ── Group 3：List 補完 ────────────────────────────────────
+
+            case OpCode.ListDequeue:
+            {
+                string name      = Param<string>(instr, "name",      "");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    var list = ctx.GetList(name, global);
+                    if (list != null && list.Count > 0)
+                    {
+                        float v = list[0];
+                        list.RemoveAt(0);
+                        if (!string.IsNullOrEmpty(resultVar))
+                            ctx.InstanceVars[resultVar] = v;
+                    }
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.ListSet:
+            {
+                string name   = Param<string>(instr, "name",  "");
+                float  rawIdx = ResolveNum(instr, "index", ctx);
+                float  value  = ResolveNum(instr, "value", ctx);
+                bool   global = Param<bool>  (instr, "global", false);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    var list = ctx.GetList(name, global);
+                    if (list != null)
+                    {
+                        int idx = (int)rawIdx - 1; // 1-based → 0-based
+                        if (idx >= 0 && idx < list.Count)
+                            list[idx] = value;
+                    }
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.ListLength:
+            {
+                string name      = Param<string>(instr, "name",      "");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                if (!string.IsNullOrEmpty(resultVar))
+                    ctx.InstanceVars[resultVar] = ctx.GetList(name, global)?.Count ?? 0;
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.ListContains:
+            {
+                string name      = Param<string>(instr, "name",      "");
+                float  value     = ResolveNum(instr, "value", ctx);
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    var list  = ctx.GetList(name, global);
+                    bool found = list != null && list.Any(v => MathF.Abs(v - value) < 0.0001f);
+                    ctx.InstanceVars[resultVar] = found ? 1f : 0f;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.ListRemoveAt:
+            {
+                string name   = Param<string>(instr, "name",  "");
+                float  rawIdx = ResolveNum(instr, "index", ctx);
+                bool   global = Param<bool>  (instr, "global", false);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    var list = ctx.GetList(name, global);
+                    if (list != null)
+                    {
+                        int idx = (int)rawIdx - 1;
+                        if (idx >= 0 && idx < list.Count)
+                            list.RemoveAt(idx);
+                    }
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.ListClear:
+            {
+                string name   = Param<string>(instr, "name",  "");
+                bool   global = Param<bool>  (instr, "global", false);
+                ctx.GetList(name, global)?.Clear();
+                ctx.PC++;
+                break;
+            }
+
+            // ── Group 4：向量運算 ─────────────────────────────────────
+
+            case OpCode.VecMake:
+            {
+                string name   = Param<string>(instr, "name",   "v");
+                float  x      = ResolveNum(instr, "x", ctx);
+                float  y      = ResolveNum(instr, "y", ctx);
+                bool   global = Param<bool>(instr, "global", false);
+                SetVec(ctx, name, x, y, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecGetComp:
+            {
+                string name      = Param<string>(instr, "name",      "v");
+                string comp      = Param<string>(instr, "comp",      "x");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    var (vx, vy) = GetVec(ctx, name, global);
+                    ctx.InstanceVars[resultVar] = comp == "y" ? vy : vx;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecAdd:
+            {
+                string a = Param<string>(instr, "vecA", "a"), b = Param<string>(instr, "vecB", "b");
+                string r = Param<string>(instr, "result", "r");
+                bool global = Param<bool>(instr, "global", false);
+                var (ax, ay) = GetVec(ctx, a, global);
+                var (bx, by) = GetVec(ctx, b, global);
+                SetVec(ctx, r, ax + bx, ay + by, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecSub:
+            {
+                string a = Param<string>(instr, "vecA", "a"), b = Param<string>(instr, "vecB", "b");
+                string r = Param<string>(instr, "result", "r");
+                bool global = Param<bool>(instr, "global", false);
+                var (ax, ay) = GetVec(ctx, a, global);
+                var (bx, by) = GetVec(ctx, b, global);
+                SetVec(ctx, r, ax - bx, ay - by, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecScale:
+            {
+                string vec    = Param<string>(instr, "vec",    "v");
+                float  scalar = ResolveNum(instr, "scalar", ctx);
+                string r      = Param<string>(instr, "result", "r");
+                bool   global = Param<bool>  (instr, "global", false);
+                var (vx, vy) = GetVec(ctx, vec, global);
+                SetVec(ctx, r, vx * scalar, vy * scalar, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecNegate:
+            {
+                string vec = Param<string>(instr, "vec",    "v");
+                string r   = Param<string>(instr, "result", "r");
+                bool global = Param<bool>(instr, "global", false);
+                var (vx, vy) = GetVec(ctx, vec, global);
+                SetVec(ctx, r, -vx, -vy, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecNorm:
+            {
+                string vec = Param<string>(instr, "vec",    "v");
+                string r   = Param<string>(instr, "result", "r");
+                bool global = Param<bool>(instr, "global", false);
+                var (vx, vy) = GetVec(ctx, vec, global);
+                float len = MathF.Sqrt(vx * vx + vy * vy);
+                SetVec(ctx, r, len > 0.0001f ? vx / len : 0f,
+                              len > 0.0001f ? vy / len : 0f, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecLength:
+            {
+                string vec       = Param<string>(instr, "vec",       "v");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    var (vx, vy) = GetVec(ctx, vec, global);
+                    ctx.InstanceVars[resultVar] = MathF.Sqrt(vx * vx + vy * vy);
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecDot:
+            {
+                string a = Param<string>(instr, "vecA", "a"), b = Param<string>(instr, "vecB", "b");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool global = Param<bool>(instr, "global", false);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    var (ax, ay) = GetVec(ctx, a, global);
+                    var (bx, by) = GetVec(ctx, b, global);
+                    ctx.InstanceVars[resultVar] = ax * bx + ay * by;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecCross:
+            {
+                string a = Param<string>(instr, "vecA", "a"), b = Param<string>(instr, "vecB", "b");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool global = Param<bool>(instr, "global", false);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    var (ax, ay) = GetVec(ctx, a, global);
+                    var (bx, by) = GetVec(ctx, b, global);
+                    ctx.InstanceVars[resultVar] = ax * by - ay * bx;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.VecFromEntity:
+            {
+                string r    = Param<string>(instr, "result", "e_pos");
+                bool global = Param<bool>  (instr, "global", false);
+                if (ctx.CurrentIterEntity.HasValue)
+                {
+                    var e = ctx.CurrentIterEntity.Value;
+                    SetVec(ctx, r, e.Position.X, e.Position.Y, global);
+                }
+                else
+                {
+                    ctx.InstanceVars.TryGetValue("_e.x", out float ex);
+                    ctx.InstanceVars.TryGetValue("_e.y", out float ey);
+                    SetVec(ctx, r, ex, ey, global);
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.GetFocalPoint:
+            {
+                string r    = Param<string>(instr, "result", "focal");
+                bool global = Param<bool>  (instr, "global", false);
+                var fp = ctx.FocalPointQuery?.Invoke() ?? new GridPos(0, 0);
+                SetVec(ctx, r, fp.X, fp.Y, global);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.Raycast:
+            {
+                string startVec  = Param<string>(instr, "startVec",  "pos");
+                string dirVec    = Param<string>(instr, "dirVec",    "dir");
+                float  maxDist   = ResolveNum(instr, "maxDist", ctx);
+                string resultVec = Param<string>(instr, "resultVec", "ray");
+                bool   global    = Param<bool>  (instr, "global",    false);
+
+                if (ctx.RaycastQuery != null)
+                {
+                    var (sx, sy) = GetVec(ctx, startVec, global);
+                    var (dx, dy) = GetVec(ctx, dirVec,   global);
+                    var start    = new GridPos((int)sx, (int)sy);
+                    var (hit, matId, didHit) = ctx.RaycastQuery(start, dx, dy, maxDist);
+                    SetVec(ctx, resultVec, hit.X, hit.Y, global);
+                    ctx.InstanceVars[$"{resultVec}.hit"] = didHit ? 1f : 0f;
+                    ctx.InstanceVars[$"{resultVec}.mat"] = matId;
+                }
+                ctx.PC++;
+                break;
+            }
         }
     }
 
@@ -441,6 +768,30 @@ public class ExecutionLoop
         ctx.InstanceVars["_e.hp"]    = e.Hp;
         ctx.InstanceVars["_e.maxhp"] = e.MaxHp;
         ctx.InstanceVars["_e.idx"]   = e.Id;
+    }
+
+    // ── 向量輔助 ─────────────────────────────────────────────────────
+
+    private static (float x, float y) GetVec(ExecutionContext ctx, string name, bool global)
+    {
+        var vars = global ? ExecutionContext.GlobalVars : ctx.InstanceVars;
+        vars.TryGetValue($"{name}.x", out float x);
+        vars.TryGetValue($"{name}.y", out float y);
+        return (x, y);
+    }
+
+    private static void SetVec(ExecutionContext ctx, string name, float x, float y, bool global)
+    {
+        if (global)
+        {
+            ExecutionContext.GlobalVars[$"{name}.x"] = x;
+            ExecutionContext.GlobalVars[$"{name}.y"] = y;
+        }
+        else
+        {
+            ctx.InstanceVars[$"{name}.x"] = x;
+            ctx.InstanceVars[$"{name}.y"] = y;
+        }
     }
 
     // ── 工具方法 ─────────────────────────────────────────────────────

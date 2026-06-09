@@ -4,10 +4,13 @@ public enum BlockType
 {
     // ── 控制流 ────────────────────────────────────────────────────
     If,           // 條件分支
+    Evaluate,     // 條件執行容器（條件為真才執行包裹積木；無 else 分支）
     RepeatN,      // 重複 N 次（上限 20）
     RepeatWhile,  // 重複直到條件不符
     ForEachNearby,// 對範圍內每個實體執行一次
     Wait,         // 等待 N 秒（僅頂層支援）
+    Sleep,        // 等待 N 幀後繼續（幀計時；法陣保持啟動）
+    Die,          // 立刻終止整個法陣（後續積木全部跳過）
     RandomChoice, // 隨機選擇（均等/加權/不重複輪轉）
     SequentialGate,// 序列條件閘門（多階段解鎖）
 
@@ -51,12 +54,12 @@ public enum BlockType
     // ── 列表（List）─────────────────────────────────────────────
     ListCreate,    // 宣告具名有序列表
     ListAppend,    // 加入末尾（Enqueue）
-    ListPop,       // 取出尾部（Stack Pop）
-    ListDequeue,   // 取出頭部（Queue Dequeue）
-    ListGet,       // 按 index 讀取（1-based）
+    ListPop,       // 取出尾部（Stack Pop）→ resultVar
+    ListDequeue,   // 取出頭部（Queue Dequeue）→ resultVar
+    ListGet,       // 按 index 讀取（1-based）→ resultVar
     ListSet,       // 設定指定位置值
-    ListLength,    // 列表長度 → 數值
-    ListContains,  // 成員查詢 → 布林
+    ListLength,    // 列表長度 → resultVar
+    ListContains,  // 成員查詢 → 0/1 存入 resultVar
     ListRemoveAt,  // 按 index 移除
     ListClear,     // 清空列表
 
@@ -78,9 +81,28 @@ public enum BlockType
     BroadcastAndWait,   // 廣播並等待回應
     OnReceive,          // 接收指定廣播後執行
 
+    // ── 執行追蹤 ──────────────────────────────────────────────────
+    LoopcastIndex, // 本法陣從啟動以來執行次數 → Number
+    SuccessCount,  // 本次已成功執行的圖騰數（HitTotems.Count）→ Number
+
     // ── 全局戰鬥統計查詢 ─────────────────────────────────────────
     GetBattleStat, // 查詢施放次數/傷害量/擊殺數等
     GetComboCount, // 讀取當前連擊數
+
+    // ── 向量運算（2D Vector，儲存為 name.x / name.y）────────────
+    VecMake,       // (x, y) → 具名向量
+    VecGetComp,    // 向量分量（x 或 y）→ 數值變數
+    VecAdd,        // vecA + vecB → result
+    VecSub,        // vecA − vecB → result
+    VecScale,      // vec × scalar → result
+    VecNegate,     // −vec → result
+    VecNorm,       // normalize(vec) → result
+    VecLength,     // |vec| → 數值變數
+    VecDot,        // vecA · vecB → 數值變數
+    VecCross,      // vecA × vecB (2D scalar) → 數值變數
+    VecFromEntity, // 當前迭代實體位置 → 具名向量
+    Raycast,       // 從向量位置沿向量方向射出，回傳命中格（hit.x/y/hit/mat）
+    FocalPoint,    // 焦點位置（滑鼠世界格座標）→ 具名向量
 
     // ── 被動反應觸發（自動偵測類）────────────────────────────────
     DetectProjectile,  // 偵測投射物進入範圍

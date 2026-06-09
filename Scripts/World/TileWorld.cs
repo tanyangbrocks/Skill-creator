@@ -313,6 +313,40 @@ public class TileWorld : IWorldInterface
         OnExplosion?.Invoke(new GridPos(cx, cy), radius);
     }
 
+    // DDA 射線投射：從 start 向 (dirX, dirY) 射出，回傳第一個非 Air 格子
+    // 回傳：(命中格, 材質 int, 是否命中)；未命中則回傳 (start, 0, false)
+    public (GridPos Hit, int MatId, bool DidHit) Raycast(
+        GridPos start, float dirX, float dirY, float maxDist)
+    {
+        float len = MathF.Sqrt(dirX * dirX + dirY * dirY);
+        if (len < 0.0001f) return (start, 0, false);
+        dirX /= len; dirY /= len;
+
+        float px = start.X + 0.5f, py = start.Y + 0.5f;
+        int   tx = start.X,        ty = start.Y;
+        int   stepX = dirX >= 0 ? 1 : -1;
+        int   stepY = dirY >= 0 ? 1 : -1;
+
+        float deltaX = MathF.Abs(dirX) < 0.0001f ? float.MaxValue : 1f / MathF.Abs(dirX);
+        float deltaY = MathF.Abs(dirY) < 0.0001f ? float.MaxValue : 1f / MathF.Abs(dirY);
+
+        float sideX = dirX >= 0 ? (tx + 1f - px) * deltaX : (px - tx) * deltaX;
+        float sideY = dirY >= 0 ? (ty + 1f - py) * deltaY : (py - ty) * deltaY;
+
+        float dist = 0f;
+        while (dist < maxDist)
+        {
+            if (sideX < sideY) { dist = sideX; sideX += deltaX; tx += stepX; }
+            else               { dist = sideY; sideY += deltaY; ty += stepY; }
+
+            if (dist > maxDist || !InBounds(tx, ty)) break;
+            var mat = TypeAt(tx, ty);
+            if (mat != Materials.MaterialType.Air)
+                return (new GridPos(tx, ty), (int)mat, true);
+        }
+        return (start, 0, false);
+    }
+
     public  bool InBoundsPublic(int x, int y) => x >= 0 && x < Width && y >= 0 && y < Height;
     private bool InBounds(int x, int y)       => InBoundsPublic(x, y);
     private int  Idx(int x, int y)      => y * Width + x;

@@ -23,4 +23,35 @@ public enum OpCode
     ListGet,       // 按 1-based 索引讀取並寫入結果變數
     Broadcast,     // 廣播訊號至 EventBus（本幀有效）
     OnReceive,     // 等待訊號：訊號存在則通過，否則進入 WaitingSignal 狀態
+
+    // ── Group 1：進階控制流 ───────────────────────────────────────
+    Die,           // 立刻終止法陣（State = Completed）
+    SleepFrames,   // 等待 N 幀後繼續（WaitingFrames 狀態）
+    // Evaluate 複用 JumpIfFalse（無 else Jump），無需新 OpCode
+
+    // ── Group 2：執行追蹤 ─────────────────────────────────────────
+    ReadExecStat,  // 讀取 LoopcastIndex / SuccessCount → resultVar
+
+    // ── Group 3：List 補完 ────────────────────────────────────────
+    ListDequeue,   // 取出頭部（index 0）→ resultVar
+    ListSet,       // 設定指定 1-based 位置值
+    ListLength,    // 列表長度 → resultVar
+    ListContains,  // 成員查詢 → 0/1 存入 resultVar
+    ListRemoveAt,  // 按 1-based index 移除
+    ListClear,     // 清空列表
+
+    // ── Group 4：向量運算（2D，儲存為 name.x / name.y）──────────
+    VecMake,       // (x, y) → name.x / name.y
+    VecGetComp,    // name.x 或 name.y → resultVar
+    VecAdd,        // a + b → result
+    VecSub,        // a − b → result
+    VecScale,      // v × scalar → result
+    VecNegate,     // −v → result
+    VecNorm,       // normalize(v) → result
+    VecLength,     // |v| → resultVar（純量）
+    VecDot,        // a · b → resultVar（純量）
+    VecCross,      // a × b (2D) → resultVar（純量：ax*by − ay*bx）
+    VecFromEntity, // 當前迭代實體位置 → result
+    Raycast,       // DDA 射線：start+dir+maxDist → result.x/y/hit/mat
+    GetFocalPoint, // 焦點位置 → result.x / result.y
 }

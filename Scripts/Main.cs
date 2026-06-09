@@ -176,6 +176,12 @@ public partial class Main : Node
         _mpLabel.Text = $"MP  {_player.Mp:F0} / {PlayerController.MaxMp:F0}";
         RefreshSlotLabels();
 
+        // 滑鼠世界格座標（FocalPoint 積木用）
+        var mp = _world.GetLocalMousePosition();
+        _player.MouseGridPos = new GridPos(
+            Math.Clamp((int)(mp.X / TileWorldRenderer.TilePixels), 0, _world.World.Width  - 1),
+            Math.Clamp((int)(mp.Y / TileWorldRenderer.TilePixels), 0, _world.World.Height - 1));
+
         if (_editorOpen) return;  // ← 編輯器開啟：其餘全暫停
 
         _player.Tick(dt);

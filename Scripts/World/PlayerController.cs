@@ -4,9 +4,11 @@ using SkillCreator.World.Materials;
 
 public class PlayerController
 {
-    public GridPos Position { get; set; }
+    public GridPos Position     { get; set; }
     // Facing 只追蹤水平方向，確保投射物永遠往左/右打
-    public GridPos Facing { get; private set; } = new GridPos(1, 0);
+    public GridPos Facing       { get; private set; } = new GridPos(1, 0);
+    // 滑鼠對應的世界格座標（由 Main._Process 每幀更新）
+    public GridPos MouseGridPos { get; set; }
 
     public float Hp { get; set; }
     public const float MaxHp = 100f;
