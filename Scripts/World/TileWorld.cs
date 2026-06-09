@@ -24,6 +24,8 @@ public class TileWorld : IWorldInterface
 #pragma warning disable CS0067
     public event Action<string, object?>? OnPlayerAction;
 #pragma warning restore CS0067
+    // 爆炸事件：(center, radius) — EnemyManager 訂閱以計算炸傷
+    public event Action<GridPos, int>? OnExplosion;
 
     public TileWorld(int width = 200, int height = 150)
     {
@@ -308,9 +310,11 @@ public class TileWorld : IWorldInterface
             if (dx * dx + dy * dy <= radius * radius)
                 Set(cx + dx, cy + dy, MaterialType.Air);
         }
+        OnExplosion?.Invoke(new GridPos(cx, cy), radius);
     }
 
-    private bool InBounds(int x, int y) => x >= 0 && x < Width && y >= 0 && y < Height;
+    public  bool InBoundsPublic(int x, int y) => x >= 0 && x < Width && y >= 0 && y < Height;
+    private bool InBounds(int x, int y)       => InBoundsPublic(x, y);
     private int  Idx(int x, int y)      => y * Width + x;
 
     // ════════════════════════════════════════════════════════════

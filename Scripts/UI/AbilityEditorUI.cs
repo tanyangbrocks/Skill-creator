@@ -3,33 +3,40 @@ namespace SkillCreator.UI;
 using Godot;
 using SkillCreator.AbilitySystem;
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.AbilitySystem.VM;
 
 public partial class AbilityEditorUI : Control
 {
     private enum Mode { Idle, TotemSelected, SlotSelected }
 
-    // 最後一次儲存的法陣（供 Main.cs 施放用）
-    public SpellArray? SavedSpell { get; private set; }
+    // 技能欄位（共 MaxSlots 個槽位）
+    public SpellLoadout Loadout { get; } = new();
 
     // ── 狀態 ──────────────────────────────────────────────────────
-    private readonly SpellArray _spell = new();
-    private Mode _mode = Mode.Idle;
+    private readonly SpellArray[] _spells =
+        new SpellArray[SpellLoadout.MaxSlots];
+    private int _activeEditorSlot = 0;
+    private SpellArray _spell => _spells[_activeEditorSlot];
+
+    private Mode      _mode         = Mode.Idle;
     private TotemData? _pendingTotem;
-    private int _activeSlot = -1;
-    private const int MaxSlots = 8;
-    private const int PlayerLv = 1;
+    private int       _activeSlot   = -1;
+    private const int MaxSlots      = 8;
+    private const int PlayerLv      = 1;
 
     // ── UI 節點引用 ───────────────────────────────────────────────
-    private LineEdit _nameInput = null!;
-    private HBoxContainer _slotsRow = null!;
-    private Label _apValue = null!;
-    private ProgressBar _apBar = null!;
-    private Label _mpValue = null!;
-    private Label _status = null!;
+    private LineEdit      _nameInput = null!;
+    private HBoxContainer _slotsRow  = null!;
+    private Label         _apValue   = null!;
+    private ProgressBar   _apBar     = null!;
+    private Label         _mpValue   = null!;
+    private Label         _status    = null!;
+    private VBoxContainer _blockList = null!;
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
     {
+        for (int i = 0; i < _spells.Length; i++) _spells[i] = new SpellArray();
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         BuildUI();
         RefreshAll();
@@ -87,30 +94,63 @@ public partial class AbilityEditorUI : Control
         _nameInput.TextChanged += t => _spell.Name = t;
         row.AddChild(_nameInput);
 
-        HSpacer(row, 20);
-        row.AddChild(Lbl("發動類型：", vcenter: true));
+        HSpacer(row, 12);
+        row.AddChild(Lbl("發動：", vcenter: true));
 
-        var grp = new ButtonGroup();
-        foreach (var (type, label) in new (AbilityActivationType, string)[]
+        var actGrp = new ButtonGroup();
+        foreach (var (atype, albl) in new (AbilityActivationType, string)[]
         {
-            (AbilityActivationType.Instant,   "即時 ×0.8"),
-            (AbilityActivationType.Declare,   "宣告 ×1.0"),
-            (AbilityActivationType.Sustained, "持續 ×1.5"),
+            (AbilityActivationType.Instant,   "即時"),
+            (AbilityActivationType.Declare,   "宣告"),
+            (AbilityActivationType.Sustained, "持續"),
         })
         {
-            var btn = Btn(label, new Color(0.22f, 0.22f, 0.30f));
-            btn.ToggleMode = true;
-            btn.ButtonGroup = grp;
-            btn.ButtonPressed = _spell.ActivationType == type;
+            var btn = Btn(albl, new Color(0.22f, 0.22f, 0.30f));
+            btn.ToggleMode = true; btn.ButtonGroup = actGrp;
+            btn.ButtonPressed = _spell.ActivationType == atype;
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-            var t2 = type;
+            var t2 = atype;
             btn.Toggled += on => { if (on) { _spell.ActivationType = t2; RefreshCost(); } };
             row.AddChild(btn);
         }
 
-        // 彈性空白
-        var flex = new Control();
-        flex.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        HSpacer(row, 12);
+        row.AddChild(Lbl("容器：", vcenter: true));
+
+        var ctGrp = new ButtonGroup();
+        foreach (var (ct, ctLbl) in new (ContainerType, string)[]
+        {
+            (ContainerType.PlayerBody,  "本體"),
+            (ContainerType.Projectile,  "投射物"),
+            (ContainerType.Contact,     "接觸"),
+        })
+        {
+            var btn = Btn(ctLbl, new Color(0.22f, 0.28f, 0.22f));
+            btn.ToggleMode = true; btn.ButtonGroup = ctGrp;
+            btn.ButtonPressed = _spell.Container == ct;
+            btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            var cap = ct;
+            btn.Toggled += on => { if (on) _spell.Container = cap; };
+            row.AddChild(btn);
+        }
+
+        HSpacer(row, 16);
+        row.AddChild(Lbl("槽位：", vcenter: true));
+
+        var slotGrp = new ButtonGroup();
+        for (int si = 0; si < SpellLoadout.MaxSlots; si++)
+        {
+            var btn = Btn((si + 1).ToString(), new Color(0.26f, 0.22f, 0.36f));
+            btn.ToggleMode = true; btn.ButtonGroup = slotGrp;
+            btn.ButtonPressed = si == 0;
+            btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            btn.CustomMinimumSize = new Vector2(28, 30);
+            var captSi = si;
+            btn.Toggled += on => { if (on) SelectEditorSlot(captSi); };
+            row.AddChild(btn);
+        }
+
+        var flex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         row.AddChild(flex);
 
         _status = new Label();
@@ -143,14 +183,26 @@ public partial class AbilityEditorUI : Control
         VSpacer(vbox, 8);
         vbox.AddChild(SectionLbl("▶ 圖騰庫"));
 
+        TotemType? lastType = null;
         foreach (var totem in TotemLibrary.AllTotems)
         {
+            if (totem.Type != lastType)
+            {
+                var sep = new Label();
+                sep.Text = TotemTypeName(totem.Type);
+                sep.AddThemeColorOverride("font_color", TotemClr(totem.Type).Darkened(0.2f));
+                sep.AddThemeFontSizeOverride("font_size", 11);
+                vbox.AddChild(sep);
+                lastType = totem.Type;
+            }
+
             var t = totem;
+            string lvTag = totem.RequiredPlayerLevel > 1 ? $" LV{totem.RequiredPlayerLevel}+" : "";
             var btn = Btn(
-                $"{totem.DisplayName}  [{(totem.Type == TotemType.Trigger ? "觸發" : "武技")}]  {totem.BaseAbilityPointCost}pt",
+                $"  {totem.DisplayName}{lvTag}  {totem.BaseAbilityPointCost}pt",
                 new Color(0.18f, 0.22f, 0.30f));
             btn.Alignment = HorizontalAlignment.Left;
-            btn.CustomMinimumSize = new Vector2(0, 38);
+            btn.CustomMinimumSize = new Vector2(0, 32);
             btn.AddThemeColorOverride("font_color", TotemClr(totem.Type));
             btn.Pressed += () => SelectTotem(t);
             vbox.AddChild(btn);
@@ -174,12 +226,87 @@ public partial class AbilityEditorUI : Control
                 lastClr = eng.Color;
             }
             var e = eng;
-            var btn = Btn($"  {eng.DisplayName}  {eng.BaseCost}pt", new Color(0.18f, 0.20f, 0.20f));
+            string costTag = eng.IsRestriction ? $"+{eng.BaseCost}pt" : $"{eng.BaseCost}pt";
+            var btn = Btn($"  {eng.DisplayName}  {costTag}", new Color(0.18f, 0.20f, 0.20f));
             btn.Alignment = HorizontalAlignment.Left;
-            btn.CustomMinimumSize = new Vector2(0, 28);
+            btn.CustomMinimumSize = new Vector2(0, 26);
             btn.AddThemeColorOverride("font_color", EngraveClr(eng.Color));
             btn.Pressed += () => AttachEngrave(e);
             vbox.AddChild(btn);
+        }
+
+        VSpacer(vbox, 6);
+        vbox.AddChild(new HSeparator());
+        VSpacer(vbox, 6);
+        vbox.AddChild(SectionLbl("▶ 積木庫"));
+
+        var blockLibCats = new (string cat, (string lbl, BlockType bt)[])[]
+        {
+            ("── 呼叫 ──", new[] {
+                ("觸發圖騰",  BlockType.InvokeTotem),
+                ("發動法陣",  BlockType.InvokeSpell),
+            }),
+            ("── 控制流 ──", new[] {
+                ("If",        BlockType.If),
+                ("Repeat×N",  BlockType.RepeatN),
+                ("While",     BlockType.RepeatWhile),
+                ("Wait",      BlockType.Wait),
+                ("Random",    BlockType.RandomChoice),
+                ("ForEach",   BlockType.ForEachNearby),
+            }),
+            ("── 邊緣觸發 ──", new[] {
+                ("上升沿",    BlockType.RisingEdge),
+                ("下降沿",    BlockType.FallingEdge),
+                ("單次脈衝",  BlockType.SinglePulse),
+            }),
+            ("── 偵測 ──", new[] {
+                ("HP%",       BlockType.DetectHpThreshold),
+                ("MP%",       BlockType.DetectMpThreshold),
+                ("偵測實體",  BlockType.DetectEntityEnter),
+            }),
+            ("── 變數 ──", new[] {
+                ("設定",      BlockType.SetVar),
+                ("讀取",      BlockType.GetVar),
+                ("Compare",   BlockType.Compare),
+                ("布林設",    BlockType.SetVarBool),
+                ("布林讀",    BlockType.GetVarBool),
+            }),
+            ("── 實體 ──", new[] {
+                ("查詢附近",  BlockType.QueryNear),
+                ("讀屬性",    BlockType.GetEntityProp),
+                ("寫屬性",    BlockType.SetEntityProp),
+            }),
+            ("── 廣播 ──", new[] {
+                ("廣播",      BlockType.Broadcast),
+                ("廣播等待",  BlockType.BroadcastAndWait),
+                ("接收",      BlockType.OnReceive),
+            }),
+            ("── 計數器 ──", new[] {
+                ("設定",      BlockType.TaskCounterSet),
+                ("增加",      BlockType.TaskCounterAdd),
+                ("到達",      BlockType.TaskCounterOnReach),
+                ("歸零",      BlockType.TaskCounterReset),
+            }),
+        };
+
+        foreach (var (cat, entries) in blockLibCats)
+        {
+            var catLbl = new Label { Text = cat };
+            catLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.65f));
+            catLbl.AddThemeFontSizeOverride("font_size", 11);
+            vbox.AddChild(catLbl);
+
+            foreach (var (lbl, bt) in entries)
+            {
+                var captBt = bt;
+                var btn = Btn($"  {BlockTypeName(bt)}", new Color(0.14f, 0.18f, 0.26f));
+                btn.Alignment = HorizontalAlignment.Left;
+                btn.CustomMinimumSize = new Vector2(0, 24);
+                btn.AddThemeFontSizeOverride("font_size", 11);
+                btn.AddThemeColorOverride("font_color", BlockTypeColor(bt));
+                btn.Pressed += () => { _spell.Blocks.Add(MakeDefaultBlock(captBt)); RebuildBlockList(); };
+                vbox.AddChild(btn);
+            }
         }
 
         VSpacer(vbox, 8);
@@ -227,11 +354,46 @@ public partial class AbilityEditorUI : Control
         HSpacer(slotRow, 10);
 
         var hint = new Label();
-        hint.Text = "① 點左側圖騰  ② 點插槽放入  ③ 選中插槽後點刻印附加";
+        hint.Text = "① 點左側圖騰  ② 點插槽放入  ③ 選中插槽後點刻印附加  ④ 為插槽命名後可在積木中引用";
         hint.HorizontalAlignment = HorizontalAlignment.Center;
         hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
-        hint.AddThemeFontSizeOverride("font_size", 12);
+        hint.AddThemeFontSizeOverride("font_size", 11);
         vbox.AddChild(hint);
+
+        // ── 積木序列（玩家設計）──────────────────────────────────
+        VSpacer(vbox, 4);
+        vbox.AddChild(new HSeparator());
+
+        var bhdr = new HBoxContainer();
+        bhdr.AddThemeConstantOverride("separation", 4);
+        HSpacer(bhdr, 8);
+        bhdr.AddChild(SectionLbl("▶ 積木序列（玩家設計邏輯）"));
+        var bflex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        bhdr.AddChild(bflex);
+
+        var autoFillBtn = Btn("自動填入", new Color(0.12f, 0.25f, 0.18f));
+        autoFillBtn.CustomMinimumSize = new Vector2(72, 22);
+        autoFillBtn.Pressed += AutoFillBlocks;
+        bhdr.AddChild(autoFillBtn);
+
+        var bClrBtn = Btn("清除", new Color(0.30f, 0.12f, 0.12f));
+        bClrBtn.CustomMinimumSize = new Vector2(44, 22);
+        bClrBtn.Pressed += () => { _spell.Blocks.Clear(); RebuildBlockList(); };
+        bhdr.AddChild(bClrBtn);
+        HSpacer(bhdr, 8);
+        vbox.AddChild(bhdr);
+
+        var blScroll = new ScrollContainer();
+        blScroll.CustomMinimumSize   = new Vector2(0, 130);
+        blScroll.VerticalScrollMode   = ScrollContainer.ScrollMode.Auto;
+        blScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        _blockList = new VBoxContainer();
+        _blockList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _blockList.AddThemeConstantOverride("separation", 2);
+        blScroll.AddChild(_blockList);
+        vbox.AddChild(blScroll);
+
+        // 積木類型已移至左側面板（▶ 積木庫），此處保留清除與自動填入控制
 
         VSpacer(vbox, 6);
     }
@@ -322,9 +484,11 @@ public partial class AbilityEditorUI : Control
 
     private void RefreshAll()
     {
+        if (_nameInput != null) _nameInput.Text = _spell.Name;
         RefreshSlots();
         RefreshCost();
         RefreshStatus();
+        RebuildBlockList();
     }
 
     private void RefreshSlots()
@@ -393,6 +557,21 @@ public partial class AbilityEditorUI : Control
         var num = Lbl($"插槽 {idx + 1}", 11, new Color(0.45f, 0.45f, 0.5f));
         num.HorizontalAlignment = HorizontalAlignment.Center;
         vbox.AddChild(num);
+
+        // 插槽命名（供積木 InvokeTotem 引用）
+        var nameLE = new LineEdit();
+        nameLE.PlaceholderText = "命名（積木引用）";
+        nameLE.Text = slot.Name;
+        nameLE.CustomMinimumSize = new Vector2(0, 20);
+        nameLE.AddThemeFontSizeOverride("font_size", 10);
+        var captSlot = idx;
+        nameLE.TextChanged += text =>
+        {
+            if (captSlot < _spell.Slots.Count)
+                _spell.Slots[captSlot].Name = text;
+            RebuildBlockList();
+        };
+        vbox.AddChild(nameLE);
 
         if (slot.IsEmpty)
         {
@@ -565,7 +744,8 @@ public partial class AbilityEditorUI : Control
             Color = template.Color, ScalingType = template.ScalingType,
             ScalingCoefficient = template.ScalingCoefficient,
             BaseEffect = template.BaseEffect, BaseCost = template.BaseCost,
-            IsGlobal = template.IsGlobal, PointsInvested = 0,
+            IsGlobal = template.IsGlobal, IsRestriction = template.IsRestriction,
+            PointsInvested = 0,
         });
         RefreshAll();
     }
@@ -599,6 +779,431 @@ public partial class AbilityEditorUI : Control
         RefreshAll();
     }
 
+    // ── 積木編輯器 ───────────────────────────────────────────────
+
+    private void AutoFillBlocks()
+    {
+        _spell.Blocks.Clear();
+        _spell.Blocks.AddRange(BlockAutoGenerator.Generate(_spell));
+        RebuildBlockList();
+    }
+
+    private void RebuildBlockList()
+    {
+        if (_blockList is null) return;
+        foreach (var child in _blockList.GetChildren().ToArray())
+            child.QueueFree();
+
+        if (_spell.Blocks.Count == 0)
+        {
+            _blockList.AddChild(Lbl("（空）施放時依插槽順序直接執行。按上方按鈕加入積木或自動填入。",
+                10, new Color(0.38f, 0.38f, 0.42f)));
+            return;
+        }
+
+        for (int i = 0; i < _spell.Blocks.Count; i++)
+            _blockList.AddChild(BuildBlockRow(i, _spell.Blocks[i], _spell.Blocks, isTop: true));
+    }
+
+    private Control BuildBlockRow(int idx, BlockNode block, List<BlockNode> parentList, bool isTop)
+    {
+        var container = new VBoxContainer();
+        container.AddThemeConstantOverride("separation", 2);
+
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 3);
+
+        if (!isTop) { var ind = new Control { CustomMinimumSize = new Vector2(14, 0) }; row.AddChild(ind); }
+
+        row.AddChild(Lbl(" " + BlockTypeName(block.Type), 12, BlockTypeColor(block.Type)));
+
+        switch (block.Type)
+        {
+            case BlockType.InvokeTotem:
+                row.AddChild(BuildSlotPicker(block, "totemName"));
+                break;
+
+            case BlockType.InvokeSpell:
+            {
+                var le = new LineEdit { PlaceholderText = "法陣名稱", CustomMinimumSize = new Vector2(90, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                le.Text = block.Params.TryGetValue("spellName", out var v) ? v?.ToString() ?? "" : "";
+                le.TextChanged += t => block.Params["spellName"] = t;
+                row.AddChild(le);
+                break;
+            }
+
+            case BlockType.If:
+            {
+                string[] condTypes  = { "totemDone", "totemHit", "totemFizzle" };
+                string[] condLabels = { "已執行",    "命中",      "Fizzle" };
+                var dd = new OptionButton { CustomMinimumSize = new Vector2(62, 22) };
+                dd.AddThemeFontSizeOverride("font_size", 10);
+                foreach (var n in condLabels) dd.AddItem(n);
+                string curC = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "totemDone" : "totemDone";
+                for (int ci = 0; ci < condTypes.Length; ci++)
+                    if (condTypes[ci] == curC) { dd.Selected = ci; break; }
+                dd.ItemSelected += i => block.Params["conditionType"] = condTypes[(int)i];
+                row.AddChild(dd);
+                row.AddChild(BuildSlotPicker(block, "totemName"));
+                row.AddChild(Lbl("→then:", 10, new Color(0.4f, 0.7f, 0.4f)));
+                break;
+            }
+
+            case BlockType.Wait:
+            {
+                var le = new LineEdit { PlaceholderText = "秒", CustomMinimumSize = new Vector2(42, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                float d = block.Params.TryGetValue("duration", out var dv) && dv is float df ? df : 1f;
+                le.Text = d.ToString("F1");
+                le.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["duration"] = f; };
+                row.AddChild(le);
+                row.AddChild(Lbl("秒", 10));
+                break;
+            }
+
+            case BlockType.RepeatN:
+            {
+                var le = new LineEdit { PlaceholderText = "次", CustomMinimumSize = new Vector2(36, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                int cnt = block.Params.TryGetValue("count", out var cnv) && cnv is float cf ? (int)cf : 2;
+                le.Text = cnt.ToString();
+                le.TextChanged += t => { if (int.TryParse(t, out int n)) block.Params["count"] = (float)Math.Min(n, 20); };
+                row.AddChild(le);
+                row.AddChild(Lbl("次", 10));
+                break;
+            }
+
+            case BlockType.SetVar:
+            case BlockType.SetVarBool:
+            {
+                var nameLE = new LineEdit { PlaceholderText = "變數名", CustomMinimumSize = new Vector2(58, 22) };
+                nameLE.AddThemeFontSizeOverride("font_size", 11);
+                nameLE.Text = block.Params.TryGetValue("name", out var nv) ? nv?.ToString() ?? "" : "";
+                nameLE.TextChanged += t => block.Params["name"] = t;
+                row.AddChild(nameLE);
+                row.AddChild(Lbl("=", 11));
+                var valLE = new LineEdit { PlaceholderText = block.Type == BlockType.SetVarBool ? "true/false" : "值", CustomMinimumSize = new Vector2(60, 22) };
+                valLE.AddThemeFontSizeOverride("font_size", 11);
+                valLE.Text = block.Params.TryGetValue("value", out var vv) ? vv?.ToString() ?? "" : "";
+                valLE.TextChanged += t => block.Params["value"] = t;
+                row.AddChild(valLE);
+                break;
+            }
+
+            case BlockType.GetVar:
+            case BlockType.GetVarBool:
+            {
+                var nameLE = new LineEdit { PlaceholderText = "變數名", CustomMinimumSize = new Vector2(80, 22) };
+                nameLE.AddThemeFontSizeOverride("font_size", 11);
+                nameLE.Text = block.Params.TryGetValue("name", out var nv2) ? nv2?.ToString() ?? "" : "";
+                nameLE.TextChanged += t => block.Params["name"] = t;
+                row.AddChild(nameLE);
+                break;
+            }
+
+            case BlockType.Compare:
+            {
+                var varLE = new LineEdit { PlaceholderText = "變數", CustomMinimumSize = new Vector2(50, 22) };
+                varLE.AddThemeFontSizeOverride("font_size", 11);
+                varLE.Text = block.Params.TryGetValue("name", out var cn) ? cn?.ToString() ?? "" : "";
+                varLE.TextChanged += t => block.Params["name"] = t;
+                row.AddChild(varLE);
+                string[] ops = { "==", "!=", ">", "<", ">=", "<=" };
+                var opDD = new OptionButton { CustomMinimumSize = new Vector2(46, 22) };
+                opDD.AddThemeFontSizeOverride("font_size", 10);
+                foreach (var op in ops) opDD.AddItem(op);
+                string curOp = block.Params.TryGetValue("op", out var opv) ? opv?.ToString() ?? "==" : "==";
+                for (int oi = 0; oi < ops.Length; oi++) if (ops[oi] == curOp) { opDD.Selected = oi; break; }
+                opDD.ItemSelected += i => block.Params["op"] = ops[(int)i];
+                row.AddChild(opDD);
+                var valLE2 = new LineEdit { PlaceholderText = "值", CustomMinimumSize = new Vector2(40, 22) };
+                valLE2.AddThemeFontSizeOverride("font_size", 11);
+                valLE2.Text = block.Params.TryGetValue("value", out var vv2) ? vv2?.ToString() ?? "" : "0";
+                valLE2.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["value"] = f; };
+                row.AddChild(valLE2);
+                break;
+            }
+
+            case BlockType.RepeatWhile:
+            {
+                row.AddChild(Lbl("條件：", 10));
+                var le = new LineEdit { PlaceholderText = "條件名", CustomMinimumSize = new Vector2(80, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                le.Text = block.Params.TryGetValue("condition", out var cv) ? cv?.ToString() ?? "" : "";
+                le.TextChanged += t => block.Params["condition"] = t;
+                row.AddChild(le);
+                break;
+            }
+
+            case BlockType.RandomChoice:
+            {
+                var le = new LineEdit { PlaceholderText = "選項數", CustomMinimumSize = new Vector2(40, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                float cnt = block.Params.TryGetValue("count", out var cnv) && cnv is float cf ? cf : 2f;
+                le.Text = cnt.ToString();
+                le.TextChanged += t => { if (int.TryParse(t, out int n)) block.Params["count"] = (float)Math.Min(n, 8); };
+                row.AddChild(le);
+                row.AddChild(Lbl("支", 10));
+                break;
+            }
+
+            case BlockType.ForEachNearby:
+            case BlockType.QueryNear:
+            {
+                var le = new LineEdit { PlaceholderText = "範圍", CustomMinimumSize = new Vector2(40, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                float r = block.Params.TryGetValue("radius", out var rv) && rv is float rf ? rf : 5f;
+                le.Text = r.ToString();
+                le.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["radius"] = f; };
+                row.AddChild(le);
+                row.AddChild(Lbl("格", 10));
+                break;
+            }
+
+            case BlockType.RisingEdge:
+            case BlockType.FallingEdge:
+            case BlockType.SinglePulse:
+                row.AddChild(BuildSlotPicker(block, "totemName"));
+                break;
+
+            case BlockType.DetectHpThreshold:
+            case BlockType.DetectMpThreshold:
+            {
+                var le = new LineEdit { PlaceholderText = "%", CustomMinimumSize = new Vector2(42, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                float pct = block.Params.TryGetValue("percent", out var pv) && pv is float pf ? pf : 30f;
+                le.Text = pct.ToString();
+                le.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["percent"] = f; };
+                row.AddChild(le);
+                row.AddChild(Lbl("%", 10));
+                break;
+            }
+
+            case BlockType.DetectEntityEnter:
+            {
+                string[] factions = { "敵方", "友方", "任意" };
+                var dd = new OptionButton { CustomMinimumSize = new Vector2(56, 22) };
+                dd.AddThemeFontSizeOverride("font_size", 10);
+                foreach (var f in factions) dd.AddItem(f);
+                dd.ItemSelected += i => block.Params["faction"] = factions[(int)i];
+                row.AddChild(dd);
+                var le = new LineEdit { PlaceholderText = "範圍", CustomMinimumSize = new Vector2(36, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                float r2 = block.Params.TryGetValue("radius", out var rv2) && rv2 is float rf2 ? rf2 : 5f;
+                le.Text = r2.ToString();
+                le.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["radius"] = f; };
+                row.AddChild(le);
+                break;
+            }
+
+            case BlockType.Broadcast:
+            case BlockType.BroadcastAndWait:
+            case BlockType.OnReceive:
+            {
+                var le = new LineEdit { PlaceholderText = "訊號名", CustomMinimumSize = new Vector2(80, 22) };
+                le.AddThemeFontSizeOverride("font_size", 11);
+                le.Text = block.Params.TryGetValue("signal", out var sv) ? sv?.ToString() ?? "" : "";
+                le.TextChanged += t => block.Params["signal"] = t;
+                row.AddChild(le);
+                break;
+            }
+
+            case BlockType.GetEntityProp:
+            case BlockType.SetEntityProp:
+            {
+                string[] props = { "hp", "maxHp", "mp", "faction" };
+                var dd = new OptionButton { CustomMinimumSize = new Vector2(60, 22) };
+                dd.AddThemeFontSizeOverride("font_size", 10);
+                foreach (var p in props) dd.AddItem(p);
+                dd.ItemSelected += i => block.Params["prop"] = props[(int)i];
+                row.AddChild(dd);
+                break;
+            }
+
+            case BlockType.TaskCounterSet:
+            case BlockType.TaskCounterAdd:
+            case BlockType.TaskCounterOnReach:
+            case BlockType.TaskCounterReset:
+            {
+                var nameLE = new LineEdit { PlaceholderText = "計數器名", CustomMinimumSize = new Vector2(68, 22) };
+                nameLE.AddThemeFontSizeOverride("font_size", 11);
+                nameLE.Text = block.Params.TryGetValue("name", out var cnv2) ? cnv2?.ToString() ?? "" : "";
+                nameLE.TextChanged += t => block.Params["name"] = t;
+                row.AddChild(nameLE);
+                if (block.Type != BlockType.TaskCounterReset)
+                {
+                    var valLE3 = new LineEdit { PlaceholderText = "值", CustomMinimumSize = new Vector2(36, 22) };
+                    valLE3.AddThemeFontSizeOverride("font_size", 11);
+                    float cv2 = block.Params.TryGetValue("count", out var cvv) && cvv is float cf2 ? cf2 : 1f;
+                    valLE3.Text = cv2.ToString();
+                    valLE3.TextChanged += t => { if (float.TryParse(t, out float f)) block.Params["count"] = f; };
+                    row.AddChild(valLE3);
+                }
+                break;
+            }
+        }
+
+        var flex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        row.AddChild(flex);
+
+        var rmBtn = new Button { Text = "✕" };
+        rmBtn.CustomMinimumSize = new Vector2(20, 20);
+        rmBtn.AddThemeFontSizeOverride("font_size", 9);
+        int captIdx = idx;
+        var captList = parentList;
+        rmBtn.Pressed += () => { captList.RemoveAt(captIdx); RebuildBlockList(); };
+        row.AddChild(rmBtn);
+
+        container.AddChild(row);
+
+        // If 積木：顯示 Then 分支
+        if (block.Type == BlockType.If)
+        {
+            var thenVBox = new VBoxContainer();
+            thenVBox.AddThemeConstantOverride("separation", 1);
+            for (int ti = 0; ti < block.ThenBranch.Count; ti++)
+                thenVBox.AddChild(BuildBlockRow(ti, block.ThenBranch[ti], block.ThenBranch, isTop: false));
+
+            var addSubBtn = new Button { Text = "    ＋ 加入 Then 積木（觸發圖騰）" };
+            addSubBtn.Alignment = HorizontalAlignment.Left;
+            addSubBtn.Flat = true;
+            addSubBtn.AddThemeColorOverride("font_color", new Color(0.4f, 0.7f, 0.4f));
+            addSubBtn.AddThemeFontSizeOverride("font_size", 10);
+            var captBlock = block;
+            addSubBtn.Pressed += () => { captBlock.ThenBranch.Add(MakeDefaultBlock(BlockType.InvokeTotem)); RebuildBlockList(); };
+            thenVBox.AddChild(addSubBtn);
+            container.AddChild(thenVBox);
+        }
+
+        return container;
+    }
+
+    private OptionButton BuildSlotPicker(BlockNode block, string paramKey)
+    {
+        var opts = GetSlotOptions();
+        var dd = new OptionButton { CustomMinimumSize = new Vector2(100, 22) };
+        dd.AddThemeFontSizeOverride("font_size", 10);
+        dd.AddItem("（選插槽）");
+        foreach (var (display, _) in opts) dd.AddItem(display);
+
+        string cur = block.Params.TryGetValue(paramKey, out var pv) ? pv?.ToString() ?? "" : "";
+        for (int i = 0; i < opts.Count; i++)
+            if (opts[i].refKey == cur) { dd.Selected = i + 1; break; }
+
+        dd.ItemSelected += optIdx =>
+            block.Params[paramKey] = optIdx > 0 && optIdx - 1 < opts.Count ? opts[(int)optIdx - 1].refKey : "";
+        return dd;
+    }
+
+    private List<(string display, string refKey)> GetSlotOptions()
+    {
+        var result = new List<(string, string)>();
+        for (int i = 0; i < _spell.Slots.Count; i++)
+        {
+            var s = _spell.Slots[i];
+            if (s.IsEmpty) continue;
+            string refKey  = string.IsNullOrEmpty(s.Name) ? $"slot_{i}" : s.Name;
+            string display = $"{s.Totem!.DisplayName}（{refKey}）";
+            result.Add((display, refKey));
+        }
+        return result;
+    }
+
+    private static BlockNode MakeDefaultBlock(BlockType type) => type switch
+    {
+        BlockType.InvokeTotem    => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["totemName"] = "" } },
+        BlockType.InvokeSpell    => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["spellName"] = "" } },
+        BlockType.If             => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["conditionType"] = "totemDone", ["totemName"] = "" } },
+        BlockType.RepeatN        => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["count"] = 2f } },
+        BlockType.RepeatWhile    => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["condition"] = "" } },
+        BlockType.RandomChoice   => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["count"] = 2f } },
+        BlockType.ForEachNearby  => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["radius"] = 5f } },
+        BlockType.Wait           => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["duration"] = 1f } },
+        BlockType.SetVar         => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "x", ["value"] = "0" } },
+        BlockType.GetVar         => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "x" } },
+        BlockType.SetVarBool     => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "b", ["value"] = "true" } },
+        BlockType.GetVarBool     => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "b" } },
+        BlockType.Compare        => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "x", ["op"] = "==", ["value"] = 0f } },
+        BlockType.RisingEdge     => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["totemName"] = "" } },
+        BlockType.FallingEdge    => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["totemName"] = "" } },
+        BlockType.SinglePulse    => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["totemName"] = "" } },
+        BlockType.DetectHpThreshold  => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["percent"] = 30f } },
+        BlockType.DetectMpThreshold  => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["percent"] = 30f } },
+        BlockType.DetectEntityEnter  => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["faction"] = "敵方", ["radius"] = 5f } },
+        BlockType.QueryNear          => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["radius"] = 5f } },
+        BlockType.GetEntityProp      => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["prop"] = "hp" } },
+        BlockType.SetEntityProp      => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["prop"] = "hp" } },
+        BlockType.Broadcast          => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["signal"] = "" } },
+        BlockType.BroadcastAndWait   => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["signal"] = "" } },
+        BlockType.OnReceive          => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["signal"] = "" } },
+        BlockType.TaskCounterSet     => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "c", ["count"] = 0f } },
+        BlockType.TaskCounterAdd     => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "c", ["count"] = 1f } },
+        BlockType.TaskCounterOnReach => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "c", ["count"] = 5f } },
+        BlockType.TaskCounterReset   => new BlockNode { Type = type, Params = new Dictionary<string,object?> { ["name"] = "c" } },
+        _                            => new BlockNode { Type = type },
+    };
+
+    private static string BlockTypeName(BlockType type) => type switch
+    {
+        BlockType.InvokeTotem        => "觸發圖騰",
+        BlockType.InvokeSpell        => "發動法陣",
+        BlockType.If                 => "If",
+        BlockType.RepeatN            => "Repeat×N",
+        BlockType.RepeatWhile        => "RepeatWhile",
+        BlockType.RandomChoice       => "Random",
+        BlockType.ForEachNearby      => "ForEach附近",
+        BlockType.Wait               => "Wait",
+        BlockType.RisingEdge         => "上升沿",
+        BlockType.FallingEdge        => "下降沿",
+        BlockType.SinglePulse        => "單次脈衝",
+        BlockType.SetVar             => "設定變數",
+        BlockType.GetVar             => "讀取變數",
+        BlockType.SetVarBool         => "設定Bool",
+        BlockType.GetVarBool         => "讀取Bool",
+        BlockType.Compare            => "Compare",
+        BlockType.QueryNear          => "查詢附近",
+        BlockType.GetEntityProp      => "讀實體屬性",
+        BlockType.SetEntityProp      => "寫實體屬性",
+        BlockType.Broadcast          => "廣播",
+        BlockType.BroadcastAndWait   => "廣播等待",
+        BlockType.OnReceive          => "接收廣播",
+        BlockType.DetectHpThreshold  => "偵測HP%",
+        BlockType.DetectMpThreshold  => "偵測MP%",
+        BlockType.DetectEntityEnter  => "偵測實體進入",
+        BlockType.TaskCounterSet     => "計數器設定",
+        BlockType.TaskCounterAdd     => "計數器＋",
+        BlockType.TaskCounterOnReach => "計數器到達",
+        BlockType.TaskCounterReset   => "計數器歸零",
+        BlockType.EffectLabel        => "效果標記",
+        _                            => type.ToString(),
+    };
+
+    private static Color BlockTypeColor(BlockType type) => type switch
+    {
+        BlockType.InvokeTotem or BlockType.InvokeSpell
+                                     => new Color(1.0f,  0.72f, 0.35f),  // 橙
+        BlockType.If or BlockType.RepeatN or BlockType.RepeatWhile or
+        BlockType.RandomChoice or BlockType.ForEachNearby
+                                     => new Color(0.65f, 0.95f, 0.30f),  // 黃綠
+        BlockType.Wait               => new Color(0.38f, 0.88f, 0.48f),  // 綠
+        BlockType.RisingEdge or BlockType.FallingEdge or BlockType.SinglePulse
+                                     => new Color(0.38f, 0.88f, 0.88f),  // 青
+        BlockType.SetVar or BlockType.GetVar or BlockType.SetVarBool or
+        BlockType.GetVarBool or BlockType.Compare
+                                     => new Color(1.0f,  0.88f, 0.28f),  // 黃
+        BlockType.QueryNear or BlockType.GetEntityProp or BlockType.SetEntityProp
+                                     => new Color(0.55f, 0.80f, 1.0f),   // 藍
+        BlockType.Broadcast or BlockType.BroadcastAndWait or BlockType.OnReceive
+                                     => new Color(0.80f, 0.38f, 1.0f),   // 紫
+        BlockType.DetectHpThreshold or BlockType.DetectMpThreshold or
+        BlockType.DetectEntityEnter  => new Color(1.0f,  0.42f, 0.42f),  // 紅
+        BlockType.TaskCounterSet or BlockType.TaskCounterAdd or
+        BlockType.TaskCounterOnReach or BlockType.TaskCounterReset
+                                     => new Color(0.95f, 0.65f, 0.95f),  // 淡紫
+        _                            => new Color(0.75f, 0.75f, 0.75f),
+    };
+
     private void SaveSpell()
     {
         if (string.IsNullOrWhiteSpace(_spell.Name))
@@ -611,12 +1216,20 @@ public partial class AbilityEditorUI : Control
             _status.Text = "⚠ 能力點超過上限，無法儲存！";
             return;
         }
-        SavedSpell = _spell;
-        GD.Print($"[儲存] 法陣「{_spell.Name}」" +
+        Loadout.SetSlot(_activeEditorSlot, _spell);
+        GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 法陣「{_spell.Name}」  " +
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
                  $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}  " +
-                 $"類型：{_spell.ActivationType}");
-        _status.Text = $"✓ 「{_spell.Name}」已儲存　按 E 切回世界，空白鍵施放";
+                 $"容器：{_spell.Container}");
+        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存　按 E 切回世界，1-5 切換槽位，空白鍵施放";
+    }
+
+    private void SelectEditorSlot(int i)
+    {
+        _activeEditorSlot = i;
+        _mode       = Mode.Idle;
+        _activeSlot = -1;
+        RefreshAll();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -690,31 +1303,56 @@ public partial class AbilityEditorUI : Control
 
     // ── 顏色映射 ──────────────────────────────────────────────────
 
-    private static Color TotemClr(TotemType t) => t == TotemType.Trigger
-        ? new Color(0.55f, 0.80f, 1.0f)
-        : new Color(1.0f, 0.72f, 0.35f);
+    private static Color TotemClr(TotemType t) => t switch
+    {
+        TotemType.Trigger      => new Color(0.55f, 0.80f, 1.0f),  // 藍
+        TotemType.Technique    => new Color(1.0f,  0.72f, 0.35f), // 橙
+        TotemType.Morph        => new Color(0.40f, 0.90f, 0.80f), // 青
+        TotemType.Displacement => new Color(0.65f, 0.95f, 0.30f), // 黃綠
+        TotemType.Summon       => new Color(1.0f,  0.75f, 0.20f), // 金
+        TotemType.Domain       => new Color(0.85f, 0.40f, 1.0f),  // 紫
+        _                      => new Color(0.8f,  0.8f,  0.8f),
+    };
+
+    private static string TotemTypeName(TotemType t) => t switch
+    {
+        TotemType.Trigger      => "── 觸發圖騰 ──",
+        TotemType.Technique    => "── 武技圖騰 ──",
+        TotemType.Morph        => "── 變幻圖騰 ──",
+        TotemType.Displacement => "── 位移圖騰 ──",
+        TotemType.Summon       => "── 召喚圖騰 ──",
+        TotemType.Domain       => "── 領域圖騰 ──",
+        _                      => "──",
+    };
 
     private static Color EngraveClr(EngraveColor c) => c switch
     {
-        EngraveColor.White  => new Color(0.93f, 0.93f, 0.93f),
-        EngraveColor.Red    => new Color(1.0f,  0.38f, 0.38f),
-        EngraveColor.Green  => new Color(0.38f, 0.88f, 0.48f),
-        EngraveColor.Blue   => new Color(0.38f, 0.60f, 1.0f),
-        EngraveColor.Yellow => new Color(1.0f,  0.88f, 0.28f),
-        EngraveColor.Orange => new Color(1.0f,  0.58f, 0.18f),
-        EngraveColor.Purple => new Color(0.80f, 0.38f, 1.0f),
-        EngraveColor.Black  => new Color(0.68f, 0.48f, 0.88f),
-        _                   => new Color(1, 1, 1),
+        EngraveColor.White     => new Color(0.93f, 0.93f, 0.93f),
+        EngraveColor.Red       => new Color(1.0f,  0.38f, 0.38f),
+        EngraveColor.Green     => new Color(0.38f, 0.88f, 0.48f),
+        EngraveColor.Blue      => new Color(0.38f, 0.60f, 1.0f),
+        EngraveColor.Yellow    => new Color(1.0f,  0.88f, 0.28f),
+        EngraveColor.Orange    => new Color(1.0f,  0.58f, 0.18f),
+        EngraveColor.Purple    => new Color(0.80f, 0.38f, 1.0f),
+        EngraveColor.Black     => new Color(0.68f, 0.48f, 0.88f),
+        EngraveColor.Elemental => new Color(1.0f,  0.78f, 0.25f), // 金色
+        EngraveColor.Law       => new Color(0.78f, 0.78f, 0.95f), // 銀紫
+        _                      => new Color(1, 1, 1),
     };
 
     private static string ColorGroupName(EngraveColor c) => c switch
     {
-        EngraveColor.White  => "  ── 白（傷害）",
-        EngraveColor.Green  => "  ── 綠（輔助）",
-        EngraveColor.Red    => "  ── 紅（侵略）",
-        EngraveColor.Blue   => "  ── 藍（改造）",
-        EngraveColor.Yellow => "  ── 黃（限制）",
-        _                   => "  ──",
+        EngraveColor.White     => "  ── 白（傷害）",
+        EngraveColor.Orange    => "  ── 橙（控制）",
+        EngraveColor.Blue      => "  ── 藍（改造）",
+        EngraveColor.Red       => "  ── 紅（侵略）",
+        EngraveColor.Green     => "  ── 綠（輔助）",
+        EngraveColor.Purple    => "  ── 紫（額外操作）",
+        EngraveColor.Yellow    => "  ── 黃（限制）",
+        EngraveColor.Black     => "  ── 黑（邏輯）",
+        EngraveColor.Elemental => "  ── 屬性（元素）",
+        EngraveColor.Law       => "  ── 法則（高等）",
+        _                      => "  ──",
     };
 
     private static int LvCap(int lv) => lv switch { < 20 => 50, < 30 => 120, < 50 => 250, < 70 => 500, _ => 900 };

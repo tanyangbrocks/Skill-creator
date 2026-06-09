@@ -1,0 +1,84 @@
+namespace SkillCreator.World;
+
+using SkillCreator.World.Materials;
+
+public enum EnemyState { Idle, Chase, Attack }
+
+public class Enemy
+{
+    public GridPos    Position { get; set; }
+    public float      Hp       { get; set; }
+    public float      MaxHp    { get; }
+    public bool       IsAlive  => Hp > 0f;
+    public EnemyState State    { get; private set; } = EnemyState.Idle;
+
+    private float _gravityTimer = 0f;
+    private float _moveTimer    = 0f;
+    private float _attackTimer  = 0f;
+
+    private const float GravityInterval = 0.25f;
+    private const float MoveInterval    = 0.35f;
+    private const float AttackInterval  = 1.8f;
+    private const float AttackDamage    = 8f;
+    private const int   DetectRange     = 25;
+    private const int   AttackRange     = 2;
+
+    public Enemy(GridPos pos, float maxHp = 50f)
+    {
+        Position = pos;
+        MaxHp    = maxHp;
+        Hp       = maxHp;
+    }
+
+    public void Update(TileWorld world, PlayerController player, float delta)
+    {
+        ApplyGravity(world, delta);
+        UpdateAI(world, player, delta);
+    }
+
+    private void ApplyGravity(TileWorld world, float delta)
+    {
+        _gravityTimer -= delta;
+        if (_gravityTimer > 0f) return;
+        _gravityTimer = GravityInterval;
+        var below = new GridPos(Position.X, Position.Y + 1);
+        if (world.TypeAt(below.X, below.Y) == MaterialType.Air)
+            Position = below;
+    }
+
+    private void UpdateAI(TileWorld world, PlayerController player, float delta)
+    {
+        int dist = Math.Abs(Position.X - player.Position.X)
+                 + Math.Abs(Position.Y - player.Position.Y);
+
+        State = dist <= AttackRange ? EnemyState.Attack
+              : dist <= DetectRange ? EnemyState.Chase
+              :                       EnemyState.Idle;
+
+        switch (State)
+        {
+            case EnemyState.Chase:
+                _moveTimer -= delta;
+                if (_moveTimer <= 0f)
+                {
+                    _moveTimer = MoveInterval;
+                    int dx   = Math.Sign(player.Position.X - Position.X);
+                    var next = new GridPos(Position.X + dx, Position.Y);
+                    if (dx != 0 && world.TypeAt(next.X, next.Y) == MaterialType.Air)
+                        Position = next;
+                }
+                break;
+
+            case EnemyState.Attack:
+                _attackTimer -= delta;
+                if (_attackTimer <= 0f)
+                {
+                    _attackTimer = AttackInterval;
+                    player.TakeDamage(AttackDamage);
+                }
+                break;
+        }
+    }
+
+    public void TakeDamage(float amount) => Hp = Math.Max(0f, Hp - amount);
+}

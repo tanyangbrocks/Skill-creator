@@ -1,81 +1,341 @@
 namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.AbilitySystem.VM;
 using SkillCreator.World;
 using SkillCreator.World.Materials;
 
-// 將一個 SpellArray 的效果實際施放到 TileWorld 上（Phase 1 硬編碼版）
+// 施放法陣：透過 VM 執行積木序列，每個 InvokeTotem 導向對應圖騰效果
 public static class SpellCaster
 {
-    public static bool TryCast(SpellArray spell, PlayerController player, TileWorld world)
+    // 施放結果（成功 + 可能產生的投射物）
+    public readonly struct SpellCastResult
     {
-        if (!player.CanCast) return false;
+        public bool             Ok        { get; init; }
+        public SpellProjectile? Projectile{ get; init; }
+        public static SpellCastResult Failed => default;
+    }
+
+    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world)
+    {
+        if (!player.CanCast) return SpellCastResult.Failed;
 
         float mpCost = AbilityPointCalculator.CalculateMpCost(spell);
-        if (!SafetyGuard.HasMp(player.Mp, mpCost)) return false;
+        if (!SafetyGuard.HasMp(player.Mp, mpCost)) return SpellCastResult.Failed;
 
         player.Mp -= mpCost;
         player.SetCastCooldown(spell.CastDelay);
 
-        foreach (var slot in spell.Slots)
+        // 投射物容器：生成投射物，命中時再執行效果
+        if (spell.Container == ContainerType.Projectile)
         {
-            if (slot.IsEmpty || slot.Totem?.Type != TotemType.Technique) continue;
-            ExecuteTechnique(slot, player, world);
+            var start = new GridPos(player.Position.X + player.Facing.X * 2, player.Position.Y);
+            return new SpellCastResult
+            {
+                Ok         = true,
+                Projectile = new SpellProjectile(start, player.Facing, spell, player),
+            };
         }
-        return true;
+
+        // 接觸容器：Phase 3 實作，暫時同 PlayerBody 執行
+        ExecuteEffects(spell, player, world);
+        return new SpellCastResult { Ok = true };
     }
+
+    // 直接執行效果（投射物命中時、接觸觸發時皆可呼叫）
+    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world)
+    {
+        var blocks = spell.Blocks.Count > 0
+            ? spell.Blocks
+            : BlockAutoGenerator.Generate(spell);
+
+        if (blocks.Count == 0) return;
+
+        var slotByRef = BuildSlotLookup(spell);
+        var ctx  = new ExecutionContext(blocks);
+        var loop = new ExecutionLoop(new SafetyGuard());
+        loop.ResetTick();
+
+        int safety = 0;
+        while (!ctx.IsFinished && safety++ < 300)
+        {
+            if (ctx.State == ExecutionState.Waiting)
+            {
+                ctx.WaitRemaining = 0f;
+                ctx.State = ExecutionState.Running;
+            }
+
+            loop.Step(ctx, 0f);
+
+            if (ctx.PendingInvokeTotem != null)
+            {
+                string name = ctx.PendingInvokeTotem;
+                ctx.PendingInvokeTotem = null;
+                if (slotByRef.TryGetValue(name, out var slot))
+                    ResolveTotem(name, slot, ctx, player, world);
+                else
+                    ctx.DoneTotems.Add(name);
+            }
+
+            if (ctx.PendingInvokeSpell != null)
+                ctx.PendingInvokeSpell = null; // TODO Phase 3：連段
+        }
+    }
+
+    // ── 建立插槽參考對照表 ─────────────────────────────────────────
+
+    private static Dictionary<string, SpellSlot> BuildSlotLookup(SpellArray spell)
+    {
+        var dict = new Dictionary<string, SpellSlot>();
+        for (int i = 0; i < spell.Slots.Count; i++)
+        {
+            var s = spell.Slots[i];
+            if (s.IsEmpty) continue;
+            dict[BlockAutoGenerator.SlotRef(spell, i)] = s;
+        }
+        return dict;
+    }
+
+    // ── 圖騰解析：觸發條件 or 執行效果 ──────────────────────────────
+
+    private static void ResolveTotem(string name, SpellSlot slot,
+        ExecutionContext ctx, PlayerController player, TileWorld world)
+    {
+        switch (slot.Totem!.Type)
+        {
+            case TotemType.Trigger:
+                if (EvaluateTrigger(slot, player))
+                    ctx.DoneTotems.Add(name);
+                else
+                    ctx.FizzledTotems.Add(name);
+                break;
+
+            default:
+                ExecuteSlot(slot, player, world);
+                ctx.HitTotems.Add(name);
+                ctx.DoneTotems.Add(name);
+                break;
+        }
+    }
+
+    // ── 觸發條件判斷（Phase 1 簡化版）────────────────────────────────
+
+    private static bool EvaluateTrigger(SpellSlot slot, PlayerController player)
+        => slot.Totem!.Id switch
+        {
+            "trigger_on_cast"    => true,
+            "trigger_on_hit"     => true, // Phase 1：假設命中
+            "trigger_on_hp_low"  => player.Hp < PlayerController.MaxHp * 0.3f,
+            "trigger_on_kill"    => true, // Phase 1：假設
+            "trigger_periodic"   => true,
+            "trigger_on_damaged" => true,
+            _                    => true,
+        };
+
+    // ── 分派到各類型圖騰執行器 ─────────────────────────────────────
+
+    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world)
+    {
+        switch (slot.Totem!.Type)
+        {
+            case TotemType.Technique:    ExecuteTechnique(slot, player, world);    break;
+            case TotemType.Morph:        ExecuteMorph(slot, player, world);        break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world); break;
+            case TotemType.Summon:       ExecuteSummon(slot, player, world);       break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world);       break;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  圖騰效果實作
+    // ════════════════════════════════════════════════════════════
+
+    private struct Mods
+    {
+        public float DmgBonus; public int Multi;
+        public bool Fire, Water, Ice, Thunder;
+    }
+
+    private static Mods ReadMods(SpellSlot slot)
+    {
+        var m = new Mods { Multi = 1 };
+        foreach (var e in slot.LocalEngravings)
+        {
+            switch (e.Id)
+            {
+                case "white_dmg":    m.DmgBonus = e.CalculateEffect();              break;
+                case "blue_multi":   m.Multi    = Math.Max(1,(int)e.CalculateEffect()); break;
+                case "elem_fire":    m.Fire     = true;                             break;
+                case "elem_water":   m.Water    = true;                             break;
+                case "elem_ice":     m.Ice      = true;                             break;
+                case "elem_thunder": m.Thunder  = true;                             break;
+            }
+        }
+        return m;
+    }
+
+    // ── 武技 ──────────────────────────────────────────────────────
 
     private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world)
     {
-        // 從刻印計算加成
-        float dmgBonus  = 0f;
-        int   multiCount = 1;
-        foreach (var eng in slot.LocalEngravings)
-        {
-            switch (eng.Id)
-            {
-                case "white_dmg":  dmgBonus   = eng.CalculateEffect(); break;
-                case "blue_multi": multiCount = Math.Max(1, (int)eng.CalculateEffect()); break;
-            }
-        }
+        var m = ReadMods(slot);
+        int r  = 2 + (int)(m.DmgBonus * 3f);
+        var p  = player.Position;
+        int fx = player.Facing.X, fy = player.Facing.Y;
 
-        int baseRadius = 2 + (int)(dmgBonus * 3f);   // 傷害增幅 0→1 對應 半徑 2→5
-        var pos = player.Position;
-        int fx  = player.Facing.X;
-        int fy  = player.Facing.Y;
-
-        for (int rep = 0; rep < multiCount; rep++)
+        for (int rep = 0; rep < m.Multi; rep++)
         {
             switch (slot.Totem!.Id)
             {
-                // ── 斬擊：在朝向方向 N 格處爆炸 ───────────────────
                 case "technique_slash":
-                    var impact = new GridPos(pos.X + fx * (4 + rep * 3),
-                                            pos.Y + fy * (4 + rep * 3));
-                    world.Explode(impact.X, impact.Y, baseRadius);
+                    var hit = new GridPos(p.X + fx * (4 + rep * 3), p.Y + fy * (4 + rep * 3));
+                    world.Explode(hit.X, hit.Y, r);
+                    ApplyElement(world, hit, r, m);
                     break;
 
-                // ── 投射物：沿朝向噴出一條火線 ────────────────────
                 case "technique_projectile":
                     int range = 15 + rep * 5;
                     for (int i = 1; i <= range; i++)
                     {
-                        int tx = pos.X + fx * i, ty = pos.Y + fy * i;
+                        int tx = p.X + fx * i, ty = p.Y + fy * i;
                         var mat = world.TypeAt(tx, ty);
                         if (mat == MaterialType.Stone) break;
-                        world.Set(tx, ty, MaterialType.Fire);
-                        if (mat != MaterialType.Air) break; // 撞上可燃物即停
+                        world.Set(tx, ty, m.Water || m.Ice ? MaterialType.Water : MaterialType.Fire);
+                        if (mat != MaterialType.Air) break;
                     }
                     break;
 
-                // ── 範圍效果：以玩家為中心爆炸 ────────────────────
                 case "technique_area":
-                    world.Explode(pos.X + fx * rep * 2, pos.Y + fy * rep * 2,
-                                  baseRadius + 2 + rep);
-                    world.SpawnEffect("fire", new GridPos(pos.X, pos.Y),
-                        new Dictionary<string, object?> { ["radius"] = baseRadius });
+                    int ar = r + 2 + rep;
+                    world.Explode(p.X + fx * rep * 2, p.Y + fy * rep * 2, ar);
+                    ApplyElement(world, p, ar, m);
+                    if (!m.Water && !m.Ice)
+                        world.SpawnEffect("fire", p, new Dictionary<string, object?> { ["radius"] = r });
+                    break;
+
+                case "technique_beam":
+                    for (int i = 1; i <= 25 + rep * 8; i++)
+                    {
+                        int tx = p.X + fx * i, ty = p.Y + fy * i;
+                        if (!world.InBoundsPublic(tx, ty)) break;
+                        for (int dy = -1; dy <= 1; dy++)
+                            if (world.TypeAt(tx, ty + dy) != MaterialType.Stone)
+                                world.Set(tx, ty + dy, m.Water ? MaterialType.Water : MaterialType.Fire);
+                    }
+                    break;
+
+                case "technique_chain":
+                    for (int c = 0; c < 3 + rep; c++)
+                    {
+                        var cp = new GridPos(p.X + fx * (3 + c * 3), p.Y + fy * (3 + c * 3));
+                        world.Explode(cp.X, cp.Y, Math.Max(1, r - c));
+                    }
                     break;
             }
+        }
+    }
+
+    private static void ApplyElement(TileWorld world, GridPos pos, int radius, in Mods m)
+    {
+        if (m.Fire)  world.SpawnEffect("fire",  pos, new Dictionary<string, object?> { ["radius"] = radius });
+        if (m.Water) world.SpawnEffect("water", pos, new Dictionary<string, object?> { ["radius"] = radius });
+    }
+
+    // ── 變幻 ──────────────────────────────────────────────────────
+
+    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld world)
+    {
+        switch (slot.Totem!.Id)
+        {
+            case "morph_speed":
+            case "morph_strengthen":
+                world.SpawnEffect("water", player.Position, new Dictionary<string, object?> { ["radius"] = 1 });
+                break;
+            case "morph_flight":
+                world.Explode(player.Position.X, player.Position.Y + 3, 2);
+                break;
+            case "morph_invisible":
+                world.SpawnEffect("water", player.Position, new Dictionary<string, object?> { ["radius"] = 2 });
+                break;
+        }
+    }
+
+    // ── 位移 ──────────────────────────────────────────────────────
+
+    private static void ExecuteDisplacement(SpellSlot slot, PlayerController player, TileWorld world)
+    {
+        int fx = player.Facing.X, fy = player.Facing.Y;
+        switch (slot.Totem!.Id)
+        {
+            case "displace_dash":
+                for (int i = 0; i < 10; i++)
+                {
+                    var n = new GridPos(player.Position.X + fx, player.Position.Y + fy);
+                    if (world.TypeAt(n.X, n.Y) != MaterialType.Air) break;
+                    player.Position = n;
+                }
+                break;
+            case "displace_teleport":
+                for (int i = 20; i >= 1; i--)
+                {
+                    var tp = new GridPos(player.Position.X + fx * i, player.Position.Y + fy * i);
+                    if (world.TypeAt(tp.X, tp.Y) == MaterialType.Air) { player.Position = tp; break; }
+                }
+                break;
+            case "displace_dodge":
+                for (int i = 0; i < 5; i++)
+                {
+                    var b = new GridPos(player.Position.X - fx, player.Position.Y - fy);
+                    if (world.TypeAt(b.X, b.Y) != MaterialType.Air) break;
+                    player.Position = b;
+                }
+                break;
+        }
+    }
+
+    // ── 召喚 ──────────────────────────────────────────────────────
+
+    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld world)
+    {
+        var sp = new GridPos(player.Position.X + player.Facing.X * 4,
+                             player.Position.Y + player.Facing.Y * 4);
+        switch (slot.Totem!.Id)
+        {
+            case "summon_minion":
+                world.SpawnEffect("fire", sp, new Dictionary<string, object?> { ["radius"] = 1 });
+                break;
+            case "summon_turret":
+                for (int dy = -1; dy <= 1; dy++)
+                    world.Set(sp.X, sp.Y + dy, MaterialType.Stone);
+                break;
+            case "summon_guardian":
+                world.SpawnEffect("water", sp, new Dictionary<string, object?> { ["radius"] = 2 });
+                break;
+        }
+    }
+
+    // ── 領域 ──────────────────────────────────────────────────────
+
+    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld world)
+    {
+        var pos = player.Position;
+        switch (slot.Totem!.Id)
+        {
+            case "domain_barrier":
+                for (int angle = 0; angle < 360; angle += 10)
+                {
+                    float rad = angle * MathF.PI / 180f;
+                    world.Set(pos.X + (int)(MathF.Cos(rad) * 8),
+                              pos.Y + (int)(MathF.Sin(rad) * 8), MaterialType.Stone);
+                }
+                break;
+            case "domain_terrain":
+                world.Explode(pos.X, pos.Y, 12);
+                break;
+            case "domain_weather":
+                for (int dx = -8; dx <= 8; dx++)
+                    world.Set(pos.X + dx, pos.Y - 10, MaterialType.Water);
+                break;
         }
     }
 }

@@ -1,5 +1,7 @@
 namespace SkillCreator.AbilitySystem.Data;
 
+using SkillCreator.AbilitySystem.VM;
+
 // 法陣：玩家設計的完整能力單元
 public class SpellArray
 {
@@ -8,10 +10,16 @@ public class SpellArray
     // 插槽式排列，執行順序 = 索引由小到大
     public List<SpellSlot> Slots { get; } = new();
 
+    // 積木序列（空 = 施放時由 BlockAutoGenerator 根據插槽自動生成）
+    public List<BlockNode> Blocks { get; } = new();
+
     // 全域刻印（影響整個法陣所有圖騰）
     public List<EngraveData> GlobalEngravings { get; } = new();
 
     public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Declare;
+
+    // 執行容器：決定效果在哪裡、何時觸發
+    public ContainerType Container { get; set; } = ContainerType.PlayerBody;
 
     // 施放延遲（秒）；每個法陣各自獨立
     public float CastDelay { get; set; } = 0.3f;

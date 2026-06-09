@@ -16,14 +16,22 @@ public class EngraveData
     // 局部（只影響所在圖騰）或全域（影響整個法陣所有圖騰）
     public bool IsGlobal { get; init; } = false;
 
-    // 刻印本身的建構基礎成本（設計時固定，不因投入點改變）
+    // 刻印本身的建構基礎成本（設計時固定）
     public int BaseCost { get; init; } = 1;
+
+    // 解鎖所需玩家等級（0 = 無門檻）
+    public int RequiredPlayerLevel { get; init; } = 0;
+
+    // 是否為限制型（黃色）：加入後回收能力點，而非消耗
+    public bool IsRestriction { get; init; } = false;
 
     // 玩家投入的能力點數
     public int PointsInvested { get; set; } = 0;
 
-    // 該刻印消耗的總能力點
-    public int TotalAbilityPointCost => BaseCost + PointsInvested;
+    // 總能力點影響：限制型為負（回收），普通為正（消耗）
+    public int TotalAbilityPointCost => IsRestriction
+        ? -(BaseCost + PointsInvested)
+        :   BaseCost + PointsInvested;
 
     // 根據投入點計算效果值
     public float CalculateEffect() => ScalingType switch
