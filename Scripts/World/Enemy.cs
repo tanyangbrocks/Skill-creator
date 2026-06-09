@@ -7,14 +7,18 @@ public enum EnemyState { Idle, Chase, Attack }
 public class Enemy
 {
     public GridPos    Position { get; set; }
+    public GridPos    SpawnPos { get; }       // 原始生成位置，重生時回到這裡
     public float      Hp       { get; set; }
     public float      MaxHp    { get; }
     public bool       IsAlive  => Hp > 0f;
     public EnemyState State    { get; private set; } = EnemyState.Idle;
 
-    private float _gravityTimer = 0f;
-    private float _moveTimer    = 0f;
-    private float _attackTimer  = 0f;
+    private float _gravityTimer  = 0f;
+    private float _moveTimer     = 0f;
+    private float _attackTimer   = 0f;
+    private float _respawnTimer  = 0f;
+
+    public const float RespawnTime = 8f;   // 死亡後幾秒重生
 
     private const float GravityInterval = 0.25f;
     private const float MoveInterval    = 0.35f;
@@ -26,8 +30,31 @@ public class Enemy
     public Enemy(GridPos pos, float maxHp = 50f)
     {
         Position = pos;
+        SpawnPos = pos;
         MaxHp    = maxHp;
         Hp       = maxHp;
+    }
+
+    // 開始重生倒數（由 EnemyManager 在偵測到死亡後呼叫）
+    public void StartRespawn() => _respawnTimer = RespawnTime;
+
+    // 每幀倒數，倒數完回傳 true
+    public bool TickRespawn(float delta)
+    {
+        _respawnTimer -= delta;
+        return _respawnTimer <= 0f;
+    }
+
+    // 重置到出生點
+    public void Respawn()
+    {
+        Position      = SpawnPos;
+        Hp            = MaxHp;
+        State         = EnemyState.Idle;
+        _gravityTimer = 0f;
+        _moveTimer    = 0f;
+        _attackTimer  = 0f;
+        _respawnTimer = 0f;
     }
 
     public void Update(TileWorld world, PlayerController player, float delta)

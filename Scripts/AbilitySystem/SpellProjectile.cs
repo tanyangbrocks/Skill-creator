@@ -73,7 +73,7 @@ public class SpellProjectile
         // 臨時把施法者位置移到命中點，效果在該點爆發
         var orig = _caster.Position;
         _caster.Position = pos;
-        SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout);
+        SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout, atHitPoint: true);
         _caster.Position = orig;
         IsAlive = false;
     }

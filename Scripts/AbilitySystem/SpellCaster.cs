@@ -70,7 +70,7 @@ public static class SpellCaster
                     target.TakeDamage(20f);   // 直接接觸傷害（獨立於技能效果）
                     var orig = player.Position;
                     player.Position = checkPos;
-                    ExecuteEffects(spell, player, world, enemies, loadout);
+                    ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
                     player.Position = orig;
                     return;
                 }
@@ -81,14 +81,17 @@ public static class SpellCaster
         var meleePt = new GridPos(player.Position.X + fx * 2, player.Position.Y);
         var origPos = player.Position;
         player.Position = meleePt;
-        ExecuteEffects(spell, player, world, enemies, loadout);
+        ExecuteEffects(spell, player, world, enemies, loadout, atHitPoint: true);
         player.Position = origPos;
     }
 
     // ── 直接執行效果（PlayerBody / Contact 命中 / 投射物命中時皆可呼叫）────
 
+    // atHitPoint：效果中心即 player.Position（投射物命中 / 接觸命中時為 true）
+    //             technique_slash 等會用此 flag 把爆炸 offset 改為 0，避免偏移到命中點之外
     public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world,
-        EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0)
+        EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0,
+        bool atHitPoint = false)
     {
         var blocks = spell.Blocks.Count > 0
             ? spell.Blocks
@@ -117,7 +120,7 @@ public static class SpellCaster
                 string name = ctx.PendingInvokeTotem;
                 ctx.PendingInvokeTotem = null;
                 if (slotByRef.TryGetValue(name, out var slot))
-                    ResolveTotem(name, slot, ctx, player, world);
+                    ResolveTotem(name, slot, ctx, player, world, atHitPoint);
                 else
                     ctx.DoneTotems.Add(name);
             }
@@ -172,7 +175,7 @@ public static class SpellCaster
     // ── 圖騰解析：觸發條件 or 執行效果 ──────────────────────────────
 
     private static void ResolveTotem(string name, SpellSlot slot,
-        ExecutionContext ctx, PlayerController player, TileWorld world)
+        ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
     {
         switch (slot.Totem!.Type)
         {
@@ -184,7 +187,7 @@ public static class SpellCaster
                 break;
 
             default:
-                ExecuteSlot(slot, player, world);
+                ExecuteSlot(slot, player, world, atHitPoint);
                 ctx.HitTotems.Add(name);
                 ctx.DoneTotems.Add(name);
                 break;
@@ -207,15 +210,16 @@ public static class SpellCaster
 
     // ── 分派到各類型圖騰執行器 ─────────────────────────────────────
 
-    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world,
+        bool atHitPoint = false)
     {
         switch (slot.Totem!.Type)
         {
-            case TotemType.Technique:    ExecuteTechnique(slot, player, world);    break;
-            case TotemType.Morph:        ExecuteMorph(slot, player, world);        break;
-            case TotemType.Displacement: ExecuteDisplacement(slot, player, world); break;
-            case TotemType.Summon:       ExecuteSummon(slot, player, world);       break;
-            case TotemType.Domain:       ExecuteDomain(slot, player, world);       break;
+            case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint); break;
+            case TotemType.Morph:        ExecuteMorph(slot, player, world);                 break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);          break;
+            case TotemType.Summon:       ExecuteSummon(slot, player, world);                break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world);                break;
         }
     }
 
@@ -249,19 +253,24 @@ public static class SpellCaster
 
     // ── 武技 ──────────────────────────────────────────────────────
 
-    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world,
+        bool atHitPoint = false)
     {
         var m = ReadMods(slot);
         int r  = 2 + (int)(m.DmgBonus * 3f);
         var p  = player.Position;
         int fx = player.Facing.X, fy = player.Facing.Y;
 
+        // 直接施放：爆炸在前方 4 格；投射物/接觸命中：爆炸就在命中點（offset 0）
+        int slashOfs = atHitPoint ? 0 : 4;
+
         for (int rep = 0; rep < m.Multi; rep++)
         {
             switch (slot.Totem!.Id)
             {
                 case "technique_slash":
-                    var hit = new GridPos(p.X + fx * (4 + rep * 3), p.Y + fy * (4 + rep * 3));
+                    var hit = new GridPos(p.X + fx * (slashOfs + rep * 3),
+                                         p.Y + fy * (slashOfs + rep * 3));
                     world.Explode(hit.X, hit.Y, r);
                     ApplyElement(world, hit, r, m);
                     break;
