@@ -3,26 +3,25 @@ namespace SkillCreator.AbilitySystem.VM;
 public enum ExecutionState
 {
     Running,
-    Waiting,   // Wait 積木暫停，下一幀繼續
+    Waiting,   // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
     Completed,
     Fizzled,   // 執行途中目標消失（MP 不退還）
 }
 
 public class ExecutionContext
 {
-    // 頂層積木序列（執行入口）
-    public List<BlockNode> Blocks { get; }
+    // 編譯後的扁平指令序列
+    public List<Instruction> Code { get; }
 
-    // 頂層序列的當前執行位置
-    public int CurrentIndex { get; set; } = 0;
+    // 程式計數器（當前指令索引）
+    public int PC { get; set; } = 0;
 
-    public ExecutionState State { get; set; } = ExecutionState.Running;
+    public ExecutionState State          { get; set; } = ExecutionState.Running;
+    public float          WaitRemaining  { get; set; } = 0f;
+    public float          MpConsumed     { get; set; } = 0f;
 
-    // Wait 積木剩餘等待時間
-    public float WaitRemaining { get; set; } = 0f;
-
-    // 已消耗的 MP（用於 Fizzle 時的日誌，不退還）
-    public float MpConsumed { get; set; } = 0f;
+    // RepeatN 嵌套計數器堆疊（支援巢狀循環）
+    public Stack<int> LoopCounters { get; } = new();
 
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
@@ -31,20 +30,18 @@ public class ExecutionContext
     public static Dictionary<string, float> GlobalVars { get; } = new();
 
     // 圖騰執行結果（由呼叫方在圖騰執行後寫入）
-    public HashSet<string> HitTotems { get; } = new();
-    public HashSet<string> DoneTotems { get; } = new();
+    public HashSet<string> HitTotems     { get; } = new();
+    public HashSet<string> DoneTotems    { get; } = new();
     public HashSet<string> FizzledTotems { get; } = new();
 
-    // InvokeSpell 積木設置此欄位，由呼叫方讀取並發動連段
+    // InvokeSpell / InvokeTotem 積木設置此欄位，由呼叫方讀取後處理
     public string? PendingInvokeSpell { get; set; }
-
-    // InvokeTotem 積木設置此欄位，由呼叫方讀取並觸發圖騰
     public string? PendingInvokeTotem { get; set; }
 
     public bool IsFinished => State is ExecutionState.Completed or ExecutionState.Fizzled;
 
-    public ExecutionContext(List<BlockNode> blocks)
+    public ExecutionContext(List<Instruction> code)
     {
-        Blocks = blocks;
+        Code = code;
     }
 }

@@ -100,16 +100,18 @@ public static class SpellCaster
         if (blocks.Count == 0) return;
 
         var slotByRef = BuildSlotLookup(spell);
-        var ctx  = new ExecutionContext(blocks);
+        var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
         var loop = new ExecutionLoop(new SafetyGuard());
         loop.ResetTick();
 
         int safety = 0;
         while (!ctx.IsFinished && safety++ < 300)
         {
+            // 同步執行模式：強制跳過 Wait（結構正確，計時不生效；真實計時需 SpellRunner，Phase 3）
             if (ctx.State == ExecutionState.Waiting)
             {
                 ctx.WaitRemaining = 0f;
+                ctx.PC++;           // 推進 PC 跳過 Wait 指令
                 ctx.State = ExecutionState.Running;
             }
 
