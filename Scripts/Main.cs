@@ -272,6 +272,11 @@ public partial class Main : Node
         // 物理
         _player.ApplyPhysics(_world.World, dt);
 
+        // 鏡頭跟隨玩家（Camera2D.Limit 自動限制於世界邊界）
+        _world.Camera.Position = new Vector2(
+            (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
+            (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
+
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world.World, _player, dt);
 

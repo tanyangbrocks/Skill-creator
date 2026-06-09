@@ -10,7 +10,12 @@ public partial class TileWorldRenderer : Node2D
 {
     public const int TilePixels = 4;
 
-    public TileWorld      World    { get; } = new TileWorld(200, 150);
+    // 世界格子尺寸（可自由調整；視窗固定顯示 200×150 格）
+    public const int WorldTilesW = 600;
+    public const int WorldTilesH = 200;
+
+    public TileWorld      World    { get; } = new TileWorld(WorldTilesW, WorldTilesH);
+    public Camera2D       Camera   { get; private set; } = null!;
     public MaterialType   SelectedMaterial { get; set; } = MaterialType.Sand;
     public PlayerController?    Player      { get; set; }
     public EnemyManager?        Enemies     { get; set; }
@@ -23,7 +28,7 @@ public partial class TileWorldRenderer : Node2D
     private Image _image = null!;
     private ImageTexture _texture = null!;
     private Sprite2D _sprite = null!;
-    private readonly byte[] _renderBuf = new byte[200 * 150 * 3];
+    private byte[] _renderBuf = null!;
 
     public int  SimStepsPerFrame { get; set; } = 1;
     public bool PaintingEnabled  { get; set; } = true;
@@ -31,6 +36,10 @@ public partial class TileWorldRenderer : Node2D
     public override void _Ready()
     {
         int w = World.Width, h = World.Height;
+
+        // 渲染 buffer（依世界實際尺寸動態配置）
+        _renderBuf = new byte[w * h * 3];
+
         _image   = Image.CreateEmpty(w, h, false, Image.Format.Rgb8);
         _texture = ImageTexture.CreateFromImage(_image);
         _sprite  = new Sprite2D
@@ -41,7 +50,17 @@ public partial class TileWorldRenderer : Node2D
             TextureFilter = CanvasItem.TextureFilterEnum.Nearest,
         };
         AddChild(_sprite);
-        GetTree().Root.MinSize = new Vector2I(w * TilePixels, h * TilePixels);
+
+        // 視窗固定為 200×150 格（= 800×600 px）；世界可以更大
+        GetTree().Root.MinSize = new Vector2I(200 * TilePixels, 150 * TilePixels);
+
+        // Camera2D：跟隨玩家，限制在世界邊界內
+        Camera = new Camera2D();
+        Camera.LimitLeft   = 0;
+        Camera.LimitTop    = 0;
+        Camera.LimitRight  = w * TilePixels;
+        Camera.LimitBottom = h * TilePixels;
+        AddChild(Camera);
     }
 
     public override void _Process(double delta)
