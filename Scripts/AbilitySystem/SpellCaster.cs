@@ -19,8 +19,10 @@ public static class SpellCaster
         public static SpellCastResult Failed => default;
     }
 
+    // runner != null 時，PlayerBody 法陣提交給 Runner 做跨幀執行（Wait 真實計時）
+    // runner == null 時維持舊的同步執行（Projectile/Contact 命中時使用）
     public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
-        EnemyManager? enemies = null, SpellLoadout? loadout = null)
+        EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
         if (!player.CanCast) return SpellCastResult.Failed;
 
@@ -46,7 +48,10 @@ public static class SpellCaster
                 return new SpellCastResult { Ok = true };
 
             default:
-                ExecuteEffects(spell, player, world, enemies, loadout);
+                if (runner != null)
+                    runner.Submit(spell, player, world, enemies, loadout);
+                else
+                    ExecuteEffects(spell, player, world, enemies, loadout);
                 return new SpellCastResult { Ok = true };
         }
     }
@@ -162,7 +167,7 @@ public static class SpellCaster
 
     // ── 建立插槽參考對照表 ─────────────────────────────────────────
 
-    private static Dictionary<string, SpellSlot> BuildSlotLookup(SpellArray spell)
+    internal static Dictionary<string, SpellSlot> BuildSlotLookup(SpellArray spell)
     {
         var dict = new Dictionary<string, SpellSlot>();
         for (int i = 0; i < spell.Slots.Count; i++)
@@ -176,7 +181,7 @@ public static class SpellCaster
 
     // ── 圖騰解析：觸發條件 or 執行效果 ──────────────────────────────
 
-    private static void ResolveTotem(string name, SpellSlot slot,
+    internal static void ResolveTotem(string name, SpellSlot slot,
         ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
     {
         switch (slot.Totem!.Type)

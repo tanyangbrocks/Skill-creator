@@ -14,6 +14,7 @@ public partial class Main : Node
     private PlayerController         _player     = null!;
     private EnemyManager             _enemies    = new();
     private readonly List<SpellProjectile> _projectiles = new();
+    private readonly SpellRunner     _runner     = new();
 
     private Label   _hpLabel    = null!;
     private Label   _mpLabel    = null!;
@@ -169,6 +170,7 @@ public partial class Main : Node
 
         _player.Tick(dt);
         _enemies.Update(_world.World, _player, dt);
+        _runner.Update(dt);
 
         // 投射物更新
         _projectiles.RemoveAll(p => !p.IsAlive);
@@ -213,7 +215,7 @@ public partial class Main : Node
                 var spell = _editor.Loadout.ActiveSpell;
                 if (spell != null)
                 {
-                    var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout);
+                    var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout, _runner);
                     if (!result.Ok)
                         GD.Print("[施放] 失敗：MP 不足或冷卻中");
                     else if (result.Projectile != null)
