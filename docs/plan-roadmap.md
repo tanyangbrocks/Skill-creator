@@ -442,6 +442,40 @@ List 資料結構積木：
 
 ## 18. 未來方向
 
+### 次像素級物理模擬（GPU Compute Shader）
+
+> ⚠️ 後期升級項目，待 Tile 物理系統穩定後評估。
+
+```
+現況：
+  物理模擬以中粒度 Tile 為最小單位（CPU Cellular Automata）
+  次像素目前僅用於渲染視覺（Shader / GPUParticles2D）
+
+未來目標：
+  讓模擬粒子本身比螢幕像素還小——即模擬精度超越顯示精度
+  一個顯示像素內可包含多個獨立模擬粒子，各自持有狀態（溫度、材質、速度）
+
+為何需要 GPU Compute Shader：
+  次像素粒子數量 = 地圖像素數 × 縮放倍率，每幀更新整張 grid
+  例：800×600 地圖 × 4× 細分 = 1,920,000 粒子 / 幀
+  CPU 單執行緒跑 CA 規則在這規模下不夠快
+  Godot 4 的 RenderingServer 支援 Compute Shader，可把整張 grid 的 CA
+  更新搬到 GPU 上並行執行（社群已有可參考的 falling sand 範例）
+
+升級路線：
+  1. Tile CA（現況）：中粒度，CPU，穩定可靠
+  2. 混合模式：Tile 負責物理邏輯，Shader 負責次像素視覺插值
+  3. 全 GPU CA：整個模擬 grid 搬到 Compute Shader，Tile 降為邏輯載體
+     → 這步需要重寫 TileWorld 的更新迴圈，但介面合約（MaterialType、SpawnData）
+       可以維持不變，不影響能力系統
+
+注意：
+  「模擬粒子比像素小」不等於物理引擎更強——規則本身相同
+  差別在於模擬精度與視覺細膩度，而非物理正確性
+```
+
+---
+
 ### 2D → 3D 升維路線
 
 ```
