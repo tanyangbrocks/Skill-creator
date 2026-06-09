@@ -2,6 +2,7 @@ namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.VM;
+using SkillCreator.Snapshot;
 using SkillCreator.World;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,6 +34,9 @@ public sealed class SpellRunner
         public SpellLoadout?                  Loadout;
         public int                            ComboDepth;
         public bool                           AtHitPoint;
+        // S-9：供 PruneAfter 使用
+        public float                          SubmittedAt;   // GameClock.TotalTicks 提交時間
+        public float                          MpCost;        // 已扣除的 MP，退還用
 
         public ActiveSpell(ExecutionContext ctx, ExecutionLoop loop,
             Dictionary<string, SpellSlot> slotByRef,
@@ -68,6 +72,12 @@ public sealed class SpellRunner
             ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);
         ctx.RaycastQuery     = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
         ctx.FocalPointQuery  = () => player.MouseGridPos;
+        // S-10：快照 delegates（Anchor/Rollback 積木用）
+        var capturedRunner = this;
+        ctx.AnchorAction   = radius =>
+            SnapshotManager.TakeSnapshot(player.Position, radius, player, enemies, world);
+        ctx.RollbackAction = () =>
+            SnapshotManager.ApplyLatest(player, enemies, world, capturedRunner);
         ctx.PlayerStatsQuery = key => key switch
         {
             "hp"    => player.Hp,
@@ -80,9 +90,30 @@ public sealed class SpellRunner
         var loop = new ExecutionLoop(new SafetyGuard());
         var slotByRef = SpellCaster.BuildSlotLookup(spell);
 
-        _active.Add(new ActiveSpell(ctx, loop, slotByRef,
+        var entry = new ActiveSpell(ctx, loop, slotByRef,
             player, world, enemies, loadout, comboDepth,
-            atHitPoint: atHitPoint || fixedOrigin.HasValue));
+            atHitPoint: atHitPoint || fixedOrigin.HasValue)
+        {
+            SubmittedAt = GameClock.TotalTicks,
+            MpCost      = AbilityPointCalculator.CalculateMpCost(spell),
+        };
+        _active.Add(entry);
+    }
+
+    // ── S-9：清除錨點後提交的法陣並退還 MP ──────────────────────
+
+    /// <summary>移除所有在 anchorTimestamp 之後提交的法陣並退還其已扣除的 MP。</summary>
+    public void PruneAfter(float anchorTimestamp)
+    {
+        for (int i = _active.Count - 1; i >= 0; i--)
+        {
+            var s = _active[i];
+            if (s.SubmittedAt > anchorTimestamp)
+            {
+                s.Player.Mp = Math.Min(s.Player.MaxMp, s.Player.Mp + s.MpCost);
+                _active.RemoveAt(i);
+            }
+        }
     }
 
     // ── 每幀驅動（Main._Process 呼叫）────────────────────────────

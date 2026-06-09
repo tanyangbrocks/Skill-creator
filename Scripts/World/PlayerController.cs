@@ -2,10 +2,11 @@ namespace SkillCreator.World;
 
 using SkillCreator.AbilitySystem;
 using SkillCreator.AbilitySystem.Elemental;
+using SkillCreator.Snapshot;
 using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
-public class PlayerController : IElementalTarget
+public class PlayerController : IElementalTarget, ISnapshottable
 {
     // ── IElementalTarget 實作（W-3）─────────────────────────────────
     int  IElementalTarget.EntityId => -1;  // 玩家固定 -1
@@ -244,6 +245,29 @@ public class PlayerController : IElementalTarget
     }
 
     public void SetCastCooldown(float seconds) => _castCooldown = seconds;
+
+    // ── ISnapshottable（S-7）──────────────────────────────────────
+
+    public EntitySnapshot TakeSnapshot() => new(
+        EntityId:  EntitySnapshot.PlayerId,
+        Position:  Position,
+        Hp:        Hp,
+        Mp:        Mp,
+        WasAlive:  IsAlive,
+        Aura:      Aura.TakeSnapshot(),
+        CharState: State.TakeSnapshot(),
+        CharStats: CharStatsSnapshot.From(Stats)
+    );
+
+    public void RestoreFromSnapshot(EntitySnapshot snap)
+    {
+        Position = snap.Position;
+        Hp       = snap.Hp;
+        Mp       = snap.Mp;
+        Aura.RestoreFromSnapshot(snap.Aura);
+        if (snap.CharState is { } cs)  State.RestoreFromSnapshot(cs);
+        if (snap.CharStats is { } cst) cst.ApplyTo(Stats);
+    }
 
     // ── 採掘 ──────────────────────────────────────────────────────
 

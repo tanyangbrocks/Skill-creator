@@ -2,6 +2,7 @@ namespace SkillCreator.World;
 
 using SkillCreator.AbilitySystem;
 using SkillCreator.AbilitySystem.Elemental;
+using SkillCreator.Snapshot;
 using SkillCreator.World.Materials;
 
 public enum EnemyState { Idle, Chase, Attack }
@@ -14,7 +15,7 @@ public enum EnemyType
     Heavy,   // 重裝：高 HP、緩慢、重擊
 }
 
-public class Enemy : IElementalTarget
+public class Enemy : IElementalTarget, ISnapshottable
 {
     private static int _nextId = 0;
 
@@ -127,6 +128,44 @@ public class Enemy : IElementalTarget
         _respawnTimer = 0f;
         _patrolDir    = 1;
         Aura.Reset();
+    }
+
+    /// <summary>S-14：繞過重生計時器，直接強制復活至指定狀態（Rollback 用）。</summary>
+    public void ForceRevive(GridPos position, float hp)
+    {
+        Position      = position;
+        Hp            = Math.Clamp(hp, 1f, MaxHp);
+        State         = EnemyState.Idle;
+        WantsToFire   = false;
+        _respawnTimer = 0f;
+        Aura.Reset();
+    }
+
+    // ── ISnapshottable（S-7）──────────────────────────────────────
+
+    public EntitySnapshot TakeSnapshot() => new(
+        EntityId: Id,
+        Position: Position,
+        Hp:       Hp,
+        Mp:       0f,
+        WasAlive: IsAlive,
+        Aura:     Aura.TakeSnapshot(),
+        CharState: null,
+        CharStats: null
+    );
+
+    public void RestoreFromSnapshot(EntitySnapshot snap)
+    {
+        if (!snap.WasAlive) return; // 快照時已死亡，不做任何還原
+
+        if (!IsAlive)
+            ForceRevive(snap.Position, snap.Hp);
+        else
+        {
+            Position = snap.Position;
+            Hp       = snap.Hp;
+        }
+        Aura.RestoreFromSnapshot(snap.Aura);
     }
 
     // ── 每幀更新 ──────────────────────────────────────────────────

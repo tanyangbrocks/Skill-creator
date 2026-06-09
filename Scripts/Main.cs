@@ -2,6 +2,7 @@ using Godot;
 using SkillCreator.AbilitySystem;
 using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.Snapshot;
 using SkillCreator.UI;
 using SkillCreator.World;
 using SkillCreator.World.Items;
@@ -63,6 +64,7 @@ public partial class Main : Node
         VmContext.TaskCounterReached.Clear();
         EventBus.ClearAll();
         ActionBus.ClearAll();
+        SnapshotManager.Clear();
         GameClock.Reset();
         CombatState.Reset();
 

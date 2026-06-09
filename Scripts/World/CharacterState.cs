@@ -1,5 +1,7 @@
 namespace SkillCreator.World;
 
+using SkillCreator.Snapshot;
+
 /// <summary>
 /// W-5b：角色動態狀態（體力、精力、心情、健康、社會身份、生存四值）。
 /// 所有閾值與消耗速率以具名常數定義，方便後期平衡調整。
@@ -167,6 +169,23 @@ public class CharacterState
     // ════════════════════════════════════════════════════════════════
     //  每幀更新（回傳本幀應直接扣除的生存傷害總量，繞過防禦管線）
     // ════════════════════════════════════════════════════════════════
+
+    // ── 快照 API（S-6）────────────────────────────────────────────────────
+
+    /// <summary>擷取 7 個生存數值的不可變快照。</summary>
+    public CharStateSnapshot TakeSnapshot() => CharStateSnapshot.From(this);
+
+    /// <summary>從快照還原所有生存數值。</summary>
+    public void RestoreFromSnapshot(CharStateSnapshot snap)
+    {
+        SetStamina(snap.Stamina);
+        SetMentalEnergy(snap.MentalEnergy);
+        SetMood(snap.Mood);
+        SetBodyTemperature(snap.BodyTemperature);
+        SetThirst(snap.Thirst);
+        SetHunger(snap.Hunger);
+        SetOxygen(snap.Oxygen);
+    }
 
     /// <summary>每幀呼叫。inCombat 由 CombatState.InCombat 傳入。</summary>
     public float Tick(float delta, bool inCombat)

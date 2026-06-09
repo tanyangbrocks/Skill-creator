@@ -348,6 +348,14 @@ public static class SpellCompiler
                 break;
             }
 
+            // ── Phase 4：狀態快照（S-12）─────────────────────────────
+            case BlockType.Anchor:
+                code.Add(new Instruction(OpCode.AnchorSnapshot, block.Params));
+                break;
+            case BlockType.Rollback:
+                code.Add(new Instruction(OpCode.RollbackSnapshot, block.Params));
+                break;
+
             default:
                 GD.PushWarning($"[SpellCompiler] 未處理的 BlockType: {block.Type}");
                 break;

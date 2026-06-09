@@ -715,6 +715,18 @@ public partial class ScratchCanvas : Control
         { BlockType.DeathGuard, new(new Color(0.35f, 0.78f, 0.95f), "攔截下一次死亡（存活 1HP）",
             () => B(BlockType.DeathGuard, ("oneShot", true)),
             (r, b, _) => r.AddChild(CheckBox(b, "oneShot", "一次性"))) },
+
+        // ── Phase 4：狀態快照積木（S-11，法則刻印色系，群星 LV50+）────
+        { BlockType.Anchor, new(new Color(0.72f, 0.28f, 0.95f), "錨點刻印（群星 LV50+）",
+            () => B(BlockType.Anchor, ("radius", 10f)),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("半徑"));
+                r.AddChild(SmallSpin(b, "radius", 1f, 60f, 1f, 44));
+                r.AddChild(TinyLbl("格"));
+            }) },
+        { BlockType.Rollback, new(new Color(0.72f, 0.28f, 0.95f), "回朔刻印（群星 LV50+）",
+            () => B(BlockType.Rollback),
+            null) },
     };
 
     // ── 統一查表的三個舊介面（保持對外 API 不變）─────────────────

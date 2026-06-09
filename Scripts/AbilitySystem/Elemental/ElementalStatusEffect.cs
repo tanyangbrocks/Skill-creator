@@ -31,6 +31,12 @@ public abstract class ElementalStatusEffect
 
     /// <summary>防禦力懲罰，0–1；0 = 無，0.10 = 防禦降低 10%。</summary>
     public virtual float DefensePenalty   => 0f;
+
+    /// <summary>回傳需要持久化的累積狀態（例如 QuicksandSlowEffect._current）；無則回傳 0。</summary>
+    public virtual float GetAccumulatedState() => 0f;
+
+    /// <summary>由快照還原累積狀態；無內部狀態的子類不需覆寫。</summary>
+    public virtual void RestoreAccumulatedState(float value) { }
 }
 
 // ── 鏽化（水 + 金）────────────────────────────────────────────────────────
@@ -76,6 +82,9 @@ public sealed class QuicksandSlowEffect : ElementalStatusEffect
 
     public override void OnProcess(float delta)
         => _current = MathF.Min(MaxSpeedPenalty, _current + SpeedPenaltyPerSec * delta);
+
+    public override float GetAccumulatedState()            => _current;
+    public override void  RestoreAccumulatedState(float v) => _current = v;
 }
 
 // ── 感電（水 + 雷）────────────────────────────────────────────────────────

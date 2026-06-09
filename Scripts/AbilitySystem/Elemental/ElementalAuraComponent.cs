@@ -1,6 +1,7 @@
 namespace SkillCreator.AbilitySystem.Elemental;
 
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.Snapshot;
 using Godot;
 
 /// <summary>
@@ -74,6 +75,41 @@ public sealed class ElementalAuraComponent
     /// </summary>
     public void ApplyImmediate(ElementType element, float duration, IElementalTarget target)
         => ApplyInternal(element, duration, target);
+
+    // ── 快照 API（S-5）────────────────────────────────────────────────────
+
+    /// <summary>擷取當前 Aura 與效果的不可變快照。</summary>
+    public AuraSnapshot TakeSnapshot()
+    {
+        var auras = _auras
+            .Select(a => new AuraEntryData(a.Element, a.Duration))
+            .ToList();
+        var effects = _effects
+            .Select(e => new AuraEffectData(e.GetType(), e.RemainingDuration, e.GetAccumulatedState()))
+            .ToList();
+        return new AuraSnapshot(auras, effects);
+    }
+
+    /// <summary>從快照還原 Aura 與效果狀態（清除冷卻並重算聚合屬性）。</summary>
+    public void RestoreFromSnapshot(AuraSnapshot snap)
+    {
+        _auras.Clear();
+        _effects.Clear();
+        _cdLeft.Clear();
+
+        foreach (var a in snap.Auras)
+            _auras.Add(new AuraEntry(a.Element, a.Duration));
+
+        foreach (var e in snap.Effects)
+        {
+            var fx = (ElementalStatusEffect)Activator.CreateInstance(e.EffectType)!;
+            fx.RemainingDuration = e.RemainingDuration;
+            fx.RestoreAccumulatedState(e.AccumulatedState);
+            _effects.Add(fx);
+        }
+
+        Recompute();
+    }
 
     /// <summary>重置所有 Aura 與效果（敵人重生等場景切換時使用）。</summary>
     public void Reset()

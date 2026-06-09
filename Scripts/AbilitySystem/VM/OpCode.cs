@@ -75,4 +75,8 @@ public enum OpCode
 
     // ── Phase 4：行動攔截鉤子 ────────────────────────────────────────
     RegisterFilter,    // 向 ActionBus 登記動作過濾器（DamageShield / DeathGuard）
+
+    // ── Phase 4：狀態快照（S-10）────────────────────────────────────
+    AnchorSnapshot,    // 擷取圓形區域快照，壓入 SnapshotManager 棧（param: radius）
+    RollbackSnapshot,  // 彈出棧頂快照，還原實體 + Tile + 退還 MP
 }

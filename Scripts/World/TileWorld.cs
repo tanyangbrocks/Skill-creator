@@ -2,6 +2,7 @@ namespace SkillCreator.World;
 
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.Elemental;
+using SkillCreator.Snapshot;
 using SkillCreator.World.Materials;
 
 // 細胞自動機世界模擬（純 C#，無 Godot 依賴）
@@ -439,6 +440,38 @@ public class TileWorld : IWorldInterface
     public  bool InBoundsPublic(int x, int y) => x >= 0 && x < Width && y >= 0 && y < Height;
     private bool InBounds(int x, int y)       => InBoundsPublic(x, y);
     private int  Idx(int x, int y)      => y * Width + x;
+
+    // ════════════════════════════════════════════════════════════
+    //  快照 API（S-13）
+    // ════════════════════════════════════════════════════════════
+
+    /// <summary>擷取以 center 為圓心、半徑 radius 格的圓形區域快照（完整 TileCell）。</summary>
+    public TileWorldSnapshot SnapshotRegion(GridPos center, int radius)
+    {
+        var cells = new Dictionary<int, TileCell>();
+        int r2   = radius * radius;
+        int xMin = Math.Max(0,       center.X - radius);
+        int xMax = Math.Min(Width-1,  center.X + radius);
+        int yMin = Math.Max(0,       center.Y - radius);
+        int yMax = Math.Min(Height-1, center.Y + radius);
+
+        for (int x = xMin; x <= xMax; x++)
+        for (int y = yMin; y <= yMax; y++)
+        {
+            int dx = x - center.X, dy = y - center.Y;
+            if (dx * dx + dy * dy > r2) continue;
+            int idx = Idx(x, y);
+            cells[idx] = _cells[idx];
+        }
+        return new TileWorldSnapshot(center, radius, cells);
+    }
+
+    /// <summary>將快照中每一格直接寫回 _cells（下一幀渲染器即反映）。</summary>
+    public void RestoreRegion(TileWorldSnapshot snap)
+    {
+        foreach (var (idx, cell) in snap.Cells)
+            _cells[idx] = cell;
+    }
 
     // ════════════════════════════════════════════════════════════
     //  IWorldInterface 實作

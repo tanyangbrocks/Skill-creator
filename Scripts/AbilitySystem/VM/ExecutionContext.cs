@@ -87,6 +87,10 @@ public class ExecutionContext
     // 查詢鍵："hp" / "mp" / "hpPct" / "mpPct"
     public Func<string, float>? PlayerStatsQuery { get; set; }
 
+    // 快照代理（S-10，SpellRunner 注入；sync 路徑無 Runner 時為 null）
+    public Action<int>? AnchorAction   { get; set; }  // (radius) → TakeSnapshot
+    public Action?      RollbackAction { get; set; }  // () → ApplyLatest
+
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
 

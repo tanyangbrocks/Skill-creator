@@ -946,6 +946,21 @@ public class ExecutionLoop
                 ctx.PC++;
                 break;
             }
+
+            // ── Phase 4：狀態快照（S-10）────────────────────────────────
+            case OpCode.AnchorSnapshot:
+            {
+                int radius = (int)Param<float>(instr, "radius", 10f);
+                ctx.AnchorAction?.Invoke(radius);
+                ctx.PC++;
+                break;
+            }
+            case OpCode.RollbackSnapshot:
+            {
+                ctx.RollbackAction?.Invoke();
+                ctx.PC++;
+                break;
+            }
         }
     }
 
