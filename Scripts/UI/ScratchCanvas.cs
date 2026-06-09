@@ -157,14 +157,14 @@ public partial class ScratchCanvas : Control
         // ── 巢狀容器（If / RepeatN / RepeatWhile）────────────────
         if (block.Type == BlockType.If)
         {
-            outer.AddChild(BuildBranch(block.ThenBranch, "THEN", indent + 1));
-            outer.AddChild(BuildBranch(block.ElseBranch, "ELSE", indent + 1));
+            outer.AddChild(BuildBranch(block.ThenBranch, "成立時執行", indent + 1));
+            outer.AddChild(BuildBranch(block.ElseBranch, "不成立時執行", indent + 1));
         }
 
         if (block.Type == BlockType.RepeatN   ||
             block.Type == BlockType.RepeatWhile ||
             block.Type == BlockType.ForEachNearby)
-            outer.AddChild(BuildBranch(block.LoopBody, "LOOP", indent + 1));
+            outer.AddChild(BuildBranch(block.LoopBody, "每輪執行", indent + 1));
 
         // 間距
         outer.AddChild(Spacer(0, 3));
@@ -498,19 +498,19 @@ public partial class ScratchCanvas : Control
         Action<HBoxContainer, BlockNode, ScratchCanvas>? BuildUI = null
     );
 
-    // 條件型參數 UI（If / RepeatWhile 共用）
+    // 條件型參數 UI（如果 / 條件成立重複 共用）
     private static Action<HBoxContainer, BlockNode, ScratchCanvas> ConditionUI => (row, block, canvas) =>
     {
         string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
-        string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
-        row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
+        string[] labels = { "技能完成",  "技能命中",  "技能失效",    "數值比較", "布林變數" };
+        row.AddChild(SmallDrop(block, "conditionType", types, labels, 72));
         string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
         if (cType == "compare")
         {
-            row.AddChild(SmallEdit(block, "left", "L", 44));
+            row.AddChild(SmallEdit(block, "left", "左值", 44));
             string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
             row.AddChild(SmallDrop(block, "op", ops, ops, 40));
-            row.AddChild(SmallEdit(block, "right", "R", 44));
+            row.AddChild(SmallEdit(block, "right", "右值", 44));
         }
         else if (cType == "varBool")
             row.AddChild(SmallEdit(block, "varName", "變數名", 72));
@@ -521,133 +521,133 @@ public partial class ScratchCanvas : Control
     // 集中管理所有積木型別的 descriptor
     private static readonly Dictionary<BlockType, BlockDescriptor> _descs = new()
     {
-        // ── 圖騰 / 連段 ──────────────────────────────────────────────
-        { BlockType.InvokeTotem,  new(COrng, "觸發圖騰", () => B(BlockType.InvokeTotem,  ("totemName", "")),
+        // ── 技能呼叫 ──────────────────────────────────────────────────
+        { BlockType.InvokeTotem,  new(COrng, "使用技能", () => B(BlockType.InvokeTotem,  ("totemName", "")),
             (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
-        { BlockType.InvokeSpell,  new(COrng, "發動法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
+        { BlockType.InvokeSpell,  new(COrng, "施放其他法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "法陣名", 90))) },
 
         // ── 控制流 ────────────────────────────────────────────────────
-        { BlockType.If,           new(CFlow, "IF",      () => B(BlockType.If, ("conditionType", "totemDone"), ("totemName", "")),
+        { BlockType.If,           new(CFlow, "如果",        () => B(BlockType.If, ("conditionType", "totemDone"), ("totemName", "")),
             ConditionUI) },
-        { BlockType.RepeatN,      new(CFlow, "REPEAT",  () => B(BlockType.RepeatN,   ("count", 2f)),
+        { BlockType.RepeatN,      new(CFlow, "重複 N 次",   () => B(BlockType.RepeatN,   ("count", 2f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "count", 1f, 20f, 1f, 36)); r.AddChild(TinyLbl("次")); }) },
-        { BlockType.RepeatWhile,  new(CFlow, "WHILE",   () => B(BlockType.RepeatWhile, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
+        { BlockType.RepeatWhile,  new(CFlow, "條件成立，重複", () => B(BlockType.RepeatWhile, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
             ConditionUI) },
-        { BlockType.RandomChoice, new(CFlow, "RANDOM",  () => B(BlockType.RandomChoice, ("count", 2f)),
+        { BlockType.RandomChoice, new(CFlow, "隨機選擇",    () => B(BlockType.RandomChoice, ("count", 2f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "count", 2f, 8f, 1f, 36)); r.AddChild(TinyLbl("支")); }) },
-        { BlockType.ForEachNearby,new(CFlow, "FOREACH", () => B(BlockType.ForEachNearby, ("radius", 5f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格")); }) },
+        { BlockType.ForEachNearby,new(CFlow, "對每個附近敵人", () => B(BlockType.ForEachNearby, ("radius", 5f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
 
         // ── 時序 ──────────────────────────────────────────────────────
-        { BlockType.Wait,         new(CGrn,  "WAIT",    () => B(BlockType.Wait, ("duration", 1f)),
+        { BlockType.Wait,         new(CGrn,  "等待",        () => B(BlockType.Wait, ("duration", 1f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "duration", 0.1f, 30f, 0.1f, 42)); r.AddChild(TinyLbl("秒")); }) },
 
-        // ── 邊沿偵測 ──────────────────────────────────────────────────
-        { BlockType.RisingEdge,   new(CCyan, "上升沿",  () => B(BlockType.RisingEdge,  ("totemName", "")),
+        // ── 觸發時機 ──────────────────────────────────────────────────
+        { BlockType.RisingEdge,   new(CCyan, "開始觸發",    () => B(BlockType.RisingEdge,  ("totemName", "")),
             (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
-        { BlockType.FallingEdge,  new(CCyan, "下降沿",  () => B(BlockType.FallingEdge, ("totemName", "")),
+        { BlockType.FallingEdge,  new(CCyan, "結束觸發",    () => B(BlockType.FallingEdge, ("totemName", "")),
             (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
-        { BlockType.SinglePulse,  new(CCyan, "單次脈衝",() => B(BlockType.SinglePulse, ("totemName", "")),
+        { BlockType.SinglePulse,  new(CCyan, "僅觸發一次",  () => B(BlockType.SinglePulse, ("totemName", "")),
             (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
 
         // ── 變數 ──────────────────────────────────────────────────────
-        { BlockType.SetVar,       new(CYlw,  "SET VAR", () => B(BlockType.SetVar, ("name", "x"), ("value", "0"), ("global", false)),
+        { BlockType.SetVar,       new(CYlw,  "設定變數",    () => B(BlockType.SetVar, ("name", "x"), ("value", "0"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "變數名", 52)); r.AddChild(TinyLbl("="));
                            r.AddChild(SmallEdit(b, "value", "值", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.GetVar,       new(CYlw,  "GET VAR", () => B(BlockType.GetVar, ("name", "x")),
+        { BlockType.GetVar,       new(CYlw,  "讀取變數",    () => B(BlockType.GetVar, ("name", "x")),
             (r, b, _) => r.AddChild(SmallEdit(b, "name", "變數名", 72))) },
-        { BlockType.SetVarBool,   new(CYlw,  "SET BOOL",() => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false))) },
-        { BlockType.GetVarBool,   new(CYlw,  "GET BOOL",() => B(BlockType.GetVarBool, ("name", "b"))) },
-        { BlockType.Compare,      new(CYlw,  "COMPARE", () => B(BlockType.Compare, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
+        { BlockType.SetVarBool,   new(CYlw,  "設定布林",    () => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false))) },
+        { BlockType.GetVarBool,   new(CYlw,  "讀取布林",    () => B(BlockType.GetVarBool, ("name", "b"))) },
+        { BlockType.Compare,      new(CYlw,  "比較數值",    () => B(BlockType.Compare, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
             (r, b, _) =>
             {
-                r.AddChild(SmallEdit(b, "left", "L", 44));
+                r.AddChild(SmallEdit(b, "left", "左值", 44));
                 string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
                 r.AddChild(SmallDrop(b, "op", ops, ops, 40));
-                r.AddChild(SmallEdit(b, "right", "R", 44));
-                r.AddChild(TinyLbl("→"));
-                r.AddChild(SmallEdit(b, "resultVar", "結果", 56));
+                r.AddChild(SmallEdit(b, "right", "右值", 44));
+                r.AddChild(TinyLbl("存入"));
+                r.AddChild(SmallEdit(b, "resultVar", "變數名", 56));
                 r.AddChild(CheckBox(b, "global", "全域"));
             }) },
 
-        // ── List ──────────────────────────────────────────────────────
-        { BlockType.ListCreate,   new(COrnD, "LIST NEW",    () => B(BlockType.ListCreate, ("name", "list"), ("global", false)),
+        // ── 列表 ──────────────────────────────────────────────────────
+        { BlockType.ListCreate,   new(COrnD, "建立列表",        () => B(BlockType.ListCreate, ("name", "list"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 72)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.ListAppend,   new(COrnD, "LIST ADD",    () => B(BlockType.ListAppend, ("name", "list"), ("value", "0"), ("global", false)),
+        { BlockType.ListAppend,   new(COrnD, "列表加入末尾",    () => B(BlockType.ListAppend, ("name", "list"), ("value", "0"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("+"));
                            r.AddChild(SmallEdit(b, "value", "值/變數", 60)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.ListPop,      new(COrnD, "LIST POP",    () => B(BlockType.ListPop,    ("name", "list"), ("resultVar", "v"), ("global", false)),
+        { BlockType.ListPop,      new(COrnD, "取出列表末尾",    () => B(BlockType.ListPop,    ("name", "list"), ("resultVar", "v"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("→"));
-                           r.AddChild(SmallEdit(b, "resultVar", "結果", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.ListGet,      new(COrnD, "LIST GET",    () => B(BlockType.ListGet,    ("name", "list"), ("index", "1"), ("resultVar", "v"), ("global", false)),
-            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("["));
-                           r.AddChild(SmallEdit(b, "index", "索引", 40)); r.AddChild(TinyLbl("]→"));
-                           r.AddChild(SmallEdit(b, "resultVar", "結果", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.ListDequeue,  new(COrnD, "LIST DEQUEUE",() => B(BlockType.ListDequeue)) },
-        { BlockType.ListSet,      new(COrnD, "LIST SET",    () => B(BlockType.ListSet)) },
-        { BlockType.ListLength,   new(COrnD, "LIST LEN",    () => B(BlockType.ListLength)) },
-        { BlockType.ListContains, new(COrnD, "LIST HAS",    () => B(BlockType.ListContains)) },
-        { BlockType.ListRemoveAt, new(COrnD, "LIST DEL",    () => B(BlockType.ListRemoveAt)) },
-        { BlockType.ListClear,    new(COrnD, "LIST CLEAR",  () => B(BlockType.ListClear)) },
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListGet,      new(COrnD, "讀取列表第 N 項", () => B(BlockType.ListGet,    ("name", "list"), ("index", "1"), ("resultVar", "v"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("第"));
+                           r.AddChild(SmallEdit(b, "index", "N", 40)); r.AddChild(TinyLbl("項→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListDequeue,  new(COrnD, "取出列表第一項",  () => B(BlockType.ListDequeue)) },
+        { BlockType.ListSet,      new(COrnD, "修改列表第 N 項", () => B(BlockType.ListSet)) },
+        { BlockType.ListLength,   new(COrnD, "取得列表長度",    () => B(BlockType.ListLength)) },
+        { BlockType.ListContains, new(COrnD, "列表是否包含",    () => B(BlockType.ListContains)) },
+        { BlockType.ListRemoveAt, new(COrnD, "刪除列表第 N 項", () => B(BlockType.ListRemoveAt)) },
+        { BlockType.ListClear,    new(COrnD, "清空列表",        () => B(BlockType.ListClear)) },
 
-        // ── 實體查詢 ──────────────────────────────────────────────────
-        { BlockType.QueryNear,    new(CBlue, "QUERY",    () => B(BlockType.QueryNear, ("radius", 5f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格")); }) },
-        { BlockType.QueryNearest, new(CBlue, "QUERY 1",  () => B(BlockType.QueryNearest, ("radius", 5f), ("resultVar", "nearest")),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格 →"));
-                           r.AddChild(SmallEdit(b, "resultVar", "前綴", 60)); }) },
-        { BlockType.GetEntityProp,new(CBlue, "GET PROP", () => B(BlockType.GetEntityProp, ("property", "hp"), ("resultVar", "e_hp")),
+        // ── 敵人查詢 ──────────────────────────────────────────────────
+        { BlockType.QueryNear,    new(CBlue, "查詢附近敵人",    () => B(BlockType.QueryNear, ("radius", 5f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
+        { BlockType.QueryNearest, new(CBlue, "最近的敵人",      () => B(BlockType.QueryNearest, ("radius", 5f), ("resultVar", "nearest")),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內 →"));
+                           r.AddChild(SmallEdit(b, "resultVar", "變數前綴", 60)); }) },
+        { BlockType.GetEntityProp,new(CBlue, "讀取敵人屬性",    () => B(BlockType.GetEntityProp, ("property", "hp"), ("resultVar", "e_hp")),
             (r, b, _) =>
             {
                 string[] props = { "hp", "maxhp", "x", "y" };
-                string[] plbls = { "HP", "MaxHP", "X", "Y" };
-                r.AddChild(SmallDrop(b, "property", props, plbls, 52));
+                string[] plbls = { "生命值", "最大生命", "X 座標", "Y 座標" };
+                r.AddChild(SmallDrop(b, "property", props, plbls, 60));
                 r.AddChild(TinyLbl("→"));
-                r.AddChild(SmallEdit(b, "resultVar", "變數名", 64));
+                r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64));
             }) },
-        { BlockType.SetEntityProp,new(CBlue, "SET PROP", () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", 10f)),
+        { BlockType.SetEntityProp,new(CBlue, "設定敵人屬性",    () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", 10f)),
             (r, b, _) =>
             {
                 string[] props = { "hp", "x", "y" };
-                string[] plbls = { "HP", "X", "Y" };
-                r.AddChild(SmallDrop(b, "property", props, plbls, 44));
+                string[] plbls = { "生命值", "X 座標", "Y 座標" };
+                r.AddChild(SmallDrop(b, "property", props, plbls, 52));
                 string prop = b.Params.TryGetValue("property", out var pv) ? pv?.ToString() ?? "hp" : "hp";
                 if (prop == "hp")
                 {
-                    r.AddChild(TinyLbl("減"));
+                    r.AddChild(TinyLbl("扣除"));
                     r.AddChild(SmallSpin(b, "damage", 1f, 999f, 1f, 52));
                 }
                 else
                 {
-                    r.AddChild(TinyLbl("="));
+                    r.AddChild(TinyLbl("設為"));
                     r.AddChild(SmallEdit(b, "value", "值/變數", 60));
                 }
             }) },
 
-        // ── 廣播 ──────────────────────────────────────────────────────
-        { BlockType.Broadcast,       new(CPurp, "BROADCAST",        () => B(BlockType.Broadcast,       ("signal", "")),
+        // ── 廣播訊號 ──────────────────────────────────────────────────
+        { BlockType.Broadcast,       new(CPurp, "廣播訊號",          () => B(BlockType.Broadcast,       ("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
-        { BlockType.BroadcastAndWait,new(CPurp, "BCAST（等同廣播）", () => B(BlockType.BroadcastAndWait,("signal", "")),
+        { BlockType.BroadcastAndWait,new(CPurp, "廣播訊號（等待）",   () => B(BlockType.BroadcastAndWait,("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
-        { BlockType.OnReceive,       new(CPurp, "ON RECEIVE",        () => B(BlockType.OnReceive,       ("signal", "")),
+        { BlockType.OnReceive,       new(CPurp, "收到訊號時",          () => B(BlockType.OnReceive,       ("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
 
-        // ── 偵測 ──────────────────────────────────────────────────────
-        { BlockType.DetectHpThreshold,new(CRed, "DETECT HP",  () => B(BlockType.DetectHpThreshold, ("percent", 30f)),
+        // ── 偵測條件 ──────────────────────────────────────────────────
+        { BlockType.DetectHpThreshold,new(CRed, "生命值低於 N%",  () => B(BlockType.DetectHpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
-        { BlockType.DetectMpThreshold,new(CRed, "DETECT MP",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
+        { BlockType.DetectMpThreshold,new(CRed, "魔力值低於 N%",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
-        { BlockType.DetectEntityEnter,new(CRed, "DETECT ENT", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
+        { BlockType.DetectEntityEnter,new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
 
         // ── 任務計數器 ────────────────────────────────────────────────
-        { BlockType.TaskCounterSet,   new(CLvnd, "CTR SET",   () => B(BlockType.TaskCounterSet,    ("name", "c"), ("count", 0f)),
+        { BlockType.TaskCounterSet,   new(CLvnd, "計數器設定值",  () => B(BlockType.TaskCounterSet,    ("name", "c"), ("count", 0f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
-        { BlockType.TaskCounterAdd,   new(CLvnd, "CTR ADD",   () => B(BlockType.TaskCounterAdd,    ("name", "c"), ("count", 1f)),
+        { BlockType.TaskCounterAdd,   new(CLvnd, "計數器增加",    () => B(BlockType.TaskCounterAdd,    ("name", "c"), ("count", 1f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
-        { BlockType.TaskCounterOnReach,new(CLvnd,"CTR REACH", () => B(BlockType.TaskCounterOnReach,("name", "c"), ("count", 5f)),
+        { BlockType.TaskCounterOnReach,new(CLvnd,"計數器到達時",  () => B(BlockType.TaskCounterOnReach,("name", "c"), ("count", 5f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
-        { BlockType.TaskCounterReset, new(CLvnd, "CTR RESET", () => B(BlockType.TaskCounterReset,  ("name", "c")),
+        { BlockType.TaskCounterReset, new(CLvnd, "計數器歸零",    () => B(BlockType.TaskCounterReset,  ("name", "c")),
             (r, b, _) => r.AddChild(SmallEdit(b, "name", "計數器名", 64))) },
     };
 
