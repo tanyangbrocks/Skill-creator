@@ -30,6 +30,12 @@ public partial class Main : Node
     private float          _placeCooldown = 0f;
     private Label          _paintModeLabel = null!;
 
+    // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
+    private float _cameraZoom = 10f;
+    private const float ZoomMin  = 1f;
+    private const float ZoomMax  = 10f;
+    private const float ZoomStep = 1.2f; // 每格滾輪縮放倍率（約 12 步橫跨全範圍）
+
     private bool _editorOpen = false;
 
     public override void _Ready()
@@ -174,7 +180,7 @@ public partial class Main : Node
         }
 
         var hint = new Label();
-        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  F1 畫筆模式";
+        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆";
         hint.AnchorTop = hint.AnchorBottom = 1f;
         hint.Position  = new Vector2(10, -28);
         hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
@@ -276,6 +282,7 @@ public partial class Main : Node
         _world.Camera.Position = new Vector2(
             (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
             (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
+        _world.Camera.Zoom = new Vector2(_cameraZoom, _cameraZoom);
 
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world.World, _player, dt);
@@ -326,18 +333,21 @@ public partial class Main : Node
     // ── 鍵盤快捷鍵 ────────────────────────────────────────────────
     public override void _Input(InputEvent e)
     {
-        // 滾輪切換物品熱鍵欄槽位
+        // 滾輪：Ctrl 按住 → 調整鏡頭縮放；否則 → 切換物品熱鍵欄槽位
         if (!_editorOpen && e is InputEventMouseButton mw)
         {
+            bool ctrl = Input.IsKeyPressed(Key.Ctrl);
             if (mw.ButtonIndex == MouseButton.WheelUp)
             {
-                _player.Inventory.ActiveHotbarIndex =
+                if (ctrl) _cameraZoom = Math.Clamp(_cameraZoom * ZoomStep, ZoomMin, ZoomMax);
+                else _player.Inventory.ActiveHotbarIndex =
                     (_player.Inventory.ActiveHotbarIndex - 1 + Inventory.HotbarSize) % Inventory.HotbarSize;
                 return;
             }
             if (mw.ButtonIndex == MouseButton.WheelDown)
             {
-                _player.Inventory.ActiveHotbarIndex =
+                if (ctrl) _cameraZoom = Math.Clamp(_cameraZoom / ZoomStep, ZoomMin, ZoomMax);
+                else _player.Inventory.ActiveHotbarIndex =
                     (_player.Inventory.ActiveHotbarIndex + 1) % Inventory.HotbarSize;
                 return;
             }
