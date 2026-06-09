@@ -31,8 +31,9 @@ public partial class Main : Node
     private Label[]          _hotbarCounts  = null!;  // 右下角數量
     private PanelContainer   _tooltip       = null!;  // 懸停提示框
     private Label            _tooltipLabel  = null!;
-    private float            _placeCooldown = 0f;
-    private Label            _paintModeLabel = null!;
+    private float            _placeCooldown   = 0f;
+    private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
+    private Label            _paintModeLabel  = null!;
 
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
@@ -262,8 +263,13 @@ public partial class Main : Node
             panel.AddChild(countLbl);
             _hotbarCounts[i] = countLbl;
 
-            // ── 懸停事件 → 顯示/隱藏提示框 ───────────────────────
+            // ── 點擊選取 + 懸停提示框 ────────────────────────────
             int idx = i;
+            panel.GuiInput += (InputEvent e) =>
+            {
+                if (e is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+                    _player.Inventory.ActiveHotbarIndex = idx;
+            };
             panel.MouseEntered += () => ShowTooltip(idx);
             panel.MouseExited  += HideTooltip;
         }
@@ -341,8 +347,8 @@ public partial class Main : Node
         if (Input.IsKeyPressed(Key.D) || Input.IsKeyPressed(Key.Right)) dx =  1;
         if (dx != 0) _player.TryMove(_world.World, dx, 0);
 
-        // 採掘（按住左鍵，距離 ≤ MiningRange）
-        if (Input.IsMouseButtonPressed(MouseButton.Left))
+        // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD 上時不觸發）
+        if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar)
         {
             var target = _player.MouseGridPos;
             if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
@@ -358,7 +364,7 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f)
+        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar)
         {
             var target = _player.MouseGridPos;
             var active = _player.Inventory.ActiveItem;
@@ -485,9 +491,10 @@ public partial class Main : Node
         }
     }
 
-    // 滑鼠移入槽位 → 顯示提示框
+    // 滑鼠移入槽位 → 顯示提示框 + 標記滑鼠在 HUD 上
     private void ShowTooltip(int slotIndex)
     {
+        _mouseOverHotbar = true;
         var stack = _player.Inventory.Slots[slotIndex];
         if (stack.IsEmpty) { HideTooltip(); return; }
 
@@ -503,7 +510,7 @@ public partial class Main : Node
         _tooltip.Visible  = true;
     }
 
-    private void HideTooltip() => _tooltip.Visible = false;
+    private void HideTooltip() { _mouseOverHotbar = false; _tooltip.Visible = false; }
 
     // 依 ItemId 決定縮圖顏色：方塊物品取材質基礎色；工具用固定色
     private static Color GetItemIconColor(ItemId id)
