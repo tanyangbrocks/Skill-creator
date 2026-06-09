@@ -54,4 +54,19 @@ public enum OpCode
     VecFromEntity, // 當前迭代實體位置 → result
     Raycast,       // DDA 射線：start+dir+maxDist → result.x/y/hit/mat
     GetFocalPoint, // 焦點位置 → result.x / result.y
+
+    // ── §9-B 戰鬥狀態查詢 ─────────────────────────────────────────
+    ReadBattleStat,  // 讀取 CombatState 統計數值 → resultVar（castCount/damageDealt/killCount）
+
+    // ── §7 被動反應觸發 ───────────────────────────────────────────
+    WaitCondition,   // 暫停直到玩家狀態條件滿足（hpPct/mpPct 低於閾值，或本幀受傷）
+
+    // ── 補完實作 ──────────────────────────────────────────────────
+    QueryNearCount,    // 查詢半徑內敵人數量 → resultVar
+    RandomJump,        // 隨機跳轉到 N 個目標地址之一（__target_0 / __target_1...）
+    TaskCounterSet,    // 設定任務計數器值（全域）
+    TaskCounterAdd,    // 增加任務計數器
+    TaskCounterGet,    // 讀取任務計數器 → resultVar
+    TaskCounterOnReach,// 到達閾值一次性觸發，否則跳到 __target
+    TaskCounterReset,  // 計數器歸零並解鎖對應 OnReach 鎖定
 }

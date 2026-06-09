@@ -5,11 +5,12 @@ using SkillCreator.World;
 public enum ExecutionState
 {
     Running,
-    Waiting,        // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
-    WaitingFrames,  // Sleep 積木暫停；每幀遞減 WaitFramesRemaining，歸零後前進
-    WaitingSignal,  // OnReceive 暫停；等到訊號被廣播後由 Step 頂部恢復
+    Waiting,          // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
+    WaitingFrames,    // Sleep 積木暫停；每幀遞減 WaitFramesRemaining，歸零後前進
+    WaitingSignal,    // OnReceive 暫停；等到訊號被廣播後由 Step 頂部恢復
+    WaitingCondition, // DetectHp/Mp/Hit 暫停；每幀 Step 頂部檢查玩家狀態條件
     Completed,
-    Fizzled,        // 執行途中目標消失（MP 不退還）
+    Fizzled,          // 執行途中目標消失（MP 不退還）
 }
 
 public class ExecutionContext
@@ -65,6 +66,19 @@ public class ExecutionContext
     // ForEachNearby 迭代時的效果原點覆蓋（由 ConsumeInvokeTotem 設定，取代 player.Position 暫改）
     public GridPos? EffectOriginOverride { get; set; }
 
+    // 投射物 / 接觸命中時的固定施放原點（整個法陣生命週期有效）
+    // Runner 跨幀模式下 player.Position 不再可靠，靠此欄位保留命中點
+    public GridPos? FixedOrigin { get; set; }
+
+    // 被動觸發條件（WaitingCondition 狀態時有效）
+    // key: "hpPct" / "mpPct" / "damaged"；threshold: 觸發閾值（hpPct/mpPct 為 0–1 比例）
+    public string? WaitingConditionKey       { get; set; }
+    public float   WaitingConditionThreshold { get; set; }
+
+    // 玩家狀態查詢代理（SpellCaster / SpellRunner 建立 ctx 時注入）
+    // 查詢鍵："hp" / "mp" / "hpPct" / "mpPct"
+    public Func<string, float>? PlayerStatsQuery { get; set; }
+
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
 
@@ -74,6 +88,10 @@ public class ExecutionContext
     // ── 列表變數 ─────────────────────────────────────────────────
     public Dictionary<string, List<float>> InstanceLists { get; } = new();
     public static Dictionary<string, List<float>> GlobalLists { get; } = new();
+
+    // ── 任務計數器（全域命名，跨法陣，僅 Main._Ready 重置）────────
+    public static Dictionary<string, float> TaskCounters      { get; } = new();
+    public static HashSet<string>           TaskCounterReached { get; } = new();
 
     public List<float> GetOrCreateList(string name, bool global)
     {

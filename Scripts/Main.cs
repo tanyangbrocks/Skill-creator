@@ -48,7 +48,11 @@ public partial class Main : Node
         // 場景重啟時清除跨局狀態
         VmContext.GlobalVars.Clear();
         VmContext.GlobalLists.Clear();
+        VmContext.TaskCounters.Clear();
+        VmContext.TaskCounterReached.Clear();
         EventBus.ClearAll();
+        GameClock.Reset();
+        CombatState.Reset();
 
         // ── 世界渲染器 ──────────────────────────────────────────
         _world = new TileWorldRenderer();
@@ -301,6 +305,8 @@ public partial class Main : Node
     {
         float dt = (float)delta;
         EventBus.ClearFrame(); // 清除上一幀的廣播訊號
+        GameClock.Advance(dt);
+        CombatState.Advance(dt);
 
         // 標籤永遠更新
         _hpLabel.Text = $"HP  {_player.Hp:F0} / {PlayerController.MaxHp:F0}";

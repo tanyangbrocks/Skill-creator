@@ -169,6 +169,15 @@ public partial class ScratchCanvas : Control
             block.Type == BlockType.ForEachNearby)
             outer.AddChild(BuildBranch(block.LoopBody, "每輪執行", indent + 1));
 
+        if (block.Type == BlockType.RandomChoice)
+        {
+            outer.AddChild(BuildBranch(block.ThenBranch, "選項 A（50%）", indent + 1));
+            outer.AddChild(BuildBranch(block.ElseBranch, "選項 B（50%）", indent + 1));
+        }
+
+        if (block.Type == BlockType.TaskCounterOnReach)
+            outer.AddChild(BuildBranch(block.ThenBranch, "到達時執行（僅一次）", indent + 1));
+
         // 間距
         outer.AddChild(Spacer(0, 3));
         return outer;
@@ -485,8 +494,14 @@ public partial class ScratchCanvas : Control
                            r.AddChild(SmallEdit(b, "value", "值", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
         { BlockType.GetVar,       new(CYlw,  "讀取變數",    () => B(BlockType.GetVar, ("name", "x")),
             (r, b, _) => r.AddChild(SmallEdit(b, "name", "變數名", 72))) },
-        { BlockType.SetVarBool,   new(CYlw,  "設定布林",    () => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false))) },
-        { BlockType.GetVarBool,   new(CYlw,  "讀取布林",    () => B(BlockType.GetVarBool, ("name", "b"))) },
+        { BlockType.SetVarBool,   new(CYlw,  "設定布林",    () => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "變數名", 52)); r.AddChild(TinyLbl("="));
+                           r.AddChild(SmallDrop(b, "value", new[]{"true","false"}, new[]{"真","假"}, 44));
+                           r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.GetVarBool,   new(CYlw,  "讀取布林→",  () => B(BlockType.GetVarBool, ("name", "b"), ("resultVar", "_bool"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "源變數", 52)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 56));
+                           r.AddChild(CheckBox(b, "global", "全域")); }) },
         { BlockType.Compare,      new(CYlw,  "比較數值",    () => B(BlockType.Compare, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
             (r, b, _) =>
             {
@@ -539,8 +554,9 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 72)); r.AddChild(CheckBox(b, "global", "全域")); }) },
 
         // ── 敵人查詢 ──────────────────────────────────────────────────
-        { BlockType.QueryNear,    new(CBlue, "查詢附近敵人",    () => B(BlockType.QueryNear, ("radius", 5f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
+        { BlockType.QueryNear,    new(CBlue, "附近敵人數量",    () => B(BlockType.QueryNear, ("radius", 5f), ("resultVar", "nearby")),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 60)); }) },
         { BlockType.QueryNearest, new(CBlue, "最近的敵人",      () => B(BlockType.QueryNearest, ("radius", 5f), ("resultVar", "nearest")),
             (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內 →"));
                            r.AddChild(SmallEdit(b, "resultVar", "變數前綴", 60)); }) },
@@ -636,18 +652,37 @@ public partial class ScratchCanvas : Control
                            r.AddChild(TinyLbl("格→")); r.AddChild(SmallEdit(b,"resultVec","結果前綴",48));
                            r.AddChild(CheckBox(b,"global","全域")); }) },
 
-        // ── 偵測條件 ──────────────────────────────────────────────────
+        // ── 偵測條件（被動觸發，等待條件後繼續執行）──────────────────
         { BlockType.DetectHpThreshold,new(CRed, "生命值低於 N%",  () => B(BlockType.DetectHpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
         { BlockType.DetectMpThreshold,new(CRed, "魔力值低於 N%",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
-        { BlockType.DetectEntityEnter,new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
+        { BlockType.DetectHitReceived, new(CRed, "偵測到受到攻擊",  () => B(BlockType.DetectHitReceived)) },
+        { BlockType.DetectEntityEnter, new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
+
+        // ── 戰鬥統計查詢 ───────────────────────────────────────────────
+        { BlockType.GetBattleStat, new(new Color(0.15f,0.55f,0.55f), "本場戰鬥統計",
+            () => B(BlockType.GetBattleStat, ("stat", "castCount"), ("resultVar", "_stat")),
+            (r, b, _) => {
+                var opts = new[] { ("castCount","施放次數"), ("damageDealt","造成傷害"), ("killCount","擊殺數") };
+                var dd = new OptionButton(); dd.CustomMinimumSize = new Vector2(80, 0);
+                foreach (var (v, lbl) in opts) dd.AddItem(lbl);
+                string curStat = b.Params.TryGetValue("stat", out var s) && s is string sv ? sv : "castCount";
+                int cur = Array.FindIndex(opts, x => x.Item1 == curStat);
+                dd.Selected = Math.Max(0, cur);
+                dd.ItemSelected += idx => { b.Params["stat"] = opts[idx].Item1; };
+                r.AddChild(dd);
+                r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "變數名", 64));
+            }) },
 
         // ── 任務計數器 ────────────────────────────────────────────────
         { BlockType.TaskCounterSet,   new(CLvnd, "計數器設定值",  () => B(BlockType.TaskCounterSet,    ("name", "c"), ("count", 0f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
         { BlockType.TaskCounterAdd,   new(CLvnd, "計數器增加",    () => B(BlockType.TaskCounterAdd,    ("name", "c"), ("count", 1f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
+        { BlockType.TaskCounterGet,   new(CLvnd, "計數器讀值",    () => B(BlockType.TaskCounterGet,    ("name", "c"), ("resultVar", "c_val"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
         { BlockType.TaskCounterOnReach,new(CLvnd,"計數器到達時",  () => B(BlockType.TaskCounterOnReach,("name", "c"), ("count", 5f)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
         { BlockType.TaskCounterReset, new(CLvnd, "計數器歸零",    () => B(BlockType.TaskCounterReset,  ("name", "c")),

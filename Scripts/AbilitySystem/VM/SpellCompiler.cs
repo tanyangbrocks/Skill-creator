@@ -198,6 +198,111 @@ public static class SpellCompiler
                 code.Add(new Instruction(OpCode.GetFocalPoint, new(block.Params)));
                 break;
 
+            // ── §9-B 戰鬥統計查詢 ──────────────────────────────────────
+            case BlockType.GetBattleStat:
+                code.Add(new Instruction(OpCode.ReadBattleStat, new(block.Params)));
+                break;
+
+            // ── §7 被動觸發條件 ────────────────────────────────────────
+            case BlockType.DetectHpThreshold:
+            {
+                float pct = block.Params.TryGetValue("percent", out var pv) && pv is float f ? f : 30f;
+                code.Add(new Instruction(OpCode.WaitCondition, new()
+                {
+                    ["condKey"]   = (object?)"hpPct",
+                    ["threshold"] = (object?)(pct / 100f),
+                }));
+                break;
+            }
+            case BlockType.DetectMpThreshold:
+            {
+                float pct = block.Params.TryGetValue("percent", out var pv) && pv is float f ? f : 30f;
+                code.Add(new Instruction(OpCode.WaitCondition, new()
+                {
+                    ["condKey"]   = (object?)"mpPct",
+                    ["threshold"] = (object?)(pct / 100f),
+                }));
+                break;
+            }
+            case BlockType.DetectHitReceived:
+                code.Add(new Instruction(OpCode.WaitCondition, new()
+                {
+                    ["condKey"]   = (object?)"damaged",
+                    ["threshold"] = (object?)0f,
+                }));
+                break;
+
+            // ── 布林變數 ───────────────────────────────────────────────
+            case BlockType.SetVarBool:
+            {
+                float val = block.Params.TryGetValue("value", out var bv) &&
+                            bv is string sv && sv.ToLower() == "true" ? 1f : 0f;
+                code.Add(new Instruction(OpCode.SetVar, new()
+                {
+                    ["name"]   = block.Params.GetValueOrDefault("name",   (object?)""),
+                    ["value"]  = (object?)val,
+                    ["global"] = block.Params.GetValueOrDefault("global", (object?)false),
+                }));
+                break;
+            }
+            case BlockType.GetVarBool:
+            {
+                // 複製 name 變數值到 resultVar（ResolveNum 支援字串→變數查詢）
+                code.Add(new Instruction(OpCode.SetVar, new()
+                {
+                    ["name"]   = block.Params.GetValueOrDefault("resultVar",
+                                     block.Params.GetValueOrDefault("name", (object?)"_bool")),
+                    ["value"]  = block.Params.GetValueOrDefault("name",   (object?)""),
+                    ["global"] = block.Params.GetValueOrDefault("global", (object?)false),
+                }));
+                break;
+            }
+
+            // ── 敵人計數查詢 ───────────────────────────────────────────
+            case BlockType.QueryNear:
+                code.Add(new Instruction(OpCode.QueryNearCount, new(block.Params)));
+                break;
+
+            // ── 隨機選擇（ThenBranch=選項A，ElseBranch=選項B）─────────
+            case BlockType.RandomChoice:
+            {
+                var rj = new Instruction(OpCode.RandomJump, new());
+                code.Add(rj);
+                int addrA = code.Count;
+                EmitList(block.ThenBranch, code);
+                var jmpA = new Instruction(OpCode.Jump);
+                code.Add(jmpA);
+                int addrB = code.Count;
+                EmitList(block.ElseBranch, code);
+                rj.Params["__target_0"] = (object?)addrA;
+                rj.Params["__target_1"] = (object?)addrB;
+                rj.Params["count"]      = (object?)2;
+                jmpA.Params["__target"] = (object?)code.Count;
+                break;
+            }
+
+            // ── 任務計數器 ─────────────────────────────────────────────
+            case BlockType.TaskCounterSet:
+                code.Add(new Instruction(OpCode.TaskCounterSet, new(block.Params)));
+                break;
+            case BlockType.TaskCounterAdd:
+                code.Add(new Instruction(OpCode.TaskCounterAdd, new(block.Params)));
+                break;
+            case BlockType.TaskCounterGet:
+                code.Add(new Instruction(OpCode.TaskCounterGet, new(block.Params)));
+                break;
+            case BlockType.TaskCounterReset:
+                code.Add(new Instruction(OpCode.TaskCounterReset, new(block.Params)));
+                break;
+            case BlockType.TaskCounterOnReach:
+            {
+                var checkInstr = new Instruction(OpCode.TaskCounterOnReach, new(block.Params));
+                code.Add(checkInstr);
+                EmitList(block.ThenBranch, code);
+                checkInstr.Params["__target"] = (object?)code.Count;
+                break;
+            }
+
             default:
                 GD.PushWarning($"[SpellCompiler] 未處理的 BlockType: {block.Type}");
                 break;

@@ -3,6 +3,7 @@ namespace SkillCreator.AbilitySystem.VM;
 using System.Linq;
 using SkillCreator.AbilitySystem;
 using SkillCreator.World;
+using SkillCreator.World.Materials;
 
 public class ExecutionLoop
 {
@@ -44,6 +45,29 @@ public class ExecutionLoop
             ctx.State            = ExecutionState.Running;
             ctx.WaitingSignalName = null;
             ctx.PC++;   // 跳過已通過的 OnReceive 指令
+        }
+
+        // 被動觸發條件等待：每幀頂部檢查玩家狀態
+        if (ctx.State == ExecutionState.WaitingCondition)
+        {
+            bool met;
+            if (ctx.WaitingConditionKey == "damaged")
+            {
+                met = CombatState.TookDamageThisFrame;
+            }
+            else if (ctx.PlayerStatsQuery != null)
+            {
+                float val = ctx.PlayerStatsQuery(ctx.WaitingConditionKey!);
+                met = val < ctx.WaitingConditionThreshold;
+            }
+            else
+            {
+                met = true; // 無代理（同步路徑）→ 直接通過
+            }
+            if (!met) return true;
+            ctx.WaitingConditionKey = null;
+            ctx.State = ExecutionState.Running;
+            ctx.PC++;   // 跳過已通過的 WaitCondition 指令
         }
 
         while (ctx.State == ExecutionState.Running && ctx.PC < ctx.Code.Count)
@@ -701,6 +725,117 @@ public class ExecutionLoop
                     ctx.InstanceVars[$"{resultVec}.hit"] = didHit ? 1f : 0f;
                     ctx.InstanceVars[$"{resultVec}.mat"] = matId;
                 }
+                ctx.PC++;
+                break;
+            }
+
+            // ── §9-B 戰鬥統計查詢 ─────────────────────────────────────
+            case OpCode.ReadBattleStat:
+            {
+                string statKey  = Param<string>(instr, "stat",      "castCount");
+                string resultVar = Param<string>(instr, "resultVar", "_battleStat");
+                bool   global   = Param<bool>  (instr, "global",    false);
+                float  val = statKey switch
+                {
+                    "castCount"   => CombatState.CastCount,
+                    "damageDealt" => CombatState.DamageDealt,
+                    "killCount"   => CombatState.KillCount,
+                    _             => 0f,
+                };
+                var vars = global ? ExecutionContext.GlobalVars : ctx.InstanceVars;
+                vars[resultVar] = val;
+                ctx.PC++;
+                break;
+            }
+
+            // ── §7 被動觸發條件 ──────────────────────────────────────
+            case OpCode.WaitCondition:
+            {
+                ctx.WaitingConditionKey       = Param<string>(instr, "condKey",    "hpPct");
+                ctx.WaitingConditionThreshold = Param<float> (instr, "threshold",  0.3f);
+                ctx.State = ExecutionState.WaitingCondition;
+                // PC 不前進：由 Step 頂部條件滿足後前進
+                break;
+            }
+
+            // ── 補完實作 ──────────────────────────────────────────────
+            case OpCode.QueryNearCount:
+            {
+                float  radius    = Param<float> (instr, "radius",    5f);
+                string resultVar = Param<string>(instr, "resultVar", "nearby");
+                ctx.InstanceVars[resultVar] = ctx.EntityQuery != null
+                    ? ctx.EntityQuery(radius).Count
+                    : 0f;
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.RandomJump:
+            {
+                int count  = Param<int>(instr, "count", 2);
+                int choice = new System.Random().Next(count);
+                ctx.PC = Param<int>(instr, $"__target_{choice}", ctx.PC + 1);
+                break;
+            }
+
+            case OpCode.TaskCounterSet:
+            {
+                string name  = Param<string>(instr, "name",  "c");
+                float  count = ResolveNum(instr, "count", ctx);
+                ExecutionContext.TaskCounters[name] = count;
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.TaskCounterAdd:
+            {
+                string name = Param<string>(instr, "name", "c");
+                ExecutionContext.TaskCounters.TryGetValue(name, out float cur);
+                ExecutionContext.TaskCounters[name] = cur + ResolveNum(instr, "count", ctx);
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.TaskCounterGet:
+            {
+                string name      = Param<string>(instr, "name",      "c");
+                string resultVar = Param<string>(instr, "resultVar", "");
+                bool   global    = Param<bool>  (instr, "global",    false);
+                ExecutionContext.TaskCounters.TryGetValue(name, out float val);
+                if (!string.IsNullOrEmpty(resultVar))
+                {
+                    if (global) ExecutionContext.GlobalVars[resultVar] = val;
+                    else        ctx.InstanceVars[resultVar] = val;
+                }
+                ctx.PC++;
+                break;
+            }
+
+            case OpCode.TaskCounterOnReach:
+            {
+                string name      = Param<string>(instr, "name",  "c");
+                float  threshold = Param<float> (instr, "count", 5f);
+                string reachedKey = name + "\x01" + threshold.ToString("G",
+                    System.Globalization.CultureInfo.InvariantCulture);
+                ExecutionContext.TaskCounters.TryGetValue(name, out float current);
+                if (current >= threshold && !ExecutionContext.TaskCounterReached.Contains(reachedKey))
+                {
+                    ExecutionContext.TaskCounterReached.Add(reachedKey);
+                    ctx.PC++;
+                }
+                else
+                {
+                    ctx.PC = Param<int>(instr, "__target", ctx.PC + 1);
+                }
+                break;
+            }
+
+            case OpCode.TaskCounterReset:
+            {
+                string name   = Param<string>(instr, "name", "c");
+                string prefix = name + "\x01";
+                ExecutionContext.TaskCounters[name] = 0f;
+                ExecutionContext.TaskCounterReached.RemoveWhere(k => k.StartsWith(prefix));
                 ctx.PC++;
                 break;
             }
