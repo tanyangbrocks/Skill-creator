@@ -27,6 +27,12 @@ public static class SpellCaster
     {
         if (!player.CanCast) return SpellCastResult.Failed;
 
+        if (AbilityPointCalculator.ExceedsLevelCap(spell, player.Level))
+        {
+            Godot.GD.Print($"[施放] 能力點 {AbilityPointCalculator.CalculateTotalCost(spell)} 超過等級 {player.Level} 上限");
+            return SpellCastResult.Failed;
+        }
+
         float mpCost = AbilityPointCalculator.CalculateMpCost(spell);
         if (!SafetyGuard.HasMp(player.Mp, mpCost)) return SpellCastResult.Failed;
 
@@ -74,8 +80,9 @@ public static class SpellCaster
                 var target = enemies.Enemies.Find(e => e.IsAlive && e.Position == checkPos);
                 if (target is not null)
                 {
-                    target.TakeDamage(20f);   // 直接接觸傷害（獨立於技能效果）
-                    CombatState.OnPlayerDealtDamage(20f);
+                    float meleeDmg = 20f * player.Equipment.TotalAtkMult;
+                    target.TakeDamage(meleeDmg);
+                    CombatState.OnPlayerDealtDamage(meleeDmg);
                     if (runner != null)
                     {
                         runner.Submit(spell, player, world, enemies, loadout, fixedOrigin: checkPos);
@@ -132,7 +139,7 @@ public static class SpellCaster
             "hp"    => player.Hp,
             "mp"    => player.Mp,
             "hpPct" => player.Hp / PlayerController.MaxHp,
-            "mpPct" => player.Mp / PlayerController.MaxMp,
+            "mpPct" => player.Mp / player.MaxMp,
             _       => 0f,
         };
         var loop = new ExecutionLoop(new SafetyGuard());

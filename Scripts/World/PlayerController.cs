@@ -11,15 +11,34 @@ public class PlayerController
     // 滑鼠對應的世界格座標（由 Main._Process 每幀更新）
     public GridPos MouseGridPos { get; set; }
 
-    public Inventory Inventory { get; } = new Inventory();
-    public const float MiningRange = 5f; // 採掘/放置最大距離（格數）
+    public Inventory       Inventory  { get; } = new();
+    public PlayerEquipment Equipment  { get; } = new();
+    public const float MiningRange = 5f;
 
     public float Hp { get; set; }
     public const float MaxHp = 100f;
 
     public float Mp { get; set; }
-    public const float MaxMp    = 100f;
-    private const float MpRegen = 8f;
+    private const float BaseMaxMp = 100f;
+    private const float MpRegen   = 8f;
+    public float MaxMp => BaseMaxMp + Equipment.TotalMpBonus;
+
+    // ── XP / 等級 ──────────────────────────────────────────────
+    public int   Level { get; private set; } = 1;
+    public float Xp    { get; private set; } = 0f;
+
+    public static int XpRequired(int level) => level * 100;
+
+    public void GainXp(float amount)
+    {
+        if (!IsAlive) return;
+        Xp += amount;
+        while (Xp >= XpRequired(Level))
+        {
+            Xp -= XpRequired(Level);
+            Level++;
+        }
+    }
 
     private float _moveCooldown = 0f;
     private float _castCooldown = 0f;
@@ -37,7 +56,12 @@ public class PlayerController
     public bool CanMove  => _moveCooldown <= 0f;
     public bool CanCast  => _castCooldown <= 0f;
 
-    public void TakeDamage(float amount) => Hp = Math.Max(0f, Hp - amount);
+    public void TakeDamage(float amount)
+    {
+        float reduced = Math.Max(0f, amount - Equipment.TotalDefFlat);
+        Hp = Math.Max(0f, Hp - reduced);
+        CombatState.OnPlayerTookDamage();
+    }
 
     public PlayerController(GridPos startPos)
     {
@@ -51,6 +75,7 @@ public class PlayerController
         if (_moveCooldown > 0f) _moveCooldown -= delta;
         if (_castCooldown > 0f) _castCooldown -= delta;
         Mp = MathF.Min(MaxMp, Mp + MpRegen * delta);
+        if (Mp > MaxMp) Mp = MaxMp; // 裝備卸下時上限可能縮小
     }
 
     // 水平移動（A/D），同時更新朝向

@@ -35,6 +35,13 @@ public partial class Main : Node
     private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
     private Label            _paintModeLabel  = null!;
 
+    // 等級 / XP / 裝備 HUD
+    private Label         _lvLabel      = null!;
+    private Label         _xpLabel      = null!;
+    private Panel         _xpBarFill    = null!;
+    private StyleBoxFlat  _xpFillStyle  = null!;
+    private Label         _equipLabel   = null!;
+
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
     private const float ZoomMin  = 1f;
@@ -63,9 +70,12 @@ public partial class Main : Node
 
         // ── 玩家 ───────────────────────────────────────────────
         _player = new PlayerController(spawnData.PlayerSpawn);
-        // 初始工具（prototype 用；合成系統完成後可移除）
-        _player.Inventory.TryAdd(ItemId.ToolBasicPick, 1);
-        _player.Inventory.TryAdd(ItemId.ToolBasicAxe,  1);
+        // 初始道具（prototype 用；合成系統完成後可移除）
+        _player.Inventory.TryAdd(ItemId.ToolBasicPick,      1);
+        _player.Inventory.TryAdd(ItemId.ToolBasicAxe,       1);
+        _player.Inventory.TryAdd(ItemId.EquipBasicSword,    1);
+        _player.Inventory.TryAdd(ItemId.EquipLeatherArmor,  1);
+        _player.Inventory.TryAdd(ItemId.EquipAmulet,        1);
         _world.Player          = _player;
         _world.Enemies         = _enemies;
         _world.Projectiles     = _projectiles;
@@ -189,7 +199,7 @@ public partial class Main : Node
         }
 
         var hint = new Label();
-        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆";
+        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
         hint.AnchorTop = hint.AnchorBottom = 1f;
         hint.Position  = new Vector2(10, -28);
         hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
@@ -197,6 +207,7 @@ public partial class Main : Node
         hud.AddChild(hint);
 
         BuildHotbar(hud);
+        BuildLevelHUD(hud);
 
         // 畫筆模式指示器（F1 切換時顯示）
         _paintModeLabel = new Label();
@@ -300,6 +311,50 @@ public partial class Main : Node
         _tooltip.AddChild(_tooltipLabel);
     }
 
+    private void BuildLevelHUD(CanvasLayer hud)
+    {
+        // 裝備欄文字（熱鍵欄上方 y=-185）
+        _equipLabel = new Label();
+        _equipLabel.AnchorTop = _equipLabel.AnchorBottom = 1f;
+        _equipLabel.Position  = new Vector2(10, -185f);
+        _equipLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.85f, 0.65f));
+        _equipLabel.AddThemeFontSizeOverride("font_size", 11);
+        hud.AddChild(_equipLabel);
+
+        // 等級標籤（y=-170）
+        _lvLabel = new Label();
+        _lvLabel.AnchorTop = _lvLabel.AnchorBottom = 1f;
+        _lvLabel.Position  = new Vector2(10, -170f);
+        _lvLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.85f, 0.25f));
+        _lvLabel.AddThemeFontSizeOverride("font_size", 13);
+        hud.AddChild(_lvLabel);
+
+        // XP 數字標籤（等級標籤右側）
+        _xpLabel = new Label();
+        _xpLabel.AnchorTop = _xpLabel.AnchorBottom = 1f;
+        _xpLabel.Position  = new Vector2(62f, -169f);
+        _xpLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
+        _xpLabel.AddThemeFontSizeOverride("font_size", 11);
+        hud.AddChild(_xpLabel);
+
+        // XP 進度條背景（y=-157）
+        var xpBgStyle = new StyleBoxFlat { BgColor = new Color(0.12f, 0.12f, 0.18f) };
+        var xpBg = new Panel();
+        xpBg.AnchorTop  = xpBg.AnchorBottom = 1f;
+        xpBg.Position   = new Vector2(10f, -157f);
+        xpBg.Size       = new Vector2(200f, 7f);
+        xpBg.AddThemeStyleboxOverride("panel", xpBgStyle);
+        hud.AddChild(xpBg);
+
+        // XP 進度條填充（子節點，每幀更新 Size.X）
+        _xpFillStyle = new StyleBoxFlat { BgColor = new Color(0.25f, 0.65f, 0.95f) };
+        _xpBarFill = new Panel();
+        _xpBarFill.Position = Vector2.Zero;
+        _xpBarFill.Size     = new Vector2(0f, 7f);
+        _xpBarFill.AddThemeStyleboxOverride("panel", _xpFillStyle);
+        xpBg.AddChild(_xpBarFill);
+    }
+
     // ── 每幀更新 ───────────────────────────────────────────────────
     public override void _Process(double delta)
     {
@@ -310,9 +365,10 @@ public partial class Main : Node
 
         // 標籤永遠更新
         _hpLabel.Text = $"HP  {_player.Hp:F0} / {PlayerController.MaxHp:F0}";
-        _mpLabel.Text = $"MP  {_player.Mp:F0} / {PlayerController.MaxMp:F0}";
+        _mpLabel.Text = $"MP  {_player.Mp:F0} / {_player.MaxMp:F0}";
         RefreshSlotLabels();
         RefreshHotbar();
+        RefreshLevelHUD();
         _paintModeLabel.Visible = _world.PaintingEnabled;
 
         // 滑鼠世界格座標（FocalPoint 積木用）
@@ -424,6 +480,16 @@ public partial class Main : Node
 
         switch (k.Keycode)
         {
+            case Key.Q:
+                if (!_editorOpen)
+                {
+                    int hi = _player.Inventory.ActiveHotbarIndex;
+                    var activeStack = _player.Inventory.Slots[hi];
+                    if (!activeStack.IsEmpty && ItemRegistry.Get(activeStack.ItemId).EquipSlot != EquipmentSlotType.None)
+                        _player.Equipment.TryEquip(_player.Inventory, hi);
+                }
+                break;
+
             case Key.F1:
                 _world.PaintingEnabled = !_world.PaintingEnabled;
                 break;
@@ -518,7 +584,22 @@ public partial class Main : Node
 
     private void HideTooltip() { _mouseOverHotbar = false; _tooltip.Visible = false; }
 
-    // 依 ItemId 決定縮圖顏色：方塊物品取材質基礎色；工具用固定色
+    private void RefreshLevelHUD()
+    {
+        int xpReq = PlayerController.XpRequired(_player.Level);
+        _lvLabel.Text  = $"LV {_player.Level}";
+        _xpLabel.Text  = $"{_player.Xp:F0} / {xpReq} XP";
+        float ratio    = xpReq > 0 ? Math.Clamp(_player.Xp / xpReq, 0f, 1f) : 1f;
+        _xpBarFill.Size = new Vector2(200f * ratio, 7f);
+
+        var eq = _player.Equipment;
+        string wn  = eq.WeaponId    != ItemId.None ? ItemRegistry.Get(eq.WeaponId).DisplayName    : "─";
+        string an  = eq.ArmorId     != ItemId.None ? ItemRegistry.Get(eq.ArmorId).DisplayName     : "─";
+        string acn = eq.AccessoryId != ItemId.None ? ItemRegistry.Get(eq.AccessoryId).DisplayName : "─";
+        _equipLabel.Text = $"W:{wn}  A:{an}  飾:{acn}";
+    }
+
+    // 依 ItemId 決定縮圖顏色：方塊物品取材質基礎色；工具/裝備用固定色
     private static Color GetItemIconColor(ItemId id)
     {
         var data = ItemRegistry.Get(id);
@@ -526,9 +607,12 @@ public partial class Main : Node
             return MaterialRegistry.Get(data.PlaceAs.Value).BaseColor;
         return id switch
         {
-            ItemId.ToolBasicPick => new Color(0.75f, 0.75f, 0.82f), // 銀灰
-            ItemId.ToolBasicAxe  => new Color(0.58f, 0.38f, 0.16f), // 木棕
-            _                    => new Color(0.85f, 0.75f, 0.15f), // 金色通用
+            ItemId.ToolBasicPick      => new Color(0.75f, 0.75f, 0.82f), // 銀灰
+            ItemId.ToolBasicAxe       => new Color(0.58f, 0.38f, 0.16f), // 木棕
+            ItemId.EquipBasicSword    => new Color(0.80f, 0.80f, 0.95f), // 淡藍銀
+            ItemId.EquipLeatherArmor  => new Color(0.60f, 0.40f, 0.20f), // 皮革棕
+            ItemId.EquipAmulet        => new Color(0.90f, 0.30f, 0.85f), // 紫紅
+            _                         => new Color(0.85f, 0.75f, 0.15f), // 金色通用
         };
     }
 

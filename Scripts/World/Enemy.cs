@@ -309,5 +309,13 @@ public class Enemy
             Position = below;
     }
 
+    public float XpReward => Type switch
+    {
+        EnemyType.Ranged => 20f,
+        EnemyType.Patrol => 15f,
+        EnemyType.Heavy  => 40f,
+        _                => 10f,
+    };
+
     public void TakeDamage(float amount) => Hp = Math.Max(0f, Hp - amount);
 }

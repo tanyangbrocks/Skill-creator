@@ -25,6 +25,15 @@ public static class ItemRegistry
         // ── 工具（Phase F 補完實際效果）──────────────────────────
         Reg(new ItemData(ItemId.ToolBasicPick, "基礎鎬", false, null, true, 1, 2.5f, 1));
         Reg(new ItemData(ItemId.ToolBasicAxe,  "基礎斧", false, null, true, 0, 2.0f, 1));
+
+        // ── 裝備 ──────────────────────────────────────────────
+        //                         名稱        放 放為  工 Tier  速   疊  裝備槽                      AtkMult DefFlat MpBonus
+        Reg(new ItemData(ItemId.EquipBasicSword,   "基礎劍", false, null, false, 0, 1f, 1,
+            EquipmentSlotType.Weapon, 1.3f, 0f, 0f));
+        Reg(new ItemData(ItemId.EquipLeatherArmor, "皮革護甲", false, null, false, 0, 1f, 1,
+            EquipmentSlotType.Armor, 1f, 5f, 0f));
+        Reg(new ItemData(ItemId.EquipAmulet,       "護符", false, null, false, 0, 1f, 1,
+            EquipmentSlotType.Accessory, 1f, 0f, 30f));
     }
 
     private static void Reg(ItemData d) => _data[(int)d.Id] = d;

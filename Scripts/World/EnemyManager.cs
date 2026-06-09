@@ -33,7 +33,7 @@ public class EnemyManager
             if      (mat == MaterialType.Fire) e.TakeDamage(FireDps * delta);
             else if (mat == MaterialType.Lava) e.TakeDamage(LavaDps * delta);
 
-            if (!e.IsAlive) { e.StartRespawn(); continue; }
+            if (!e.IsAlive) { player.GainXp(e.XpReward); e.StartRespawn(); continue; }
 
             // 遠程敵人想要發射
             if (e.WantsToFire)
