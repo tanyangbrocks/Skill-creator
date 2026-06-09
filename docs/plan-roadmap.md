@@ -290,11 +290,16 @@ Tile = 材質容器                →  每個 Tile 內以次像素粒子渲染
 ```
 目標：讓世界值得探索
 
-1. 程序生成地圖
-2. NPC 系統
-3. 合成系統
-4. 採集與建築
-5. 敵人 AI
+1. 程序生成地圖               ✅
+2. 遊戲內時間系統             ✅（GameClock：20 ticks/秒，28,800 ticks/日）
+3. §9-B 戰鬥狀態系統         ✅（CombatState：InCombat / BattleId / 本場統計）
+4. §7 全局戰鬥統計積木        ✅（GetBattleStat：castCount / damageDealt / killCount）
+5. §7 被動反應觸發積木（子集）✅（DetectHp / DetectMp / DetectHit + WaitingCondition 狀態）
+6. 角色端（XP / 等級 / 裝備） ✅（殺敵累積 XP；等級決定 AP 上限；裝備槽 W/A/飾各賦予 AtkMult/DefFlat/MpBonus；HUD 進度條）
+7. NPC 系統                  ⬜（依賴世界觀設計）
+8. 合成系統                  ⬜（依賴世界觀設計）
+9. 採集與建築                ✅
+10. 敵人 AI                  ✅
 ```
 
 #### VM 進階功能（Phase 3）
