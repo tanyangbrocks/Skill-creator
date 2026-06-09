@@ -138,7 +138,7 @@ public static class SpellCaster
         {
             "hp"    => player.Hp,
             "mp"    => player.Mp,
-            "hpPct" => player.Hp / PlayerController.MaxHp,
+            "hpPct" => player.Hp / player.MaxHp,
             "mpPct" => player.Mp / player.MaxMp,
             _       => 0f,
         };
@@ -335,7 +335,7 @@ public static class SpellCaster
         {
             "trigger_on_cast"    => true,
             "trigger_on_hit"     => true, // Phase 1：假設命中
-            "trigger_on_hp_low"  => player.Hp < PlayerController.MaxHp * 0.3f,
+            "trigger_on_hp_low"  => player.Hp < player.MaxHp * 0.3f,
             "trigger_on_kill"    => true, // Phase 1：假設
             "trigger_periodic"   => true,
             "trigger_on_damaged" => true,

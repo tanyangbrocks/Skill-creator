@@ -12,7 +12,13 @@ public class PlayerController : IElementalTarget
     void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
 
     /// <summary>玩家身上的元素 Aura 與元素狀態效果管理器。</summary>
-    public ElementalAuraComponent Aura { get; } = new();
+    public ElementalAuraComponent Aura  { get; } = new();
+
+    // ── W-5a 完整數值系統 ──────────────────────────────────────────
+    public CharacterStats Stats { get; } = new();
+
+    // ── W-5b 角色狀態系統 ──────────────────────────────────────────
+    public CharacterState State { get; } = new();
 
     public GridPos Position     { get; set; }
     // Facing 只追蹤水平方向，確保投射物永遠往左/右打
@@ -25,12 +31,12 @@ public class PlayerController : IElementalTarget
     public const float MiningRange = 5f;
 
     public float Hp { get; set; }
-    public const float MaxHp = 100f;
+    /// <summary>最大 HP（由 Stats.MaxHpBase 決定；不再是 const，支援動態調整）。</summary>
+    public float MaxHp => Stats.MaxHpBase;
 
     public float Mp { get; set; }
-    private const float BaseMaxMp = 100f;
-    private const float MpRegen   = 8f;
-    public float MaxMp => BaseMaxMp + Equipment.TotalMpBonus;
+    /// <summary>最大 MP = Stats.MaxMpBase + 裝備加成。</summary>
+    public float MaxMp => Stats.MaxMpBase + Equipment.TotalMpBonus;
 
     // ── XP / 等級 / 境界（星盟通用戰力等級）──────────────────────
     public int   Level { get; private set; } = 1;
@@ -112,10 +118,12 @@ public class PlayerController : IElementalTarget
 
     public void TakeDamage(float amount)
     {
-        // ── 元素狀態效果修改（W-3）────────────────────────────────────
-        // 鏽化：防禦力降低，等效 DefFlat × (1 - DefensePenalty)
-        float effectiveDefFlat = Equipment.TotalDefFlat * (1f - Aura.DefensePenalty);
-        float reduced = Math.Max(0f, amount - effectiveDefFlat);
+        // ── 防禦計算（W-5a BaseDefense + 裝備 + W-3 鏽化懲罰）────────
+        float totalDefFlat = Stats.BaseDefense + Equipment.TotalDefFlat;
+        float effectiveDefFlat = totalDefFlat * (1f - Aura.DefensePenalty);
+        float afterDef = Math.Max(0f, amount - effectiveDefFlat);
+        // W-5a DamageReduction（% 減傷，0=無；⚠️ stub，預設 0）
+        float reduced = afterDef * (1f - Math.Clamp(Stats.DamageReduction, 0f, 1f));
         // ──────────────────────────────────────────────────────────────
 
         // ── 行動攔截鉤子：傷害層（Phase 4 第三層）────────────────────
@@ -152,16 +160,17 @@ public class PlayerController : IElementalTarget
     public PlayerController(GridPos startPos)
     {
         Position = startPos;
-        Hp = MaxHp;
+        Hp = Stats.MaxHpBase;  // 初始滿 HP
         Mp = MaxMp;
     }
 
     public void Tick(float delta)
     {
         Aura.Process(delta, this);
+        State.Tick(delta, CombatState.InCombat);  // W-5b：體力/精力/心情更新
         if (_moveCooldown > 0f) _moveCooldown -= delta;
         if (_castCooldown > 0f) _castCooldown -= delta;
-        Mp = MathF.Min(MaxMp, Mp + MpRegen * delta);
+        Mp = MathF.Min(MaxMp, Mp + Stats.MpRegenRate * delta);  // W-5a：MpRegen 來自 Stats
         if (Mp > MaxMp) Mp = MaxMp; // 裝備卸下時上限可能縮小
     }
 
@@ -174,7 +183,8 @@ public class PlayerController : IElementalTarget
 
         Position = next;
         if (dx != 0) Facing = new GridPos(Math.Sign(dx), 0); // 只有水平移動才更新 Facing
-        _moveCooldown = MoveInterval * (1f + Aura.SpeedPenalty);  // 元素移速懲罰
+        // W-5a 移速倍率（Stats）+ W-3 元素減速（Aura）
+        _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
         return true;
     }
 

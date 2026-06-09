@@ -72,7 +72,7 @@ public sealed class SpellRunner
         {
             "hp"    => player.Hp,
             "mp"    => player.Mp,
-            "hpPct" => player.Hp / PlayerController.MaxHp,
+            "hpPct" => player.Hp / player.MaxHp,
             "mpPct" => player.Mp / player.MaxMp,
             _       => 0f,
         };

@@ -386,7 +386,7 @@ public partial class Main : Node
         CombatState.Advance(dt);
 
         // 標籤永遠更新
-        _hpLabel.Text = $"HP  {_player.Hp:F0} / {PlayerController.MaxHp:F0}";
+        _hpLabel.Text = $"HP  {_player.Hp:F0} / {_player.MaxHp:F0}";
         _mpLabel.Text = $"MP  {_player.Mp:F0} / {_player.MaxMp:F0}";
         RefreshSlotLabels();
         RefreshHotbar();
