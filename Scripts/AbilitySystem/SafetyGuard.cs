@@ -12,6 +12,9 @@ public class SafetyGuard
     // InvokeSpell 連段最深層數（SpellCaster / SpellRunner 共用）
     public const int MaxComboDepth = 5;
 
+    // 單次施放的同步迴圈步數上限（超過視為異常，停止推進）
+    public const int MaxStepsPerCast = 300;
+
     // 場上存活實體上限（⚠️ 數值待調整）
     public const int MaxEntityCount = 100;
 

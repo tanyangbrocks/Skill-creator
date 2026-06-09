@@ -112,7 +112,7 @@ public static class SpellCaster
         loop.ResetTick();
 
         int safety = 0;
-        while (!ctx.IsFinished && safety++ < 300)
+        while (!ctx.IsFinished && safety++ < SafetyGuard.MaxStepsPerCast)
         {
             // 同步執行模式：強制跳過 Wait / WaitingSignal（真實語意需 SpellRunner）
             if (ctx.State == ExecutionState.Waiting)
@@ -131,20 +131,7 @@ public static class SpellCaster
             loop.Step(ctx, 0f);
 
             if (ctx.PendingInvokeTotem != null)
-            {
-                string name = ctx.PendingInvokeTotem;
-                ctx.PendingInvokeTotem = null;
-                // ForEach body：效果在目標實體位置執行（同 ExecuteContactHit 手法）
-                var savedPos = player.Position;
-                if (ctx.CurrentIterEntity.HasValue)
-                    player.Position = ctx.CurrentIterEntity.Value.Position;
-                if (slotByRef.TryGetValue(name, out var slot))
-                    ResolveTotem(name, slot, ctx, player, world,
-                        atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint);
-                else
-                    ctx.DoneTotems.Add(name);
-                player.Position = savedPos;
-            }
+                ConsumeInvokeTotem(ctx, slotByRef, player, world, atHitPoint);
 
             if (ctx.PendingInvokeSpell != null)
             {
@@ -154,25 +141,7 @@ public static class SpellCaster
             }
 
             if (ctx.PendingEntityDamageIdx >= 0)
-            {
-                int   idx = ctx.PendingEntityDamageIdx;
-                float dmg = ctx.PendingEntityDamageAmount;
-                ctx.PendingEntityDamageIdx    = -1;
-                ctx.PendingEntityDamageAmount = 0f;
-                if (enemies != null && idx < enemies.Enemies.Count)
-                {
-                    enemies.Enemies[idx].TakeDamage(dmg);
-                    // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
-                    if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Index == idx)
-                    {
-                        var e = ctx.CurrentIterEntity.Value;
-                        var updated = new EntityInfo(e.Index, e.Position,
-                            enemies.Enemies[idx].Hp, e.MaxHp);
-                        ctx.CurrentIterEntity = updated;
-                        ctx.InstanceVars["_e.hp"] = updated.Hp;
-                    }
-                }
-            }
+                ConsumeEntityDamage(ctx, enemies);
         }
     }
 
@@ -200,16 +169,56 @@ public static class SpellCaster
         ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
     }
 
+    // ── 共用 pending 消費 helper（SpellCaster + SpellRunner 均呼叫）─
+
+    internal static void ConsumeInvokeTotem(
+        ExecutionContext ctx, Dictionary<string, SpellSlot> slotByRef,
+        PlayerController player, TileWorld world, bool atHitPoint)
+    {
+        string name = ctx.PendingInvokeTotem!;
+        ctx.PendingInvokeTotem = null;
+        // 以 EffectOriginOverride 取代 player.Position 暫改，避免競態風險
+        ctx.EffectOriginOverride = ctx.CurrentIterEntity.HasValue
+            ? ctx.CurrentIterEntity.Value.Position
+            : (GridPos?)null;
+        if (slotByRef.TryGetValue(name, out var slot))
+            ResolveTotem(name, slot, ctx, player, world,
+                atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint);
+        else
+            ctx.DoneTotems.Add(name);
+        ctx.EffectOriginOverride = null;
+    }
+
+    internal static void ConsumeEntityDamage(ExecutionContext ctx, EnemyManager? enemies)
+    {
+        int   idx = ctx.PendingEntityDamageIdx;
+        float dmg = ctx.PendingEntityDamageAmount;
+        ctx.PendingEntityDamageIdx    = -1;
+        ctx.PendingEntityDamageAmount = 0f;
+        if (enemies != null && idx < enemies.Enemies.Count)
+        {
+            enemies.Enemies[idx].TakeDamage(dmg);
+            if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Index == idx)
+            {
+                var e = ctx.CurrentIterEntity.Value;
+                var updated = new EntityInfo(e.Index, e.Position,
+                    enemies.Enemies[idx].Hp, e.MaxHp);
+                ctx.CurrentIterEntity  = updated;
+                ctx.InstanceVars["_e.hp"] = updated.Hp;
+            }
+        }
+    }
+
     // ── 實體查詢（ForEachNearby / QueryNearest 共用）──────────────
 
     internal static List<EntityInfo> QueryEnemies(
         EnemyManager enemies, PlayerController player, float radius)
     {
+        var origin = player.Position;
         return enemies.Enemies
-            .Select((e, i) => (e, i))
-            .Where(x => x.e.IsAlive &&
-                        x.e.Position.DistanceTo(player.Position) <= radius)
-            .OrderBy(x => x.e.Position.DistanceTo(player.Position))
+            .Select((e, i) => (e, i, dist: e.IsAlive ? e.Position.DistanceTo(origin) : float.MaxValue))
+            .Where(x => x.e.IsAlive && x.dist <= radius)
+            .OrderBy(x => x.dist)
             .Select(x => new EntityInfo(x.i, x.e.Position, x.e.Hp, x.e.MaxHp))
             .ToList();
     }
@@ -243,7 +252,7 @@ public static class SpellCaster
                 break;
 
             default:
-                ExecuteSlot(slot, player, world, atHitPoint);
+                ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
                 ctx.HitTotems.Add(name);
                 ctx.DoneTotems.Add(name);
                 break;
@@ -267,15 +276,15 @@ public static class SpellCaster
     // ── 分派到各類型圖騰執行器 ─────────────────────────────────────
 
     private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world,
-        bool atHitPoint = false)
+        bool atHitPoint = false, GridPos? originOverride = null)
     {
         switch (slot.Totem!.Type)
         {
-            case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint); break;
-            case TotemType.Morph:        ExecuteMorph(slot, player, world);                 break;
-            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);          break;
-            case TotemType.Summon:       ExecuteSummon(slot, player, world);                break;
-            case TotemType.Domain:       ExecuteDomain(slot, player, world);                break;
+            case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride); break;
+            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                         break; // 位移以玩家真實位置為準
+            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);               break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);               break;
         }
     }
 
@@ -310,11 +319,11 @@ public static class SpellCaster
     // ── 武技 ──────────────────────────────────────────────────────
 
     private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world,
-        bool atHitPoint = false)
+        bool atHitPoint = false, GridPos? originOverride = null)
     {
         var m = ReadMods(slot);
         int r  = 2 + (int)(m.DmgBonus * 3f);
-        var p  = player.Position;
+        var p  = originOverride ?? player.Position;
         int fx = player.Facing.X, fy = player.Facing.Y;
 
         // 直接施放：爆炸在前方 4 格；投射物/接觸命中：爆炸就在命中點（offset 0）
@@ -381,19 +390,21 @@ public static class SpellCaster
 
     // ── 變幻 ──────────────────────────────────────────────────────
 
-    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld world,
+        GridPos? originOverride = null)
     {
+        var p = originOverride ?? player.Position;
         switch (slot.Totem!.Id)
         {
             case "morph_speed":
             case "morph_strengthen":
-                world.SpawnEffect("water", player.Position, new Dictionary<string, object?> { ["radius"] = 1 });
+                world.SpawnEffect("water", p, new Dictionary<string, object?> { ["radius"] = 1 });
                 break;
             case "morph_flight":
-                world.Explode(player.Position.X, player.Position.Y + 3, 2);
+                world.Explode(p.X, p.Y + 3, 2);
                 break;
             case "morph_invisible":
-                world.SpawnEffect("water", player.Position, new Dictionary<string, object?> { ["radius"] = 2 });
+                world.SpawnEffect("water", p, new Dictionary<string, object?> { ["radius"] = 2 });
                 break;
         }
     }
@@ -433,10 +444,12 @@ public static class SpellCaster
 
     // ── 召喚 ──────────────────────────────────────────────────────
 
-    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld world,
+        GridPos? originOverride = null)
     {
-        var sp = new GridPos(player.Position.X + player.Facing.X * 4,
-                             player.Position.Y + player.Facing.Y * 4);
+        var origin = originOverride ?? player.Position;
+        var sp = new GridPos(origin.X + player.Facing.X * 4,
+                             origin.Y + player.Facing.Y * 4);
         switch (slot.Totem!.Id)
         {
             case "summon_minion":
@@ -454,9 +467,10 @@ public static class SpellCaster
 
     // ── 領域 ──────────────────────────────────────────────────────
 
-    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld world,
+        GridPos? originOverride = null)
     {
-        var pos = player.Position;
+        var pos = originOverride ?? player.Position;
         switch (slot.Totem!.Id)
         {
             case "domain_barrier":

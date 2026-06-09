@@ -345,194 +345,14 @@ public partial class ScratchCanvas : Control
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  積木參數區（型別分派）
+    //  積木參數區（統一查 BlockDescriptor）
     // ══════════════════════════════════════════════════════════════
 
     private void AddParams(HBoxContainer row, BlockNode block,
         List<BlockNode> parent, int indent)
     {
-        switch (block.Type)
-        {
-            case BlockType.InvokeTotem:
-                row.AddChild(SlotPicker(block, "totemName"));
-                break;
-
-            case BlockType.InvokeSpell:
-                row.AddChild(SmallEdit(block, "spellName", "法陣名", 90));
-                break;
-
-            case BlockType.If:
-            {
-                string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
-                string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
-                row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
-                string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
-                if (cType == "compare")
-                {
-                    row.AddChild(SmallEdit(block, "left", "L", 44));
-                    string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
-                    row.AddChild(SmallDrop(block, "op", ops, ops, 40));
-                    row.AddChild(SmallEdit(block, "right", "R", 44));
-                }
-                else if (cType == "varBool")
-                    row.AddChild(SmallEdit(block, "varName", "變數名", 72));
-                else
-                    row.AddChild(SlotPicker(block, "totemName"));
-                break;
-            }
-
-            case BlockType.Wait:
-                row.AddChild(SmallSpin(block, "duration", 0.1f, 30f, 0.1f, 42));
-                row.AddChild(TinyLbl("秒"));
-                break;
-
-            case BlockType.RepeatN:
-                row.AddChild(SmallSpin(block, "count", 1f, 20f, 1f, 36));
-                row.AddChild(TinyLbl("次"));
-                break;
-
-            case BlockType.SetVar:
-            {
-                row.AddChild(SmallEdit(block, "name", "變數名", 52));
-                row.AddChild(TinyLbl("="));
-                row.AddChild(SmallEdit(block, "value", "值", 52));
-                var gb = CheckBox(block, "global", "全域");
-                row.AddChild(gb);
-                break;
-            }
-
-            case BlockType.GetVar:
-                row.AddChild(SmallEdit(block, "name", "變數名", 72));
-                break;
-
-            case BlockType.Compare:
-            {
-                row.AddChild(SmallEdit(block, "left",  "L", 44));
-                string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
-                row.AddChild(SmallDrop(block, "op", ops, ops, 40));
-                row.AddChild(SmallEdit(block, "right", "R", 44));
-                row.AddChild(TinyLbl("→"));
-                row.AddChild(SmallEdit(block, "resultVar", "結果", 56));
-                row.AddChild(CheckBox(block, "global", "全域"));
-                break;
-            }
-
-            case BlockType.RepeatWhile:
-            {
-                string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
-                string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
-                row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
-                string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
-                if (cType == "compare")
-                {
-                    row.AddChild(SmallEdit(block, "left", "L", 44));
-                    string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
-                    row.AddChild(SmallDrop(block, "op", ops, ops, 40));
-                    row.AddChild(SmallEdit(block, "right", "R", 44));
-                }
-                else if (cType == "varBool")
-                    row.AddChild(SmallEdit(block, "varName", "變數名", 72));
-                else
-                    row.AddChild(SlotPicker(block, "totemName"));
-                break;
-            }
-
-            case BlockType.DetectHpThreshold:
-            case BlockType.DetectMpThreshold:
-                row.AddChild(SmallSpin(block, "percent", 1f, 99f, 1f, 44));
-                row.AddChild(TinyLbl("%"));
-                break;
-
-            case BlockType.RisingEdge:
-            case BlockType.FallingEdge:
-            case BlockType.SinglePulse:
-                row.AddChild(SlotPicker(block, "totemName"));
-                break;
-
-            case BlockType.Broadcast:
-            case BlockType.BroadcastAndWait:
-            case BlockType.OnReceive:
-                row.AddChild(SmallEdit(block, "signal", "訊號名", 80));
-                break;
-
-            case BlockType.TaskCounterSet:
-            case BlockType.TaskCounterAdd:
-            case BlockType.TaskCounterOnReach:
-            {
-                row.AddChild(SmallEdit(block, "name", "計數器名", 64));
-                row.AddChild(SmallSpin(block, "count", 0f, 999f, 1f, 44));
-                break;
-            }
-
-            case BlockType.TaskCounterReset:
-                row.AddChild(SmallEdit(block, "name", "計數器名", 64));
-                break;
-
-            case BlockType.QueryNear:
-            case BlockType.ForEachNearby:
-                row.AddChild(SmallSpin(block, "radius", 1f, 30f, 1f, 40));
-                row.AddChild(TinyLbl("格"));
-                break;
-
-            case BlockType.QueryNearest:
-                row.AddChild(SmallSpin(block, "radius", 1f, 30f, 1f, 40));
-                row.AddChild(TinyLbl("格 →"));
-                row.AddChild(SmallEdit(block, "resultVar", "前綴", 60));
-                break;
-
-            case BlockType.GetEntityProp:
-            {
-                string[] props  = { "hp", "maxhp", "x", "y" };
-                string[] plbls  = { "HP", "MaxHP", "X", "Y" };
-                row.AddChild(SmallDrop(block, "property", props, plbls, 52));
-                row.AddChild(TinyLbl("→"));
-                row.AddChild(SmallEdit(block, "resultVar", "變數名", 64));
-                break;
-            }
-
-            case BlockType.SetEntityProp:
-            {
-                string[] props = { "hp" };
-                string[] plbls = { "HP" };
-                row.AddChild(SmallDrop(block, "property", props, plbls, 44));
-                row.AddChild(TinyLbl("減"));
-                row.AddChild(SmallSpin(block, "damage", 1f, 999f, 1f, 52));
-                break;
-            }
-
-            case BlockType.ListCreate:
-                row.AddChild(SmallEdit(block, "name", "列表名", 72));
-                row.AddChild(CheckBox(block, "global", "全域"));
-                break;
-
-            case BlockType.ListAppend:
-                row.AddChild(SmallEdit(block, "name", "列表名", 64));
-                row.AddChild(TinyLbl("+"));
-                row.AddChild(SmallEdit(block, "value", "值/變數", 60));
-                row.AddChild(CheckBox(block, "global", "全域"));
-                break;
-
-            case BlockType.ListPop:
-                row.AddChild(SmallEdit(block, "name", "列表名", 64));
-                row.AddChild(TinyLbl("→"));
-                row.AddChild(SmallEdit(block, "resultVar", "結果", 56));
-                row.AddChild(CheckBox(block, "global", "全域"));
-                break;
-
-            case BlockType.ListGet:
-                row.AddChild(SmallEdit(block, "name", "列表名", 64));
-                row.AddChild(TinyLbl("["));
-                row.AddChild(SmallEdit(block, "index", "索引", 40));
-                row.AddChild(TinyLbl("]→"));
-                row.AddChild(SmallEdit(block, "resultVar", "結果", 52));
-                row.AddChild(CheckBox(block, "global", "全域"));
-                break;
-
-            case BlockType.RandomChoice:
-                row.AddChild(SmallSpin(block, "count", 2f, 8f, 1f, 36));
-                row.AddChild(TinyLbl("支"));
-                break;
-        }
+        if (_descs.TryGetValue(block.Type, out var desc))
+            desc.BuildUI?.Invoke(row, block, this);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -653,121 +473,182 @@ public partial class ScratchCanvas : Control
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  靜態：積木型別映射（顏色 / 名稱 / 預設 Params）
+    //  積木型別描述器（顏色 / 名稱 / 預設積木 / 參數 UI）集中管理
     // ══════════════════════════════════════════════════════════════
 
-    internal static Color BlockColor(BlockType t) => t switch
+    // 色系常數（避免各 descriptor 重複 new Color(...)）
+    private static readonly Color COrng  = new(1.00f, 0.72f, 0.35f); // 橙   InvokeTotem/Spell
+    private static readonly Color CFlow  = new(0.65f, 0.95f, 0.30f); // 黃綠 控制流
+    private static readonly Color CGrn   = new(0.38f, 0.88f, 0.48f); // 綠   Wait
+    private static readonly Color CCyan  = new(0.38f, 0.88f, 0.88f); // 青   Edge/Pulse
+    private static readonly Color CYlw   = new(1.00f, 0.88f, 0.28f); // 黃   Var/Compare
+    private static readonly Color COrnD  = new(1.00f, 0.65f, 0.20f); // 橘深 List
+    private static readonly Color CBlue  = new(0.55f, 0.80f, 1.00f); // 藍   Entity query
+    private static readonly Color CPurp  = new(0.80f, 0.38f, 1.00f); // 紫   Broadcast
+    private static readonly Color CRed   = new(1.00f, 0.42f, 0.42f); // 紅   Detect
+    private static readonly Color CLvnd  = new(0.95f, 0.65f, 0.95f); // 淡紫 TaskCounter
+    private static readonly Color CGray  = new(0.75f, 0.75f, 0.75f); // 灰   fallback
+
+    // 積木描述器（顏色、UI 名稱、預設積木工廠、參數 UI 建構器）
+    // BuildUI = null 表示無參數列
+    internal record BlockDescriptor(
+        Color  Color,
+        string Name,
+        Func<BlockNode> Make,
+        Action<HBoxContainer, BlockNode, ScratchCanvas>? BuildUI = null
+    );
+
+    // 條件型參數 UI（If / RepeatWhile 共用）
+    private static Action<HBoxContainer, BlockNode, ScratchCanvas> ConditionUI => (row, block, canvas) =>
     {
-        BlockType.InvokeTotem or BlockType.InvokeSpell
-            => new Color(1.0f,  0.72f, 0.35f),  // 橙
-        BlockType.If or BlockType.RepeatN or BlockType.RepeatWhile or
-        BlockType.RandomChoice or BlockType.ForEachNearby
-            => new Color(0.65f, 0.95f, 0.30f),  // 黃綠
-        BlockType.Wait
-            => new Color(0.38f, 0.88f, 0.48f),  // 綠
-        BlockType.RisingEdge or BlockType.FallingEdge or BlockType.SinglePulse
-            => new Color(0.38f, 0.88f, 0.88f),  // 青
-        BlockType.SetVar or BlockType.GetVar or BlockType.SetVarBool or
-        BlockType.GetVarBool or BlockType.Compare
-            => new Color(1.0f,  0.88f, 0.28f),  // 黃
-        BlockType.ListCreate or BlockType.ListAppend or BlockType.ListPop or
-        BlockType.ListGet    or BlockType.ListDequeue or BlockType.ListSet or
-        BlockType.ListLength or BlockType.ListContains or BlockType.ListRemoveAt or
-        BlockType.ListClear
-            => new Color(1.0f,  0.65f, 0.20f),  // 橘
-        BlockType.QueryNear or BlockType.GetEntityProp or BlockType.SetEntityProp
-            => new Color(0.55f, 0.80f, 1.0f),   // 藍
-        BlockType.Broadcast or BlockType.BroadcastAndWait or BlockType.OnReceive
-            => new Color(0.80f, 0.38f, 1.0f),   // 紫
-        BlockType.DetectHpThreshold or BlockType.DetectMpThreshold or
-        BlockType.DetectEntityEnter
-            => new Color(1.0f,  0.42f, 0.42f),  // 紅
-        BlockType.TaskCounterSet or BlockType.TaskCounterAdd or
-        BlockType.TaskCounterOnReach or BlockType.TaskCounterReset
-            => new Color(0.95f, 0.65f, 0.95f),  // 淡紫
-        _   => new Color(0.75f, 0.75f, 0.75f),
+        string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
+        string[] labels = { "已執行",    "命中",      "Fizzle",      "比較",    "布林變數" };
+        row.AddChild(SmallDrop(block, "conditionType", types, labels, 60));
+        string cType = block.Params.TryGetValue("conditionType", out var cv) ? cv?.ToString() ?? "" : "";
+        if (cType == "compare")
+        {
+            row.AddChild(SmallEdit(block, "left", "L", 44));
+            string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
+            row.AddChild(SmallDrop(block, "op", ops, ops, 40));
+            row.AddChild(SmallEdit(block, "right", "R", 44));
+        }
+        else if (cType == "varBool")
+            row.AddChild(SmallEdit(block, "varName", "變數名", 72));
+        else
+            row.AddChild(canvas.SlotPicker(block, "totemName"));
     };
 
-    internal static string BlockName(BlockType t) => t switch
+    // 集中管理所有積木型別的 descriptor
+    private static readonly Dictionary<BlockType, BlockDescriptor> _descs = new()
     {
-        BlockType.InvokeTotem       => "觸發圖騰",
-        BlockType.InvokeSpell       => "發動法陣",
-        BlockType.If                => "IF",
-        BlockType.RepeatN           => "REPEAT",
-        BlockType.RepeatWhile       => "WHILE",
-        BlockType.RandomChoice      => "RANDOM",
-        BlockType.ForEachNearby     => "FOREACH",
-        BlockType.Wait              => "WAIT",
-        BlockType.RisingEdge        => "上升沿",
-        BlockType.FallingEdge       => "下降沿",
-        BlockType.SinglePulse       => "單次脈衝",
-        BlockType.SetVar            => "SET VAR",
-        BlockType.GetVar            => "GET VAR",
-        BlockType.SetVarBool        => "SET BOOL",
-        BlockType.GetVarBool        => "GET BOOL",
-        BlockType.Compare           => "COMPARE",
-        BlockType.QueryNear         => "QUERY",
-        BlockType.GetEntityProp     => "GET PROP",
-        BlockType.SetEntityProp     => "SET PROP",
-        BlockType.Broadcast         => "BROADCAST",
-        BlockType.BroadcastAndWait  => "BCAST+WAIT",
-        BlockType.OnReceive         => "ON RECEIVE",
-        BlockType.DetectHpThreshold => "DETECT HP",
-        BlockType.DetectMpThreshold => "DETECT MP",
-        BlockType.DetectEntityEnter => "DETECT ENT",
-        BlockType.TaskCounterSet    => "CTR SET",
-        BlockType.TaskCounterAdd    => "CTR ADD",
-        BlockType.TaskCounterOnReach=> "CTR REACH",
-        BlockType.TaskCounterReset  => "CTR RESET",
-        BlockType.ListCreate        => "LIST NEW",
-        BlockType.ListAppend        => "LIST ADD",
-        BlockType.ListPop           => "LIST POP",
-        BlockType.ListGet           => "LIST GET",
-        BlockType.ListDequeue       => "LIST DEQUEUE",
-        BlockType.ListSet           => "LIST SET",
-        BlockType.ListLength        => "LIST LEN",
-        BlockType.ListContains      => "LIST HAS",
-        BlockType.ListRemoveAt      => "LIST DEL",
-        BlockType.ListClear         => "LIST CLEAR",
-        _                           => t.ToString(),
+        // ── 圖騰 / 連段 ──────────────────────────────────────────────
+        { BlockType.InvokeTotem,  new(COrng, "觸發圖騰", () => B(BlockType.InvokeTotem,  ("totemName", "")),
+            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+        { BlockType.InvokeSpell,  new(COrng, "發動法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "法陣名", 90))) },
+
+        // ── 控制流 ────────────────────────────────────────────────────
+        { BlockType.If,           new(CFlow, "IF",      () => B(BlockType.If, ("conditionType", "totemDone"), ("totemName", "")),
+            ConditionUI) },
+        { BlockType.RepeatN,      new(CFlow, "REPEAT",  () => B(BlockType.RepeatN,   ("count", 2f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "count", 1f, 20f, 1f, 36)); r.AddChild(TinyLbl("次")); }) },
+        { BlockType.RepeatWhile,  new(CFlow, "WHILE",   () => B(BlockType.RepeatWhile, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
+            ConditionUI) },
+        { BlockType.RandomChoice, new(CFlow, "RANDOM",  () => B(BlockType.RandomChoice, ("count", 2f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "count", 2f, 8f, 1f, 36)); r.AddChild(TinyLbl("支")); }) },
+        { BlockType.ForEachNearby,new(CFlow, "FOREACH", () => B(BlockType.ForEachNearby, ("radius", 5f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格")); }) },
+
+        // ── 時序 ──────────────────────────────────────────────────────
+        { BlockType.Wait,         new(CGrn,  "WAIT",    () => B(BlockType.Wait, ("duration", 1f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "duration", 0.1f, 30f, 0.1f, 42)); r.AddChild(TinyLbl("秒")); }) },
+
+        // ── 邊沿偵測 ──────────────────────────────────────────────────
+        { BlockType.RisingEdge,   new(CCyan, "上升沿",  () => B(BlockType.RisingEdge,  ("totemName", "")),
+            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+        { BlockType.FallingEdge,  new(CCyan, "下降沿",  () => B(BlockType.FallingEdge, ("totemName", "")),
+            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+        { BlockType.SinglePulse,  new(CCyan, "單次脈衝",() => B(BlockType.SinglePulse, ("totemName", "")),
+            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+
+        // ── 變數 ──────────────────────────────────────────────────────
+        { BlockType.SetVar,       new(CYlw,  "SET VAR", () => B(BlockType.SetVar, ("name", "x"), ("value", "0"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "變數名", 52)); r.AddChild(TinyLbl("="));
+                           r.AddChild(SmallEdit(b, "value", "值", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.GetVar,       new(CYlw,  "GET VAR", () => B(BlockType.GetVar, ("name", "x")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "name", "變數名", 72))) },
+        { BlockType.SetVarBool,   new(CYlw,  "SET BOOL",() => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false))) },
+        { BlockType.GetVarBool,   new(CYlw,  "GET BOOL",() => B(BlockType.GetVarBool, ("name", "b"))) },
+        { BlockType.Compare,      new(CYlw,  "COMPARE", () => B(BlockType.Compare, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
+            (r, b, _) =>
+            {
+                r.AddChild(SmallEdit(b, "left", "L", 44));
+                string[] ops = { ">", "<", "=", "≠", ">=", "<=" };
+                r.AddChild(SmallDrop(b, "op", ops, ops, 40));
+                r.AddChild(SmallEdit(b, "right", "R", 44));
+                r.AddChild(TinyLbl("→"));
+                r.AddChild(SmallEdit(b, "resultVar", "結果", 56));
+                r.AddChild(CheckBox(b, "global", "全域"));
+            }) },
+
+        // ── List ──────────────────────────────────────────────────────
+        { BlockType.ListCreate,   new(COrnD, "LIST NEW",    () => B(BlockType.ListCreate, ("name", "list"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 72)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListAppend,   new(COrnD, "LIST ADD",    () => B(BlockType.ListAppend, ("name", "list"), ("value", "0"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("+"));
+                           r.AddChild(SmallEdit(b, "value", "值/變數", 60)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListPop,      new(COrnD, "LIST POP",    () => B(BlockType.ListPop,    ("name", "list"), ("resultVar", "v"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "結果", 56)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListGet,      new(COrnD, "LIST GET",    () => B(BlockType.ListGet,    ("name", "list"), ("index", "1"), ("resultVar", "v"), ("global", false)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "列表名", 64)); r.AddChild(TinyLbl("["));
+                           r.AddChild(SmallEdit(b, "index", "索引", 40)); r.AddChild(TinyLbl("]→"));
+                           r.AddChild(SmallEdit(b, "resultVar", "結果", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
+        { BlockType.ListDequeue,  new(COrnD, "LIST DEQUEUE",() => B(BlockType.ListDequeue)) },
+        { BlockType.ListSet,      new(COrnD, "LIST SET",    () => B(BlockType.ListSet)) },
+        { BlockType.ListLength,   new(COrnD, "LIST LEN",    () => B(BlockType.ListLength)) },
+        { BlockType.ListContains, new(COrnD, "LIST HAS",    () => B(BlockType.ListContains)) },
+        { BlockType.ListRemoveAt, new(COrnD, "LIST DEL",    () => B(BlockType.ListRemoveAt)) },
+        { BlockType.ListClear,    new(COrnD, "LIST CLEAR",  () => B(BlockType.ListClear)) },
+
+        // ── 實體查詢 ──────────────────────────────────────────────────
+        { BlockType.QueryNear,    new(CBlue, "QUERY",    () => B(BlockType.QueryNear, ("radius", 5f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格")); }) },
+        { BlockType.QueryNearest, new(CBlue, "QUERY 1",  () => B(BlockType.QueryNearest, ("radius", 5f), ("resultVar", "nearest")),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格 →"));
+                           r.AddChild(SmallEdit(b, "resultVar", "前綴", 60)); }) },
+        { BlockType.GetEntityProp,new(CBlue, "GET PROP", () => B(BlockType.GetEntityProp, ("property", "hp"), ("resultVar", "e_hp")),
+            (r, b, _) =>
+            {
+                string[] props = { "hp", "maxhp", "x", "y" };
+                string[] plbls = { "HP", "MaxHP", "X", "Y" };
+                r.AddChild(SmallDrop(b, "property", props, plbls, 52));
+                r.AddChild(TinyLbl("→"));
+                r.AddChild(SmallEdit(b, "resultVar", "變數名", 64));
+            }) },
+        { BlockType.SetEntityProp,new(CBlue, "SET PROP", () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", 10f)),
+            (r, b, _) =>
+            {
+                string[] props = { "hp" };
+                string[] plbls = { "HP" };
+                r.AddChild(SmallDrop(b, "property", props, plbls, 44));
+                r.AddChild(TinyLbl("減"));
+                r.AddChild(SmallSpin(b, "damage", 1f, 999f, 1f, 52));
+            }) },
+
+        // ── 廣播 ──────────────────────────────────────────────────────
+        { BlockType.Broadcast,       new(CPurp, "BROADCAST",        () => B(BlockType.Broadcast,       ("signal", "")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
+        { BlockType.BroadcastAndWait,new(CPurp, "BCAST（等同廣播）", () => B(BlockType.BroadcastAndWait,("signal", "")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
+        { BlockType.OnReceive,       new(CPurp, "ON RECEIVE",        () => B(BlockType.OnReceive,       ("signal", "")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
+
+        // ── 偵測 ──────────────────────────────────────────────────────
+        { BlockType.DetectHpThreshold,new(CRed, "DETECT HP",  () => B(BlockType.DetectHpThreshold, ("percent", 30f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
+        { BlockType.DetectMpThreshold,new(CRed, "DETECT MP",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
+            (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
+        { BlockType.DetectEntityEnter,new(CRed, "DETECT ENT", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f))) },
+
+        // ── 任務計數器 ────────────────────────────────────────────────
+        { BlockType.TaskCounterSet,   new(CLvnd, "CTR SET",   () => B(BlockType.TaskCounterSet,    ("name", "c"), ("count", 0f)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
+        { BlockType.TaskCounterAdd,   new(CLvnd, "CTR ADD",   () => B(BlockType.TaskCounterAdd,    ("name", "c"), ("count", 1f)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
+        { BlockType.TaskCounterOnReach,new(CLvnd,"CTR REACH", () => B(BlockType.TaskCounterOnReach,("name", "c"), ("count", 5f)),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "name", "計數器名", 64)); r.AddChild(SmallSpin(b, "count", 0f, 999f, 1f, 44)); }) },
+        { BlockType.TaskCounterReset, new(CLvnd, "CTR RESET", () => B(BlockType.TaskCounterReset,  ("name", "c")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "name", "計數器名", 64))) },
     };
 
-    internal static BlockNode MakeDefaultBlock(BlockType type) => type switch
-    {
-        BlockType.InvokeTotem    => B(type, ("totemName", "")),
-        BlockType.InvokeSpell    => B(type, ("spellName", "")),
-        BlockType.If             => B(type, ("conditionType", "totemDone"), ("totemName", "")),
-        BlockType.RepeatN        => B(type, ("count", 2f)),
-        BlockType.RepeatWhile    => B(type, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
-        BlockType.RandomChoice   => B(type, ("count", 2f)),
-        BlockType.ForEachNearby  => B(type, ("radius", 5f)),
-        BlockType.QueryNearest   => B(type, ("radius", 5f), ("resultVar", "nearest")),
-        BlockType.GetEntityProp  => B(type, ("property", "hp"), ("resultVar", "e_hp")),
-        BlockType.SetEntityProp  => B(type, ("property", "hp"), ("damage", 10f)),
-        BlockType.ListCreate     => B(type, ("name", "list"), ("global", false)),
-        BlockType.ListAppend     => B(type, ("name", "list"), ("value", "0"),   ("global", false)),
-        BlockType.ListPop        => B(type, ("name", "list"), ("resultVar", "v"), ("global", false)),
-        BlockType.ListGet        => B(type, ("name", "list"), ("index", "1"),   ("resultVar", "v"), ("global", false)),
-        BlockType.Wait           => B(type, ("duration", 1f)),
-        BlockType.SetVar         => B(type, ("name", "x"), ("value", "0"), ("global", false)),
-        BlockType.GetVar         => B(type, ("name", "x")),
-        BlockType.SetVarBool     => B(type, ("name", "b"), ("value", "true"), ("global", false)),
-        BlockType.GetVarBool     => B(type, ("name", "b")),
-        BlockType.Compare        => B(type, ("left", "x"), ("op", "="), ("right", "0"), ("resultVar", "result"), ("global", false)),
-        BlockType.RisingEdge or BlockType.FallingEdge or BlockType.SinglePulse
-                                 => B(type, ("totemName", "")),
-        BlockType.DetectHpThreshold or BlockType.DetectMpThreshold
-                                 => B(type, ("percent", 30f)),
-        BlockType.DetectEntityEnter => B(type, ("faction", "敵方"), ("radius", 5f)),
-        BlockType.QueryNear      => B(type, ("radius", 5f)),
-        BlockType.Broadcast or BlockType.BroadcastAndWait or BlockType.OnReceive
-                                 => B(type, ("signal", "")),
-        BlockType.TaskCounterSet    => B(type, ("name", "c"), ("count", 0f)),
-        BlockType.TaskCounterAdd    => B(type, ("name", "c"), ("count", 1f)),
-        BlockType.TaskCounterOnReach=> B(type, ("name", "c"), ("count", 5f)),
-        BlockType.TaskCounterReset  => B(type, ("name", "c")),
-        _                        => new BlockNode { Type = type },
-    };
+    // ── 統一查表的三個舊介面（保持對外 API 不變）─────────────────
+    internal static Color     BlockColor(BlockType t) =>
+        _descs.TryGetValue(t, out var d) ? d.Color : CGray;
+    internal static string    BlockName(BlockType t)  =>
+        _descs.TryGetValue(t, out var d) ? d.Name  : t.ToString();
+    internal static BlockNode MakeDefaultBlock(BlockType t) =>
+        _descs.TryGetValue(t, out var d) ? d.Make() : new BlockNode { Type = t };
 
     private static BlockNode B(BlockType t, params (string k, object? v)[] ps)
     {

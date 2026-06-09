@@ -95,7 +95,7 @@ public sealed class SpellRunner
         float stepDelta = delta;  // 第一次 Step 才帶真實 delta，其後同幀為 0
 
         int safety = 0;
-        while (!s.Ctx.IsFinished && safety++ < 300)
+        while (!s.Ctx.IsFinished && safety++ < SafetyGuard.MaxStepsPerCast)
         {
             s.Loop.Step(s.Ctx, stepDelta);
             stepDelta = 0f;
@@ -104,20 +104,10 @@ public sealed class SpellRunner
             if (s.Ctx.State == ExecutionState.Waiting ||
                 s.Ctx.State == ExecutionState.WaitingSignal) break;
 
-            // InvokeTotem：ForEach body 自動定位到目標實體位置
+            // InvokeTotem：共用 helper 自動處理 ForEach 定位（EffectOriginOverride）
             if (s.Ctx.PendingInvokeTotem != null)
             {
-                string name = s.Ctx.PendingInvokeTotem;
-                s.Ctx.PendingInvokeTotem = null;
-                var savedPos = s.Player.Position;
-                if (s.Ctx.CurrentIterEntity.HasValue)
-                    s.Player.Position = s.Ctx.CurrentIterEntity.Value.Position;
-                if (s.SlotByRef.TryGetValue(name, out var slot))
-                    SpellCaster.ResolveTotem(name, slot, s.Ctx, s.Player, s.World,
-                        atHitPoint: s.Ctx.CurrentIterEntity.HasValue || s.AtHitPoint);
-                else
-                    s.Ctx.DoneTotems.Add(name);
-                s.Player.Position = savedPos;
+                SpellCaster.ConsumeInvokeTotem(s.Ctx, s.SlotByRef, s.Player, s.World, s.AtHitPoint);
                 continue;
             }
 
@@ -133,23 +123,7 @@ public sealed class SpellRunner
             // SetEntityProp 扣血
             if (s.Ctx.PendingEntityDamageIdx >= 0)
             {
-                int   idx = s.Ctx.PendingEntityDamageIdx;
-                float dmg = s.Ctx.PendingEntityDamageAmount;
-                s.Ctx.PendingEntityDamageIdx    = -1;
-                s.Ctx.PendingEntityDamageAmount = 0f;
-                if (s.Enemies != null && idx >= 0 && idx < s.Enemies.Enemies.Count)
-                {
-                    s.Enemies.Enemies[idx].TakeDamage(dmg);
-                    // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
-                    if (s.Ctx.CurrentIterEntity.HasValue && s.Ctx.CurrentIterEntity.Value.Index == idx)
-                    {
-                        var e = s.Ctx.CurrentIterEntity.Value;
-                        var updated = new EntityInfo(e.Index, e.Position,
-                            s.Enemies.Enemies[idx].Hp, e.MaxHp);
-                        s.Ctx.CurrentIterEntity = updated;
-                        s.Ctx.InstanceVars["_e.hp"] = updated.Hp;
-                    }
-                }
+                SpellCaster.ConsumeEntityDamage(s.Ctx, s.Enemies);
                 continue;
             }
 

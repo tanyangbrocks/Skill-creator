@@ -1,11 +1,14 @@
 namespace SkillCreator.AbilitySystem.VM;
 
+using SkillCreator.World;
+
 public enum ExecutionState
 {
     Running,
-    Waiting,   // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
+    Waiting,        // Wait 積木暫停；PC 停在 Wait 指令，由 Step 頂部在計時歸零後前進
+    WaitingSignal,  // OnReceive 暫停；等到訊號被廣播後由 Step 頂部恢復
     Completed,
-    Fizzled,   // 執行途中目標消失（MP 不退還）
+    Fizzled,        // 執行途中目標消失（MP 不退還）
 }
 
 public class ExecutionContext
@@ -23,11 +26,55 @@ public class ExecutionContext
     // RepeatN 嵌套計數器堆疊（支援巢狀循環）
     public Stack<int> LoopCounters { get; } = new();
 
+    // RepeatWhile 安全計數器（防止條件永遠為真時無限執行）
+    public int WhileIterationsTotal { get; set; } = 0;
+
+    // ── ForEachNearby / QueryNearest ────────────────────────────
+    // 實體查詢代理（SpellCaster / SpellRunner 建立 ctx 時注入）
+    public Func<float, List<EntityInfo>>? EntityQuery { get; set; }
+
+    // 迭代器堆疊（支援巢狀 ForEach）
+    public Stack<EntityIterState> EntityIterators { get; } = new();
+
+    // 當前迭代實體（InvokeTotem 時 SpellCaster 用來定位效果）
+    public EntityInfo? CurrentIterEntity { get; set; }
+
+    // SetEntityProp 扣血：SpellCaster/SpellRunner 消費後清除
+    public int   PendingEntityDamageIdx    { get; set; } = -1;
+    public float PendingEntityDamageAmount { get; set; } = 0f;
+
+    // OnReceive 等待中的訊號名稱（WaitingSignal 狀態時有效）
+    public string? WaitingSignalName { get; set; }
+
+    // ForEachNearby 迭代時的效果原點覆蓋（由 ConsumeInvokeTotem 設定，取代 player.Position 暫改）
+    public GridPos? EffectOriginOverride { get; set; }
+
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
 
     // 全域變數（跨法陣共享，持久存活）
     public static Dictionary<string, float> GlobalVars { get; } = new();
+
+    // ── 列表變數 ─────────────────────────────────────────────────
+    public Dictionary<string, List<float>> InstanceLists { get; } = new();
+    public static Dictionary<string, List<float>> GlobalLists { get; } = new();
+
+    public List<float> GetOrCreateList(string name, bool global)
+    {
+        var dict = global ? GlobalLists : InstanceLists;
+        if (!dict.TryGetValue(name, out var list))
+        {
+            list = new List<float>();
+            dict[name] = list;
+        }
+        return list;
+    }
+
+    public List<float>? GetList(string name, bool global)
+    {
+        var dict = global ? GlobalLists : InstanceLists;
+        return dict.TryGetValue(name, out var list) ? list : null;
+    }
 
     // 圖騰執行結果（由呼叫方在圖騰執行後寫入）
     public HashSet<string> HitTotems     { get; } = new();
@@ -45,3 +92,9 @@ public class ExecutionContext
         Code = code;
     }
 }
+
+// 迭代中的實體快照（引擎無關，用 Index 對應 EnemyManager.Enemies）
+public readonly record struct EntityInfo(int Index, GridPos Position, float Hp, float MaxHp);
+
+// ForEachNearby 迭代器堆疊元素
+public readonly record struct EntityIterState(List<EntityInfo> Entities, int CurrentIndex);
