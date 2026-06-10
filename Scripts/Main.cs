@@ -156,6 +156,7 @@ public partial class Main : Node
         // 初始道具（prototype 用；合成系統完成後可移除）
         _player.Inventory.TryAdd(ItemId.ToolBasicPick,      1);
         _player.Inventory.TryAdd(ItemId.ToolBasicAxe,       1);
+        _player.Inventory.TryAdd(ItemId.ToolIronPick,       1);
         _player.Inventory.TryAdd(ItemId.EquipBasicSword,    1);
         _player.Inventory.TryAdd(ItemId.EquipLeatherArmor,  1);
         _player.Inventory.TryAdd(ItemId.EquipAmulet,        1);
@@ -1041,6 +1042,7 @@ public partial class Main : Node
         return id switch
         {
             ItemId.ToolBasicPick      => new Color(0.75f, 0.75f, 0.82f), // 銀灰
+            ItemId.ToolIronPick       => new Color(0.60f, 0.62f, 0.68f), // 鐵灰
             ItemId.ToolBasicAxe       => new Color(0.58f, 0.38f, 0.16f), // 木棕
             ItemId.EquipBasicSword    => new Color(0.80f, 0.80f, 0.95f), // 淡藍銀
             ItemId.EquipLeatherArmor  => new Color(0.60f, 0.40f, 0.20f), // 皮革棕

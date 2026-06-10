@@ -33,10 +33,13 @@ public static class MapGenerator
         // 5. 底部岩床
         SealBedrock(world, W, H);
 
-        // 6. 裝飾
+        // 6. 礦脈生成
+        PlaceOreVeins(world, heights, W, H, rng);
+
+        // 7. 裝飾
         AddDecor(world, heights, W, H, rng);
 
-        // 7. 生成點
+        // 8. 生成點
         return BuildSpawns(world, heights, surfaceEntry, W, H, rng);
     }
 
@@ -195,8 +198,7 @@ public static class MapGenerator
         while (queue.Count > 0)
         {
             var pos = queue.Dequeue();
-            Span<(int dx, int dy)> dirs = stackalloc (int, int)[] { (-1,0),(1,0),(0,-1),(0,1) };
-            foreach (var (dx, dy) in dirs)
+            foreach (var (dx, dy) in _orthoDirs)
             {
                 var n = new GridPos(pos.X + dx, pos.Y + dy);
                 if (n.X < 0 || n.X >= W || n.Y < 0 || n.Y >= H) continue;
@@ -219,6 +221,65 @@ public static class MapGenerator
             world.Set(x, y, MaterialType.Stone);
     }
 
+    // ════════════════════════════════════════════════════════════
+    //  Step 6 — 礦脈生成（W-4）
+    // ════════════════════════════════════════════════════════════
+
+    private static readonly (int dx, int dy)[] _orthoDirs = { (-1,0),(1,0),(0,-1),(0,1) };
+
+    private static void PlaceOreVeins(TileWorld world, int[] heights, int W, int H, Random rng)
+    {
+        int surfaceBase = heights.Max() + 5;
+
+        // (MaterialType, yMin, yMax, veinCount, maxVeinSize)
+        // 深度以 tile Y 座標表示（世界高度 200，地表約 Y=40~90）
+        var configs = new (MaterialType Mat, int YMin, int YMax, int Count, int MaxSize)[]
+        {
+            (MaterialType.CoalOre,         Math.Max(surfaceBase, (int)(H * 0.28f)), (int)(H * 0.62f), 120, 9),
+            (MaterialType.CopperOre,       (int)(H * 0.44f), (int)(H * 0.78f),  80, 6),
+            (MaterialType.IronOre,         (int)(H * 0.58f), (int)(H * 0.90f),  50, 5),
+            (MaterialType.MagicCrystalOre, (int)(H * 0.74f), (int)(H * 0.95f),  25, 3),
+        };
+
+        foreach (var (mat, yMin, yMax, count, maxSize) in configs)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int sx = rng.Next(1, W - 1);
+                int sy = rng.Next(yMin, Math.Min(yMax, H - 2));
+                if (world.TypeAt(sx, sy) == MaterialType.Stone)
+                    PlaceOreBlob(world, sx, sy, mat, maxSize, W, H, rng);
+            }
+        }
+    }
+
+    private static void PlaceOreBlob(TileWorld world, int sx, int sy,
+        MaterialType mat, int maxSize, int W, int H, Random rng)
+    {
+        world.Set(sx, sy, mat);
+        int placed = 1;
+        var queue = new Queue<GridPos>();
+        queue.Enqueue(new GridPos(sx, sy));
+
+        while (queue.Count > 0 && placed < maxSize)
+        {
+            var pos = queue.Dequeue();
+            foreach (var (dx, dy) in _orthoDirs)
+            {
+                if (placed >= maxSize) break;
+                int nx = pos.X + dx, ny = pos.Y + dy;
+                if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 2) continue;
+                if (world.TypeAt(nx, ny) != MaterialType.Stone) continue;
+                if (rng.NextSingle() < 0.65f)
+                {
+                    world.Set(nx, ny, mat);
+                    queue.Enqueue(new GridPos(nx, ny));
+                    placed++;
+                }
+            }
+        }
+    }
+
     private static void SealWalls(TileWorld world, int W, int H)
     {
         for (int y = 0; y < H; y++)
@@ -229,7 +290,7 @@ public static class MapGenerator
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 6 — 裝飾
+    //  Step 7 — 裝飾
     // ════════════════════════════════════════════════════════════
 
     private static void AddDecor(TileWorld world, int[] heights, int W, int H, Random rng)
