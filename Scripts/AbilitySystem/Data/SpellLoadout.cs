@@ -3,7 +3,7 @@ namespace SkillCreator.AbilitySystem.Data;
 // 玩家的技能欄位（最多 MaxSlots 個法陣槽位）
 public class SpellLoadout
 {
-    public const int MaxSlots = 5;
+    public const int MaxSlots = 10;
 
     private readonly SpellArray?[] _slots = new SpellArray?[MaxSlots];
 

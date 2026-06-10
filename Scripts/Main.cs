@@ -36,6 +36,8 @@ public partial class Main : Node
     private float            _placeCooldown   = 0f;
     private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
     private Label            _paintModeLabel  = null!;
+    private PanelContainer   _paintToolPanel  = null!;
+    private PanelContainer   _devToolsPanel   = null!;
 
     // 等級 / XP / 境界 / 裝備 HUD
     private Label         _lvLabel           = null!;
@@ -96,6 +98,28 @@ public partial class Main : Node
     // 偵錯（F5 快照取樣 / F6 回滾並比對）
     private sealed record SnapCompare(float PlayerHp, int[] EnemyIds, float[] EnemyHps, MaterialType TileUnderPlayer);
     private SnapCompare? _snapBefore = null;
+
+    // U/I/O/P 組合鍵施放 — 上一幀按壓狀態（rising-edge 偵測）
+    private bool _prevCastU, _prevCastI, _prevCastO, _prevCastP;
+
+    // 組合鍵對應槽位（多鍵優先 → 最長組合排最前）
+    private static readonly (Key[] Keys, int Slot)[] _castCombos =
+    {
+        (new[] { Key.U, Key.I, Key.O, Key.P }, 9),
+        (new[] { Key.I, Key.O, Key.P },        8),
+        (new[] { Key.U, Key.I, Key.O },        7),
+        (new[] { Key.O, Key.P },               6),
+        (new[] { Key.I, Key.O },               5),
+        (new[] { Key.U, Key.I },               4),
+        (new[] { Key.P },                      3),
+        (new[] { Key.O },                      2),
+        (new[] { Key.I },                      1),
+        (new[] { Key.U },                      0),
+    };
+
+    // 槽位鍵位提示文字（對應 _castCombos 的 Slot 順序）
+    private static readonly string[] _slotKeys =
+        { "U", "I", "O", "P", "U+I", "I+O", "O+P", "U+I+O", "I+O+P", "U+I+O+P" };
 
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
@@ -197,41 +221,6 @@ public partial class Main : Node
         toolbar.AddChild(statsBtn);
 
         toolbar.AddChild(new HSeparator());
-        toolbar.AddChild(MakeLbl("材質選擇（左鍵繪製 / 右鍵清除）"));
-
-        var mats = new (MaterialType, string)[]
-        {
-            (MaterialType.Sand, "沙"), (MaterialType.Water, "水"),
-            (MaterialType.Stone,"石"), (MaterialType.Wood,  "木"),
-            (MaterialType.Fire, "火"), (MaterialType.Lava,  "岩漿"),
-        };
-        var grp = new ButtonGroup();
-        foreach (var (mat, name) in mats)
-        {
-            var c   = MaterialRegistry.GetColor(mat, 128);
-            var btn = MakeBtn(name, new Color(c.R * 0.6f, c.G * 0.6f, c.B * 0.6f));
-            btn.ToggleMode = true; btn.ButtonGroup = grp;
-            btn.ButtonPressed = (mat == MaterialType.Sand);
-            var m = mat;
-            btn.Toggled += on => { if (on) _world.SelectedMaterial = m; };
-            toolbar.AddChild(btn);
-        }
-
-        toolbar.AddChild(new HSeparator());
-        toolbar.AddChild(MakeLbl("筆刷大小"));
-        var brushRow = new HBoxContainer();
-        foreach (var (label, size) in new (string, int)[] { ("1", 0), ("3", 1), ("5", 2), ("9", 4) })
-        {
-            var btn = MakeBtn(label, new Color(0.22f, 0.22f, 0.28f));
-            btn.ToggleMode = true; btn.ButtonGroup = new ButtonGroup();
-            btn.ButtonPressed = (size == 2);
-            var s = size;
-            btn.Toggled += on => { if (on) _world.BrushSize = s; };
-            brushRow.AddChild(btn);
-        }
-        toolbar.AddChild(brushRow);
-
-        toolbar.AddChild(new HSeparator());
         toolbar.AddChild(MakeLbl("模擬速度"));
         var speedRow = new HBoxContainer();
         foreach (var (label, steps) in new (string, int)[] { ("×1", 1), ("×2", 2), ("×4", 4) })
@@ -244,6 +233,93 @@ public partial class Main : Node
             speedRow.AddChild(btn);
         }
         toolbar.AddChild(speedRow);
+
+        toolbar.AddChild(new HSeparator());
+        var devBtn = MakeBtn("🛠 開發者工具", new Color(0.22f, 0.18f, 0.28f));
+        devBtn.Pressed += () => _devToolsPanel.Visible = !_devToolsPanel.Visible;
+        toolbar.AddChild(devBtn);
+
+        // ── 開發者工具清單面板（🛠 按鈕展開） ──────────────────────
+        var devPanelStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.07f, 0.07f, 0.12f, 0.96f),
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor = new Color(0.38f, 0.30f, 0.48f),
+            ContentMarginLeft = 10f, ContentMarginRight = 10f,
+            ContentMarginTop = 8f, ContentMarginBottom = 8f,
+        };
+        _devToolsPanel = new PanelContainer();
+        _devToolsPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopRight);
+        _devToolsPanel.Position = new Vector2(-200, 185);
+        _devToolsPanel.AddThemeStyleboxOverride("panel", devPanelStyle);
+        _devToolsPanel.Visible = false;
+        var devLbl = new Label();
+        devLbl.Text =
+            "F1  開發者筆刷（材質繪製）\n" +
+            "F2  座標驗證 overlay\n" +
+            "F3  VM 執行追蹤\n" +
+            "F4  生存速率 overlay\n" +
+            "F5  快照取樣（半徑 5）\n" +
+            "F6  快照回滾並比對";
+        devLbl.AddThemeFontSizeOverride("font_size", 11);
+        devLbl.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.88f));
+        _devToolsPanel.AddChild(devLbl);
+        hud.AddChild(_devToolsPanel);
+
+        // ── 開發者筆刷面板（F1 切換） ────────────────────────────────
+        var paintBgStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.10f, 0.10f, 0.14f, 0.95f),
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor = new Color(0.30f, 0.50f, 0.30f),
+            ContentMarginLeft = 6f, ContentMarginRight = 6f,
+            ContentMarginTop = 6f, ContentMarginBottom = 6f,
+        };
+        _paintToolPanel = new PanelContainer();
+        _paintToolPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopRight);
+        _paintToolPanel.Position = new Vector2(-200, 185);
+        _paintToolPanel.CustomMinimumSize = new Vector2(186, 0);
+        _paintToolPanel.AddThemeStyleboxOverride("panel", paintBgStyle);
+        _paintToolPanel.Visible = false;
+        var paintVBox = new VBoxContainer();
+        paintVBox.AddThemeConstantOverride("separation", 3);
+        _paintToolPanel.AddChild(paintVBox);
+        paintVBox.AddChild(MakeLbl("材質選擇（左鍵繪製 / 右鍵清除）"));
+        var mats = new (MaterialType, string)[]
+        {
+            (MaterialType.Sand, "沙"), (MaterialType.Water, "水"),
+            (MaterialType.Stone,"石"), (MaterialType.Wood,  "木"),
+            (MaterialType.Fire, "火"), (MaterialType.Lava,  "岩漿"),
+        };
+        var grp = new ButtonGroup();
+        foreach (var (mat, matName) in mats)
+        {
+            var c   = MaterialRegistry.GetColor(mat, 128);
+            var btn = MakeBtn(matName, new Color(c.R * 0.6f, c.G * 0.6f, c.B * 0.6f));
+            btn.ToggleMode = true; btn.ButtonGroup = grp;
+            btn.ButtonPressed = (mat == MaterialType.Sand);
+            var m = mat;
+            btn.Toggled += on => { if (on) _world.SelectedMaterial = m; };
+            paintVBox.AddChild(btn);
+        }
+        paintVBox.AddChild(new HSeparator());
+        paintVBox.AddChild(MakeLbl("筆刷大小"));
+        var brushRow = new HBoxContainer();
+        foreach (var (blbl, size) in new (string, int)[] { ("1", 0), ("3", 1), ("5", 2), ("9", 4) })
+        {
+            var btn = MakeBtn(blbl, new Color(0.22f, 0.22f, 0.28f));
+            btn.ToggleMode = true; btn.ButtonGroup = new ButtonGroup();
+            btn.ButtonPressed = (size == 2);
+            var s = size;
+            btn.Toggled += on => { if (on) _world.BrushSize = s; };
+            brushRow.AddChild(btn);
+        }
+        paintVBox.AddChild(brushRow);
+        hud.AddChild(_paintToolPanel);
 
         // ── 左下角：HP / MP ──────────────────────────────────────
         _hpLabel = new Label();
@@ -262,8 +338,9 @@ public partial class Main : Node
 
         // ── 技能欄位（底部中間）──────────────────────────────────
         _slotLabels = new Label[SpellLoadout.MaxSlots];
-        float slotW   = 120f;
-        float totalW  = slotW * SpellLoadout.MaxSlots + 4f * (SpellLoadout.MaxSlots - 1);
+        const float slotW2  = 74f;
+        const float slotGap = 3f;
+        float totalW  = slotW2 * SpellLoadout.MaxSlots + slotGap * (SpellLoadout.MaxSlots - 1);
         float startX  = (800f - totalW) / 2f;   // 畫面寬 800 px
 
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
@@ -271,16 +348,16 @@ public partial class Main : Node
             var lbl = new Label();
             lbl.AnchorTop    = lbl.AnchorBottom = 1f;
             lbl.AnchorLeft   = lbl.AnchorRight  = 0f;
-            lbl.Position     = new Vector2(startX + i * (slotW + 4f), -28f);
-            lbl.CustomMinimumSize = new Vector2(slotW, 22);
+            lbl.Position     = new Vector2(startX + i * (slotW2 + slotGap), -28f);
+            lbl.CustomMinimumSize = new Vector2(slotW2, 22);
             lbl.HorizontalAlignment = HorizontalAlignment.Center;
-            lbl.AddThemeFontSizeOverride("font_size", 11);
+            lbl.AddThemeFontSizeOverride("font_size", 10);
             hud.AddChild(lbl);
             _slotLabels[i] = lbl;
         }
 
         var hint = new Label();
-        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  C 數值  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
+        hint.Text = "A/D 移動  W 跳躍  U/I/O/P 組合鍵施放  E 編輯器  C 數值  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
         hint.AnchorTop = hint.AnchorBottom = 1f;
         hint.Position  = new Vector2(10, -28);
         hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
@@ -376,6 +453,23 @@ public partial class Main : Node
             };
             panel.MouseEntered += () => ShowTooltip(idx);
             panel.MouseExited  += HideTooltip;
+        }
+
+        // ── 背包按鈕（熱鍵欄最右側）────────────────────────────
+        {
+            const float bagW = 34f;
+            const float bagH = 30f;
+            var bagBtn = MakeBtn("▣", new Color(0.18f, 0.18f, 0.28f));
+            bagBtn.AnchorTop  = bagBtn.AnchorBottom = 1f;
+            bagBtn.AnchorLeft = bagBtn.AnchorRight  = 0f;
+            bagBtn.Position   = new Vector2(startX + count * (slotW + gap) + 4f,
+                                            startY + (slotH - bagH) / 2f);
+            bagBtn.CustomMinimumSize = new Vector2(bagW, bagH);
+            bagBtn.AddThemeFontSizeOverride("font_size", 14);
+            bagBtn.Pressed      += ToggleInventoryPanel;
+            bagBtn.MouseEntered += () => _mouseOverHotbar = true;
+            bagBtn.MouseExited  += () => _mouseOverHotbar = false;
+            hud.AddChild(bagBtn);
         }
 
         // ── 提示框（PanelContainer 自動依文字寬度縮放）───────────
@@ -548,7 +642,29 @@ public partial class Main : Node
         if (_editorOpen)
         {
             _player.CancelMining();
+            _prevCastU = _prevCastI = _prevCastO = _prevCastP = false;
             return;
+        }
+
+        // U/I/O/P 組合鍵施放（rising-edge 偵測，多鍵優先）
+        {
+            bool curU = Input.IsKeyPressed(Key.U);
+            bool curI = Input.IsKeyPressed(Key.I);
+            bool curO = Input.IsKeyPressed(Key.O);
+            bool curP = Input.IsKeyPressed(Key.P);
+
+            int triggered = -1;
+            foreach (var (keys, slot) in _castCombos)
+            {
+                bool allNow  = keys.All(k => k switch
+                    { Key.U => curU, Key.I => curI, Key.O => curO, Key.P => curP, _ => false });
+                bool allPrev = keys.All(k => k switch
+                    { Key.U => _prevCastU, Key.I => _prevCastI, Key.O => _prevCastO, Key.P => _prevCastP, _ => false });
+                if (allNow && !allPrev) { triggered = slot; break; }
+            }
+            if (triggered >= 0) TryCastSlot(triggered);
+
+            _prevCastU = curU; _prevCastI = curI; _prevCastO = curO; _prevCastP = curP;
         }
 
         _player.UpdateEnvironment(_world.World);  // W-5b：設置氧氣/環境溫度旗標
@@ -683,16 +799,6 @@ public partial class Main : Node
 
         if (e is not InputEventKey k || !k.Pressed || k.Echo) return;
 
-        // 技能槽 1–5：切換 Loadout（由 InputBindings 決定鍵位）
-        for (int si = 0; si < 5; si++)
-        {
-            if (k.IsAction($"spell_slot_{si + 1}"))
-            {
-                _editor.Loadout.ActiveIndex = si;
-                return;
-            }
-        }
-
         // 其餘按鍵：全部透過 InputBindings 對應 action
         if (k.IsAction(InputBindings.EquipItem) && !_editorOpen)
         {
@@ -703,7 +809,8 @@ public partial class Main : Node
         }
         else if (k.IsAction(InputBindings.TogglePaint))
         {
-            _world.PaintingEnabled = !_world.PaintingEnabled;
+            _world.PaintingEnabled   = !_world.PaintingEnabled;
+            _paintToolPanel.Visible  = _world.PaintingEnabled;
         }
         else if (k.IsAction(InputBindings.DebugCoord))
         {
@@ -752,37 +859,32 @@ public partial class Main : Node
         {
             _player.StartJump(); // 方向鍵上仍可跳（不加入鍵位系統，固定輔助鍵）
         }
-        else if (k.IsAction(InputBindings.CastSpell))
-        {
-            if (_editorOpen) { /* 略 */ }
-            else {
-                var spell = _editor.Loadout.ActiveSpell;
-                if (spell != null)
-                {
-                    var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout, _runner);
-                    if (!result.Ok)
-                        GD.Print("[施放] 失敗：MP 不足或冷卻中");
-                    else if (result.Projectile != null)
-                        _projectiles.Add(result.Projectile);
-                }
-                else
-                {
-                    GD.Print("[施放] 槽位空白，請先在編輯器（E）設計並儲存法陣");
-                }
-            }
-        }
     }
 
     private void RefreshSlotLabels()
     {
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
         {
-            bool   active = i == _editor.Loadout.ActiveIndex;
-            string name   = _editor.Loadout.SlotLabel(i);
-            _slotLabels[i].Text = active ? $"[{i+1}] {name}" : $" {i+1}  {name}";
-            _slotLabels[i].AddThemeColorOverride("font_color",
-                active ? new Color(1.0f, 0.9f, 0.3f) : new Color(0.5f, 0.5f, 0.55f));
+            string keyHint = _slotKeys[i];
+            string name    = _editor.Loadout.SlotLabel(i);
+            _slotLabels[i].Text = $"[{keyHint}]{name}";
+            _slotLabels[i].AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.55f));
         }
+    }
+
+    private void TryCastSlot(int slotIdx)
+    {
+        var spell = _editor.Loadout.GetSlot(slotIdx);
+        if (spell == null)
+        {
+            GD.Print($"[施放] 槽位 {slotIdx} 空白");
+            return;
+        }
+        var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout, _runner);
+        if (!result.Ok)
+            GD.Print($"[施放] 槽位 {slotIdx} 失敗：MP 不足或冷卻中");
+        else if (result.Projectile != null)
+            _projectiles.Add(result.Projectile);
     }
 
     private void RefreshHotbar()
@@ -1482,17 +1584,18 @@ public partial class Main : Node
         };
 
         _equipPanel = new Panel();
-        _equipPanel.AnchorLeft = _equipPanel.AnchorRight  = 0.5f;
+        _equipPanel.AnchorLeft = _equipPanel.AnchorRight  = 1f;
         _equipPanel.AnchorTop  = _equipPanel.AnchorBottom = 0f;
-        _equipPanel.Position   = new Vector2(5f, 20f);
+        _equipPanel.Position   = new Vector2(-(panelW + 8f), 20f);
         _equipPanel.Size       = new Vector2(panelW, panelH);
         _equipPanel.AddThemeStyleboxOverride("panel", bg);
-        _equipPanel.Visible    = false;
+        _equipPanel.Visible    = true;
         hud.AddChild(_equipPanel);
+        _equipPanelOpen = true;
 
         var titleLbl = new Label();
         titleLbl.Position = new Vector2(padX, padY);
-        titleLbl.Text     = "裝備欄  [P 關閉]";
+        titleLbl.Text     = "裝備欄  [X 關閉]";
         titleLbl.AddThemeFontSizeOverride("font_size", 12);
         titleLbl.AddThemeColorOverride("font_color", new Color(0.75f, 0.90f, 0.75f));
         _equipPanel.AddChild(titleLbl);
@@ -1572,7 +1675,7 @@ public partial class Main : Node
                 }
             };
         }
-
+        RefreshEquipPanel();
     }
 
     private void RefreshEquipPanel()

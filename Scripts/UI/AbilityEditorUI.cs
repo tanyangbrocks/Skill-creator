@@ -161,7 +161,7 @@ public partial class AbilityEditorUI : Control
             btn.ToggleMode = true; btn.ButtonGroup = slotGrp;
             btn.ButtonPressed = si == 0;
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-            btn.CustomMinimumSize = new Vector2(28, 30);
+            btn.CustomMinimumSize = new Vector2(32, 30);
             var captSi = si;
             btn.Toggled += on => { if (on) SelectEditorSlot(captSi); };
             row.AddChild(btn);
@@ -977,7 +977,7 @@ public partial class AbilityEditorUI : Control
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
                  $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}  " +
                  $"容器：{_spell.Container}");
-        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存　按 E 切回世界，1-5 切換槽位，空白鍵施放";
+        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存　按 E 切回世界";
     }
 
     private void SelectEditorSlot(int i)

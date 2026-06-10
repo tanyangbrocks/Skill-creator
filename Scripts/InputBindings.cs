@@ -1,12 +1,14 @@
 namespace SkillCreator;
 
 using Godot;
+using System.Linq;
 using System.Text.Json;
 using System.IO;
 
 /// <summary>
 /// 全域鍵位管理。所有可繫結的行為以 string 常數定義；
-/// 預設值在 _defaults 字典；執行期可動態修改並存盤。
+/// 預設值在 _defaults（Key[]，單鍵為單元素陣列，組合鍵為多元素陣列）；
+/// 單鍵行為注入 Godot InputMap，組合鍵由 _Process 自訂邏輯偵測。
 /// Main._Ready() 呼叫 RegisterAll() 完成初始化。
 /// </summary>
 public static class InputBindings
@@ -16,9 +18,6 @@ public static class InputBindings
     public const string MoveLeft       = "move_left";
     public const string MoveRight      = "move_right";
     public const string Jump           = "jump";
-
-    // 戰鬥
-    public const string CastSpell      = "cast_spell";
 
     // 物品 / 裝備
     public const string EquipItem      = "equip_item";
@@ -37,13 +36,6 @@ public static class InputBindings
     public const string Hotbar4 = "hotbar_4";
     public const string Hotbar5 = "hotbar_5";
 
-    // 技能槽 1–5（對應 Loadout）
-    public const string SpellSlot1 = "spell_slot_1";
-    public const string SpellSlot2 = "spell_slot_2";
-    public const string SpellSlot3 = "spell_slot_3";
-    public const string SpellSlot4 = "spell_slot_4";
-    public const string SpellSlot5 = "spell_slot_5";
-
     // 偵錯（不顯示在設定 UI，仍可在開發時重新繫結）
     public const string DebugCoord    = "debug_coord";
     public const string DebugVmTrace  = "debug_vm_trace";
@@ -51,69 +43,60 @@ public static class InputBindings
     public const string DebugSnapTake = "debug_snap_take";
     public const string DebugSnapRoll = "debug_snap_roll";
 
-    // ── 預設鍵位 ─────────────────────────────────────────────────────
-    private static readonly Dictionary<string, Key> _defaults = new()
+    // ── 預設鍵位（Key[]：單鍵 = 單元素陣列） ─────────────────────
+    private static readonly Dictionary<string, Key[]> _defaults = new()
     {
-        [MoveLeft]       = Key.A,
-        [MoveRight]      = Key.D,
-        [Jump]           = Key.W,
-        [CastSpell]      = Key.Space,
-        [EquipItem]      = Key.Q,
-        [OpenInventory]  = Key.I,
-        [OpenEquipment]  = Key.P,
-        [OpenEditor]     = Key.E,
-        [OpenStats]      = Key.C,
-        [TogglePaint]    = Key.F1,
-        [Hotbar1]        = Key.Key1,
-        [Hotbar2]        = Key.Key2,
-        [Hotbar3]        = Key.Key3,
-        [Hotbar4]        = Key.Key4,
-        [Hotbar5]        = Key.Key5,
-        [SpellSlot1]     = Key.Key1,
-        [SpellSlot2]     = Key.Key2,
-        [SpellSlot3]     = Key.Key3,
-        [SpellSlot4]     = Key.Key4,
-        [SpellSlot5]     = Key.Key5,
-        [DebugCoord]     = Key.F2,
-        [DebugVmTrace]   = Key.F3,
-        [DebugSurvival]  = Key.F4,
-        [DebugSnapTake]  = Key.F5,
-        [DebugSnapRoll]  = Key.F6,
+        [MoveLeft]       = new[] { Key.A },
+        [MoveRight]      = new[] { Key.D },
+        [Jump]           = new[] { Key.W },
+        [EquipItem]      = new[] { Key.Q },
+        [OpenInventory]  = new[] { Key.Z },
+        [OpenEquipment]  = new[] { Key.X },
+        [OpenEditor]     = new[] { Key.E },
+        [OpenStats]      = new[] { Key.C },
+        [TogglePaint]    = new[] { Key.F1 },
+        [Hotbar1]        = new[] { Key.Key1 },
+        [Hotbar2]        = new[] { Key.Key2 },
+        [Hotbar3]        = new[] { Key.Key3 },
+        [Hotbar4]        = new[] { Key.Key4 },
+        [Hotbar5]        = new[] { Key.Key5 },
+        [DebugCoord]     = new[] { Key.F2 },
+        [DebugVmTrace]   = new[] { Key.F3 },
+        [DebugSurvival]  = new[] { Key.F4 },
+        [DebugSnapTake]  = new[] { Key.F5 },
+        [DebugSnapRoll]  = new[] { Key.F6 },
     };
 
     // 目前有效鍵位（預設值 + 玩家自訂覆蓋）
-    private static readonly Dictionary<string, Key> _current = new();
+    private static readonly Dictionary<string, Key[]> _current = new();
 
     private static readonly string SavePath =
         Path.Combine(OS.GetUserDataDir(), "bindings.json");
 
     // ── 公開 API ─────────────────────────────────────────────────────
 
-    /// <summary>Main._Ready() 呼叫：從磁碟讀取自訂鍵位，並注入 Godot InputMap。</summary>
+    /// <summary>Main._Ready() 呼叫：從磁碟讀取自訂鍵位，並注入 Godot InputMap（僅單鍵行為）。</summary>
     public static void RegisterAll()
     {
-        // 先用預設值填充
-        foreach (var (action, key) in _defaults)
-            _current[action] = key;
+        foreach (var (action, keys) in _defaults)
+            _current[action] = keys;
 
-        // 從存檔覆蓋
         LoadFromFile();
 
-        // 注入 Godot InputMap
-        foreach (var (action, key) in _current)
-            ApplyToInputMap(action, key);
+        foreach (var (action, keys) in _current)
+            if (keys.Length == 1) ApplyToInputMap(action, keys[0]);
     }
 
-    /// <summary>取得目前某行為繫結的鍵位。</summary>
-    public static Key GetKey(string action) =>
-        _current.TryGetValue(action, out var k) ? k : Key.Unknown;
+    /// <summary>取得目前某行為繫結的鍵位陣列。</summary>
+    public static Key[] GetKeys(string action) =>
+        _current.TryGetValue(action, out var k) ? k : System.Array.Empty<Key>();
 
-    /// <summary>重新繫結某行為到新鍵位，並立即寫盤。</summary>
-    public static void Rebind(string action, Key newKey)
+    /// <summary>重新繫結某行為到新鍵位組合，並立即寫盤。單鍵才注入 InputMap。</summary>
+    public static void Rebind(string action, Key[] newKeys)
     {
         if (!_defaults.ContainsKey(action)) return;
-        _current[action] = newKey;
-        ApplyToInputMap(action, newKey);
+        _current[action] = newKeys;
+        if (newKeys.Length == 1) ApplyToInputMap(action, newKeys[0]);
         SaveToFile();
     }
 
@@ -146,11 +129,18 @@ public static class InputBindings
         try
         {
             var overrides = _current
-                .Where(kv => !_defaults.TryGetValue(kv.Key, out var def) || def != kv.Value)
-                .ToDictionary(kv => kv.Key, kv => kv.Value.ToString());
+                .Where(kv =>
+                {
+                    if (!_defaults.TryGetValue(kv.Key, out var def)) return true;
+                    if (def.Length != kv.Value.Length) return true;
+                    return !def.SequenceEqual(kv.Value);
+                })
+                .ToDictionary(
+                    kv => kv.Key,
+                    kv => kv.Value.Select(k => k.ToString()).ToArray());
             File.WriteAllText(SavePath, JsonSerializer.Serialize(overrides));
         }
-        catch { /* 存盤失敗靜默忽略（路徑不存在等邊緣情況） */ }
+        catch { /* 存盤失敗靜默忽略 */ }
     }
 
     private static void LoadFromFile()
@@ -158,13 +148,17 @@ public static class InputBindings
         if (!File.Exists(SavePath)) return;
         try
         {
-            var raw = JsonSerializer.Deserialize<Dictionary<string, string>>(
+            var raw = JsonSerializer.Deserialize<Dictionary<string, string[]>>(
                 File.ReadAllText(SavePath));
             if (raw == null) return;
-            foreach (var (action, keyStr) in raw)
+            foreach (var (action, keyStrs) in raw)
             {
-                if (_defaults.ContainsKey(action) && Enum.TryParse<Key>(keyStr, out var key))
-                    _current[action] = key;
+                if (!_defaults.ContainsKey(action)) continue;
+                var keys = keyStrs
+                    .Select(s => Enum.TryParse<Key>(s, out var k) ? k : Key.Unknown)
+                    .Where(k => k != Key.Unknown)
+                    .ToArray();
+                if (keys.Length > 0) _current[action] = keys;
             }
         }
         catch { /* 格式損毀靜默忽略，繼續使用預設值 */ }
