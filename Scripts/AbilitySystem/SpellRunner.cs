@@ -10,7 +10,7 @@ using SkillCreator.World;
 //
 //  用法：
 //    1. Main.cs 建立一個 SpellRunner 實例，每幀呼叫 Update(delta)
-//    2. PlayerBody 法陣透過 SpellRunner.Submit 提交，而非同步執行
+//    2. DirectCast 法陣透過 SpellRunner.Submit 提交，而非同步執行
 //    3. Projectile / Contact 命中仍用 SpellCaster.ExecuteEffects（同步，不過 Runner）
 //
 //  架構：
@@ -56,7 +56,7 @@ public sealed class SpellRunner
     // 目前執行中的法陣數量（可供 HUD 顯示）
     public int ActiveCount => _active.Count;
 
-    // ── 提交一個新法陣（PlayerBody 施放時呼叫）────────────────────
+    // ── 提交一個新法陣（DirectCast 施放時呼叫）────────────────────
 
     public void Submit(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null,

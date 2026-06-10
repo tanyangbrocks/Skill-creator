@@ -12,12 +12,16 @@ public class SpellProjectile
     public GridPos Position { get; private set; }
     public bool    IsAlive  { get; private set; } = true;
 
-    private readonly GridPos          _dir;
-    private readonly SpellArray       _spell;
-    private readonly PlayerController _caster;
-    private readonly EnemyManager?    _enemies;  // 連段/命中傷害用
-    private readonly SpellLoadout?    _loadout;  // 連段用
-    private readonly SpellRunner?     _runner;   // 跨幀執行（Wait 真實計時）
+    // 浮點位置 + 正規化方向向量，讓投射物沿玩家→游標真實直線飛行
+    private float _posX;
+    private float _posY;
+    private readonly float             _dirX;
+    private readonly float             _dirY;
+    private readonly SpellArray        _spell;
+    private readonly PlayerController  _caster;
+    private readonly EnemyManager?     _enemies;
+    private readonly SpellLoadout?     _loadout;
+    private readonly SpellRunner?      _runner;
 
     private float _moveTimer      = 0f;
     private int   _remainingTiles;
@@ -25,12 +29,17 @@ public class SpellProjectile
     private const float MoveInterval = 0.06f;
     private const int   MaxRange     = 55;
 
-    public SpellProjectile(GridPos start, GridPos dir, SpellArray spell, PlayerController caster,
+    public SpellProjectile(GridPos start, float dirX, float dirY, SpellArray spell, PlayerController caster,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
+        float len = MathF.Sqrt(dirX * dirX + dirY * dirY);
+        if (len < 0.001f) { dirX = 1f; dirY = 0f; }
+        else { dirX /= len; dirY /= len; }
+        _dirX = dirX;
+        _dirY = dirY;
+        _posX = start.X + 0.5f;
+        _posY = start.Y + 0.5f;
         Position       = start;
-        int ndx = Math.Sign(dir.X), ndy = Math.Sign(dir.Y);
-        _dir    = (ndx == 0 && ndy == 0) ? new GridPos(1, 0) : new GridPos(ndx, ndy);
         _spell         = spell;
         _caster        = caster;
         _enemies       = enemies;
@@ -47,7 +56,9 @@ public class SpellProjectile
         if (_moveTimer > 0f) return;
         _moveTimer = MoveInterval;
 
-        var next = new GridPos(Position.X + _dir.X, Position.Y + _dir.Y);
+        _posX += _dirX;
+        _posY += _dirY;
+        var next = new GridPos((int)MathF.Floor(_posX), (int)MathF.Floor(_posY));
 
         if (!world.InBoundsPublic(next.X, next.Y)) { IsAlive = false; return; }
 

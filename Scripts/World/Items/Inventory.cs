@@ -2,8 +2,8 @@ namespace SkillCreator.World.Items;
 
 public class Inventory
 {
-    public const int HotbarSize = 5;
-    public const int TotalSize  = 30;   // 5 熱鍵 + 25 主欄
+    public const int HotbarSize = 10;
+    public const int TotalSize  = 30;   // 10 熱鍵 + 20 主欄
 
     public ItemStack[] Slots { get; } = new ItemStack[TotalSize];
 

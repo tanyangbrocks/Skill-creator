@@ -18,8 +18,8 @@ public class SpellArray
 
     public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Declare;
 
-    // 執行容器：決定效果在哪裡、何時觸發
-    public ContainerType Container { get; set; } = ContainerType.PlayerBody;
+    // 施放方式：直接施放 或 透過哪個容器執行
+    public ContainerType Container { get; set; } = ContainerType.DirectCast;
 
     // 施放延遲（秒）；每個法陣各自獨立
     public float CastDelay { get; set; } = 0.3f;

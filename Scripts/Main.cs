@@ -32,8 +32,6 @@ public partial class Main : Node
     private Panel[]          _hotbarIcons   = null!;  // 物品色塊縮圖
     private StyleBoxFlat[]   _iconStyles    = null!;
     private Label[]          _hotbarCounts  = null!;  // 右下角數量
-    private PanelContainer   _tooltip       = null!;  // 懸停提示框
-    private Label            _tooltipLabel  = null!;
     private float            _placeCooldown   = 0f;
     private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
     private Label            _paintModeLabel  = null!;
@@ -478,6 +476,15 @@ public partial class Main : Node
             panel.AddChild(countLbl);
             _hotbarCounts[i] = countLbl;
 
+            // ── 數字鍵提示（左上角小字）──────────────────────────
+            var keyLbl = new Label();
+            keyLbl.Position = new Vector2(3f, 2f);
+            keyLbl.Text     = (i == 9) ? "0" : $"{i + 1}";
+            keyLbl.AddThemeFontSizeOverride("font_size", 9);
+            keyLbl.AddThemeColorOverride("font_color", new Color(0.50f, 0.50f, 0.60f));
+            keyLbl.MouseFilter = Control.MouseFilterEnum.Ignore;
+            panel.AddChild(keyLbl);
+
             // ── 點擊選取 + 懸停提示框 ────────────────────────────
             int idx = i;
             panel.GuiInput += (InputEvent e) =>
@@ -506,26 +513,6 @@ public partial class Main : Node
             hud.AddChild(bagBtn);
         }
 
-        // ── 提示框（PanelContainer 自動依文字寬度縮放）───────────
-        var tipStyle = new StyleBoxFlat { BgColor = new Color(0.08f, 0.08f, 0.18f, 0.95f) };
-        tipStyle.BorderWidthTop = tipStyle.BorderWidthBottom =
-        tipStyle.BorderWidthLeft = tipStyle.BorderWidthRight = 1;
-        tipStyle.BorderColor = new Color(0.50f, 0.50f, 0.75f);
-        tipStyle.ContentMarginLeft = tipStyle.ContentMarginRight = 8f;
-        tipStyle.ContentMarginTop  = tipStyle.ContentMarginBottom = 5f;
-
-        _tooltip = new PanelContainer();
-        _tooltip.AnchorTop  = _tooltip.AnchorBottom = 1f;
-        _tooltip.AnchorLeft = _tooltip.AnchorRight  = 0f;
-        _tooltip.AddThemeStyleboxOverride("panel", tipStyle);
-        _tooltip.MouseFilter = Control.MouseFilterEnum.Ignore;
-        _tooltip.Visible     = false;
-        hud.AddChild(_tooltip);
-
-        _tooltipLabel = new Label();
-        _tooltipLabel.AddThemeFontSizeOverride("font_size", 11);
-        _tooltipLabel.AddThemeColorOverride("font_color", new Color(0.90f, 0.90f, 0.95f));
-        _tooltip.AddChild(_tooltipLabel);
     }
 
     private void BuildLevelHUD(CanvasLayer hud)
@@ -800,6 +787,18 @@ public partial class Main : Node
     // ── 鍵盤快捷鍵 ────────────────────────────────────────────────
     public override void _Input(InputEvent e)
     {
+        // 數字鍵 1~9 / 0 → 切換熱鍵欄槽位（0~9）
+        if (e is InputEventKey ek && ek.Pressed && !ek.Echo)
+        {
+            int slot = ek.Keycode switch
+            {
+                Key.Key1 => 0, Key.Key2 => 1, Key.Key3 => 2, Key.Key4 => 3, Key.Key5 => 4,
+                Key.Key6 => 5, Key.Key7 => 6, Key.Key8 => 7, Key.Key9 => 8, Key.Key0 => 9,
+                _ => -1,
+            };
+            if (slot >= 0) { _player.Inventory.ActiveHotbarIndex = slot; return; }
+        }
+
         // 滾輪：Ctrl 按住 → 調整鏡頭縮放；否則 → 切換物品熱鍵欄槽位
         if (!_editorOpen && e is InputEventMouseButton mw)
         {
@@ -987,24 +986,10 @@ public partial class Main : Node
         _mouseOverHotbar = true;
         var stack = _player.Inventory.Slots[slotIndex];
         if (stack.IsEmpty) { HideTooltip(); return; }
-
-        _tooltipLabel.Text = ItemRegistry.Get(stack.ItemId).DisplayName;
-
-        const float slotW  = 48f;
-        const float gap    = 3f;
-        const float startX = 10f;
-        const float startY = -132f;
-
-        float slotLeft = startX + slotIndex * (slotW + gap);
-        _tooltip.Position = new Vector2(slotLeft, startY - 32f); // 槽位上方
-
-        // ResetSize()：讓 PanelContainer 在本幀立即重算最小尺寸（含 ContentMargin），
-        // 避免 GetMinimumSize() 在文字剛更新時回傳舊值導致寬度過窄。
-        _tooltip.ResetSize();
-        _tooltip.Visible  = true;
+        ShowFloatTooltip(ItemRegistry.Get(stack.ItemId).DisplayName);
     }
 
-    private void HideTooltip() { _mouseOverHotbar = false; _tooltip.Visible = false; }
+    private void HideTooltip() { _mouseOverHotbar = false; HideFloatTooltip(); }
 
     // ── 通用懸浮 Tooltip（跟隨游標）─────────────────────────────────────
     private void BuildFloatTooltip(CanvasLayer hud)
@@ -1487,14 +1472,18 @@ public partial class Main : Node
         float innerW  = cols * slotW + (cols - 1) * gapX;
         float panelW  = innerW + 2 * padX;
 
-        float row0Y   = padY + 20f + 14f;          // title + hotbar-label
-        float bagLblY = row0Y + slotH + gapY;
-        float row1Y   = bagLblY + 14f;
+        // 熱鍵欄佔 2 列（HotbarSize=10, cols=5），背包佔 4 列
+        float row0Y   = padY + 20f + 14f;           // 熱鍵欄 row 0（標題 + 熱鍵標籤之後）
+        float row1Y   = row0Y + slotH + gapY;        // 熱鍵欄 row 1
+        float bagLblY = row1Y + slotH + gapY + 2f;  // 背包標籤
+        float row2Y   = bagLblY + 14f;              // 背包 row 0
 
         float[] rowY  = new float[rows];
         rowY[0] = row0Y;
-        for (int r = 1; r < rows; r++)
-            rowY[r] = row1Y + (r - 1) * (slotH + gapY);
+        rowY[1] = row1Y;
+        rowY[2] = row2Y;
+        for (int r = 3; r < rows; r++)
+            rowY[r] = row2Y + (r - 2) * (slotH + gapY);
 
         float panelH = rowY[rows - 1] + slotH + padY;
 

@@ -20,8 +20,8 @@ public static class SpellCaster
         public static SpellCastResult Failed => default;
     }
 
-    // runner != null 時，PlayerBody 法陣提交給 Runner 做跨幀執行（Wait 真實計時）
-    // runner == null 時維持舊的同步執行（Projectile/Contact 命中時使用）
+    // runner != null 時，DirectCast 法陣提交給 Runner 做跨幀執行（Wait 真實計時）
+    // runner == null 時維持同步執行（Projectile/Contact 命中時使用）
     public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
@@ -44,30 +44,54 @@ public static class SpellCaster
         {
             case ContainerType.Projectile:
             {
-                // 投射物方向：以滑鼠游標位置為準（8 方向），游標與玩家重疊時 fallback 至 Facing
+                // 投射物方向：以滑鼠游標位置為準（精確浮點，非 8 方向），游標與玩家重疊時 fallback 至 Facing
                 var mouseDelta = player.MouseGridPos - player.Position;
-                int dx = Math.Sign(mouseDelta.X);
-                int dy = Math.Sign(mouseDelta.Y);
-                if (dx == 0 && dy == 0) dx = player.Facing.X;
-                var dir   = new GridPos(dx, dy);
-                var start = new GridPos(player.Position.X + dx * 2, player.Position.Y + dy);
+                float fdx = mouseDelta.X;
+                float fdy = mouseDelta.Y;
+                if (Math.Abs(fdx) < 0.001f && Math.Abs(fdy) < 0.001f)
+                    fdx = player.Facing.X;
+                // 起點：橫向偏移 2 格，垂直方向只在向上時往上偏移（避免往下生成在地板裡）
+                int sdx    = Math.Sign(fdx) != 0 ? Math.Sign(fdx) : 0;
+                int startY = player.Position.Y + (fdy < 0f ? -1 : 0);
+                var start  = new GridPos(player.Position.X + sdx * 2, startY);
                 return new SpellCastResult
                 {
                     Ok         = true,
-                    Projectile = new SpellProjectile(start, dir, spell, player, enemies, loadout, runner),
+                    Projectile = new SpellProjectile(start, fdx, fdy, spell, player, enemies, loadout, runner),
                 };
             }
+
             case ContainerType.Contact:
+                // [已移除] Contact 現為觸發條件，保留 case 避免舊存檔施放異常
                 ExecuteContactHit(spell, player, world, enemies, loadout, runner);
                 return new SpellCastResult { Ok = true };
 
-            default:
+            // TODO-STUB: 召喚物容器——效果應由實際召喚物 AI 執行，目前以佔位效果代替
+            case ContainerType.SummonMinion:
+            case ContainerType.SummonTurret:
+            case ContainerType.SummonGuardian:
+                ExecuteSummonContainer(spell, player, world, enemies, loadout, runner);
+                return new SpellCastResult { Ok = true };
+
+            default: // DirectCast：玩家直接施放，不透過容器
                 if (runner != null)
                     runner.Submit(spell, player, world, enemies, loadout);
                 else
                     ExecuteEffects(spell, player, world, enemies, loadout);
                 return new SpellCastResult { Ok = true };
         }
+    }
+
+    // ── 召喚物容器（TODO-STUB：佔位）──────────────────────────────
+    // 最終應由召喚物 AI 實體裝載 SpellArray 並在其行動時執行；
+    // 目前直接在玩家位置執行效果作為佔位，等召喚物 AI 系統完成後替換。
+    private static void ExecuteSummonContainer(SpellArray spell, PlayerController player, TileWorld world,
+        EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
+    {
+        if (runner != null)
+            runner.Submit(spell, player, world, enemies, loadout);
+        else
+            ExecuteEffects(spell, player, world, enemies, loadout);
     }
 
     // ── Contact 容器：近戰範圍命中 ────────────────────────────────
@@ -121,7 +145,7 @@ public static class SpellCaster
         }
     }
 
-    // ── 直接執行效果（PlayerBody / Contact 命中 / 投射物命中時皆可呼叫）────
+    // ── 直接執行效果（DirectCast / Contact 命中 / 投射物命中時皆可呼叫）────
 
     // atHitPoint：效果中心即 player.Position（投射物命中 / 接觸命中時為 true）
     //             technique_slash 等會用此 flag 把爆炸 offset 改為 0，避免偏移到命中點之外
@@ -327,36 +351,11 @@ public static class SpellCaster
     internal static void ResolveTotem(string name, SpellSlot slot,
         ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
     {
-        switch (slot.Totem!.Type)
-        {
-            case TotemType.Trigger:
-                if (EvaluateTrigger(slot, player))
-                    ctx.DoneTotems.Add(name);
-                else
-                    ctx.FizzledTotems.Add(name);
-                break;
-
-            default:
-                ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
-                ctx.HitTotems.Add(name);
-                ctx.DoneTotems.Add(name);
-                break;
-        }
+        // 所有圖騰類型均為執行型（無條件評估），直接執行並記錄命中
+        ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
+        ctx.HitTotems.Add(name);
+        ctx.DoneTotems.Add(name);
     }
-
-    // ── 觸發條件判斷（Phase 1 簡化版）────────────────────────────────
-
-    private static bool EvaluateTrigger(SpellSlot slot, PlayerController player)
-        => slot.Totem!.Id switch
-        {
-            "trigger_on_cast"    => true,
-            "trigger_on_hit"     => true, // Phase 1：假設命中
-            "trigger_on_hp_low"  => player.Hp < player.MaxHp * 0.3f,
-            "trigger_on_kill"    => true, // Phase 1：假設
-            "trigger_periodic"   => true,
-            "trigger_on_damaged" => true,
-            _                    => true,
-        };
 
     // ── 分派到各類型圖騰執行器 ─────────────────────────────────────
 
@@ -365,12 +364,28 @@ public static class SpellCaster
     {
         switch (slot.Totem!.Type)
         {
+            case TotemType.Area:         ExecuteArea(slot, player, world, originOverride);            break; // TODO-STUB
             case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride); break;
-            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                break;
-            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                         break; // 位移以玩家真實位置為準
-            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);               break;
-            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);               break;
+            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride); break; // TODO-STUB
+            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);           break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                    break;
+            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);          break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);          break;
         }
+    }
+
+    private static void ExecuteArea(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    {
+        // TODO-STUB: 範圍形狀施放（扇形/周身/遠距圓形/射線衝擊），目前以爆炸佔位
+        var origin = originOverride ?? player.Position;
+        world.Explode(origin.X, origin.Y, 2);
+    }
+
+    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    {
+        // TODO-STUB: 投射物圖騰（能量/實物投射），目前以爆炸佔位
+        var origin = originOverride ?? player.Position;
+        world.Explode(origin.X, origin.Y, 1);
     }
 
     // ════════════════════════════════════════════════════════════

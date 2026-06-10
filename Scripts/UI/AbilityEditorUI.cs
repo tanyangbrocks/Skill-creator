@@ -132,17 +132,21 @@ public partial class AbilityEditorUI : Control
         }
 
         HSpacer(row, 12);
-        row.AddChild(Lbl("容器：", vcenter: true));
+        row.AddChild(Lbl("施放方式：", vcenter: true));
 
         var ctGrp = new ButtonGroup();
-        foreach (var (ct, ctLbl) in new (ContainerType, string)[]
+        foreach (var (ct, ctLbl, ctColor) in new (ContainerType, string, Color)[]
         {
-            (ContainerType.PlayerBody,  "本體"),
-            (ContainerType.Projectile,  "投射物"),
-            (ContainerType.Contact,     "接觸"),
+            // 直接施放：非容器，玩家本體直接執行
+            (ContainerType.DirectCast,     "直接施放", new Color(0.22f, 0.28f, 0.22f)),
+            // 容器類型：裝載效果的實體
+            (ContainerType.Projectile,     "投射物",   new Color(0.18f, 0.26f, 0.36f)),
+            (ContainerType.SummonMinion,   "精靈",     new Color(0.28f, 0.22f, 0.35f)),
+            (ContainerType.SummonTurret,   "砲台",     new Color(0.28f, 0.22f, 0.35f)),
+            (ContainerType.SummonGuardian, "護衛",     new Color(0.28f, 0.22f, 0.35f)),
         })
         {
-            var btn = Btn(ctLbl, new Color(0.22f, 0.28f, 0.22f));
+            var btn = Btn(ctLbl, ctColor);
             btn.ToggleMode = true; btn.ButtonGroup = ctGrp;
             btn.ButtonPressed = _spell.Container == ct;
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
@@ -263,129 +267,56 @@ public partial class AbilityEditorUI : Control
         VSpacer(vbox, 6);
         vbox.AddChild(SectionLbl("▶ 積木庫"));
 
-        var blockLibCats = new (string cat, (string lbl, BlockType bt)[])[]
+        var blockLibCats = new (string cat, BlockType[] bts)[]
         {
-            ("── 呼叫 ──", new[] {
-                ("觸發圖騰",  BlockType.InvokeTotem),
-                ("發動法陣",  BlockType.InvokeSpell),
-            }),
-            ("── 控制流 ──", new[] {
-                ("If",        BlockType.If),
-                ("Evaluate",  BlockType.Evaluate),
-                ("Repeat×N",  BlockType.RepeatN),
-                ("While",     BlockType.RepeatWhile),
-                ("ForEach",   BlockType.ForEachNearby),
-                ("Wait",      BlockType.Wait),
-                ("Sleep幀",   BlockType.Sleep),
-                ("Die",       BlockType.Die),
-                ("Random",    BlockType.RandomChoice),
-                ("序列閘門",  BlockType.SequentialGate),
-            }),
-            ("── 邊緣觸發 ──", new[] {
-                ("上升沿",    BlockType.RisingEdge),
-                ("下降沿",    BlockType.FallingEdge),
-                ("單次脈衝",  BlockType.SinglePulse),
-                ("交替觸發",  BlockType.AlternateTrigger),
-            }),
-            ("── 偵測 ──", new[] {
-                ("HP%",         BlockType.DetectHpThreshold),
-                ("MP%",         BlockType.DetectMpThreshold),
-                ("受傷偵測",    BlockType.DetectHitReceived),
-                ("偵測實體",    BlockType.DetectEntityEnter),
-                ("偵測投射物",  BlockType.DetectProjectile),
-                ("偵測攻擊",    BlockType.DetectAttack),
-                ("偵測狀態",    BlockType.DetectStatusChange),
-            }),
-            ("── 發動模式 ──", new[] {
-                ("即時型",    BlockType.SetActivationInstant),
-                ("宣告型",    BlockType.SetActivationDeclare),
-                ("持續型",    BlockType.SetActivationSustained),
-            }),
-            ("── 效果標記 ──", new[] {
-                ("效果標籤",  BlockType.EffectLabel),
-                ("效果開始",  BlockType.OnEffectStart),
-                ("效果結束",  BlockType.OnEffectEnd),
-            }),
-            ("── 執行時機 ──", new[] {
-                ("末端時機",  BlockType.EndOfChain),
-                ("捨棄",      BlockType.Discard),
-            }),
-            ("── 變數 ──", new[] {
-                ("設定",      BlockType.SetVar),
-                ("讀取",      BlockType.GetVar),
-                ("Compare",   BlockType.Compare),
-                ("布林設",    BlockType.SetVarBool),
-                ("布林讀",    BlockType.GetVarBool),
-            }),
-            ("── 列表 ──", new[] {
-                ("建立",      BlockType.ListCreate),
-                ("加入末尾",  BlockType.ListAppend),
-                ("取出尾部",  BlockType.ListPop),
-                ("取出頭部",  BlockType.ListDequeue),
-                ("讀取",      BlockType.ListGet),
-                ("設定",      BlockType.ListSet),
-                ("長度",      BlockType.ListLength),
-                ("包含",      BlockType.ListContains),
-                ("移除",      BlockType.ListRemoveAt),
-                ("清空",      BlockType.ListClear),
-            }),
-            ("── 實體 ──", new[] {
-                ("查詢附近",  BlockType.QueryNear),
-                ("最近實體",  BlockType.QueryNearest),
-                ("讀屬性",    BlockType.GetEntityProp),
-                ("寫屬性",    BlockType.SetEntityProp),
-            }),
-            ("── 廣播 ──", new[] {
-                ("廣播",      BlockType.Broadcast),
-                ("廣播等待",  BlockType.BroadcastAndWait),
-                ("接收",      BlockType.OnReceive),
-            }),
-            ("── 計數器 ──", new[] {
-                ("設定",      BlockType.TaskCounterSet),
-                ("增加",      BlockType.TaskCounterAdd),
-                ("讀取",      BlockType.TaskCounterGet),
-                ("到達",      BlockType.TaskCounterOnReach),
-                ("歸零",      BlockType.TaskCounterReset),
-            }),
-            ("── 統計 ──", new[] {
-                ("戰鬥統計",  BlockType.GetBattleStat),
-                ("連擊數",    BlockType.GetComboCount),
-                ("法陣觸發",  BlockType.LoopcastIndex),
-                ("成功次數",  BlockType.SuccessCount),
-            }),
-            ("── 向量 ──", new[] {
-                ("建立向量",  BlockType.VecMake),
-                ("取分量",    BlockType.VecGetComp),
-                ("加法",      BlockType.VecAdd),
-                ("減法",      BlockType.VecSub),
-                ("縮放",      BlockType.VecScale),
-                ("反向",      BlockType.VecNegate),
-                ("正規化",    BlockType.VecNorm),
-                ("長度",      BlockType.VecLength),
-                ("點積",      BlockType.VecDot),
-                ("叉積",      BlockType.VecCross),
-                ("實體位置",  BlockType.VecFromEntity),
-                ("焦點位置",  BlockType.FocalPoint),
-                ("射線",      BlockType.Raycast),
-            }),
-            ("── 攔截 ──", new[] {
-                ("傷害護盾",  BlockType.DamageShield),
-                ("死亡守衛",  BlockType.DeathGuard),
-            }),
-            ("── 快照 ──", new[] {
-                ("錨點",      BlockType.Anchor),
-                ("回朔",      BlockType.Rollback),
-            }),
+            ("── 呼叫 ──",     new[] { BlockType.InvokeTotem, BlockType.InvokeSpell }),
+            ("── 控制流 ──",   new[] { BlockType.If, BlockType.Evaluate, BlockType.RepeatN,
+                                       BlockType.RepeatWhile, BlockType.ForEachNearby,
+                                       BlockType.Wait, BlockType.Sleep, BlockType.Die,
+                                       BlockType.RandomChoice, BlockType.SequentialGate }),
+            ("── 觸發條件 ──", new[] { BlockType.RisingEdge, BlockType.FallingEdge,
+                                       BlockType.SinglePulse, BlockType.AlternateTrigger }),
+            ("── 偵測 ──",     new[] { BlockType.DetectHpThreshold, BlockType.DetectMpThreshold,
+                                       BlockType.DetectHitReceived, BlockType.DetectEntityEnter,
+                                       BlockType.DetectProjectile, BlockType.DetectAttack,
+                                       BlockType.DetectStatusChange }),
+            ("── 發動模式 ──", new[] { BlockType.SetActivationInstant, BlockType.SetActivationDeclare,
+                                       BlockType.SetActivationSustained }),
+            ("── 效果標示 ──", new[] { BlockType.EffectLabel, BlockType.OnEffectStart,
+                                       BlockType.OnEffectEnd }),
+            ("── 執行時機 ──", new[] { BlockType.EndOfChain, BlockType.Discard }),
+            ("── 變數 ──",     new[] { BlockType.SetVar, BlockType.GetVar, BlockType.Compare,
+                                       BlockType.SetVarBool, BlockType.GetVarBool }),
+            ("── 列表 ──",     new[] { BlockType.ListCreate, BlockType.ListAppend, BlockType.ListPop,
+                                       BlockType.ListDequeue, BlockType.ListGet, BlockType.ListSet,
+                                       BlockType.ListLength, BlockType.ListContains,
+                                       BlockType.ListRemoveAt, BlockType.ListClear }),
+            ("── 實體 ──",     new[] { BlockType.QueryNear, BlockType.QueryNearest,
+                                       BlockType.GetEntityProp, BlockType.SetEntityProp }),
+            ("── 廣播 ──",     new[] { BlockType.Broadcast, BlockType.BroadcastAndWait,
+                                       BlockType.OnReceive }),
+            ("── 計數器 ──",   new[] { BlockType.TaskCounterSet, BlockType.TaskCounterAdd,
+                                       BlockType.TaskCounterGet, BlockType.TaskCounterOnReach,
+                                       BlockType.TaskCounterReset }),
+            ("── 統計 ──",     new[] { BlockType.GetBattleStat, BlockType.GetComboCount,
+                                       BlockType.LoopcastIndex, BlockType.SuccessCount }),
+            ("── 向量 ──",     new[] { BlockType.VecMake, BlockType.VecGetComp, BlockType.VecAdd,
+                                       BlockType.VecSub, BlockType.VecScale, BlockType.VecNegate,
+                                       BlockType.VecNorm, BlockType.VecLength, BlockType.VecDot,
+                                       BlockType.VecCross, BlockType.VecFromEntity,
+                                       BlockType.FocalPoint, BlockType.Raycast }),
+            ("── 攔截 ──",     new[] { BlockType.DamageShield, BlockType.DeathGuard }),
+            ("── 快照 ──",     new[] { BlockType.Anchor, BlockType.Rollback }),
         };
 
-        foreach (var (cat, entries) in blockLibCats)
+        foreach (var (cat, bts) in blockLibCats)
         {
             var catLbl = new Label { Text = cat };
             catLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.65f));
             catLbl.AddThemeFontSizeOverride("font_size", 11);
             vbox.AddChild(catLbl);
 
-            foreach (var (lbl, bt) in entries)
+            foreach (var bt in bts)
             {
                 var captBt = bt;
                 var btn = Btn($"  {BlockTypeName(bt)}", new Color(0.14f, 0.18f, 0.26f));
@@ -675,7 +606,7 @@ public partial class AbilityEditorUI : Control
             tName.HorizontalAlignment = HorizontalAlignment.Center;
             vbox.AddChild(tName);
 
-            var tType = Lbl(slot.Totem.Type == TotemType.Trigger ? "[觸發]" : "[武技]",
+            var tType = Lbl(TotemTypeTag(slot.Totem.Type),
                 11, TotemClr(slot.Totem.Type));
             tType.HorizontalAlignment = HorizontalAlignment.Center;
             vbox.AddChild(tType);
@@ -893,65 +824,11 @@ public partial class AbilityEditorUI : Control
     }
 
 
-    private static string BlockTypeName(BlockType type) => type switch
-    {
-        BlockType.InvokeTotem        => "使用技能",
-        BlockType.InvokeSpell        => "施放其他法陣",
-        BlockType.If                 => "如果",
-        BlockType.RepeatN            => "重複 N 次",
-        BlockType.RepeatWhile        => "條件成立，重複",
-        BlockType.RandomChoice       => "隨機選擇",
-        BlockType.ForEachNearby      => "對每個附近敵人",
-        BlockType.Wait               => "等待",
-        BlockType.RisingEdge         => "開始觸發",
-        BlockType.FallingEdge        => "結束觸發",
-        BlockType.SinglePulse        => "僅觸發一次",
-        BlockType.SetVar             => "設定變數",
-        BlockType.GetVar             => "讀取變數",
-        BlockType.SetVarBool         => "設定布林",
-        BlockType.GetVarBool         => "讀取布林",
-        BlockType.Compare            => "比較數值",
-        BlockType.QueryNear          => "查詢附近敵人",
-        BlockType.GetEntityProp      => "讀取敵人屬性",
-        BlockType.SetEntityProp      => "設定敵人屬性",
-        BlockType.Broadcast          => "廣播訊號",
-        BlockType.BroadcastAndWait   => "廣播訊號（等待）",
-        BlockType.OnReceive          => "收到訊號時",
-        BlockType.DetectHpThreshold  => "生命值低於 N%",
-        BlockType.DetectMpThreshold  => "魔力值低於 N%",
-        BlockType.DetectEntityEnter  => "偵測敵人進入範圍",
-        BlockType.TaskCounterSet     => "計數器設定值",
-        BlockType.TaskCounterAdd     => "計數器增加",
-        BlockType.TaskCounterOnReach => "計數器到達時",
-        BlockType.TaskCounterReset   => "計數器歸零",
-        BlockType.EffectLabel        => "效果標記",
-        _                            => type.ToString(),
-    };
+    // 積木名稱統一委託給 ScratchCanvas._descs，避免重複定義與英文 fallback
+    private static string BlockTypeName(BlockType type) => ScratchCanvas.BlockName(type);
 
-    private static Color BlockTypeColor(BlockType type) => type switch
-    {
-        BlockType.InvokeTotem or BlockType.InvokeSpell
-                                     => new Color(1.0f,  0.72f, 0.35f),  // 橙
-        BlockType.If or BlockType.RepeatN or BlockType.RepeatWhile or
-        BlockType.RandomChoice or BlockType.ForEachNearby
-                                     => new Color(0.65f, 0.95f, 0.30f),  // 黃綠
-        BlockType.Wait               => new Color(0.38f, 0.88f, 0.48f),  // 綠
-        BlockType.RisingEdge or BlockType.FallingEdge or BlockType.SinglePulse
-                                     => new Color(0.38f, 0.88f, 0.88f),  // 青
-        BlockType.SetVar or BlockType.GetVar or BlockType.SetVarBool or
-        BlockType.GetVarBool or BlockType.Compare
-                                     => new Color(1.0f,  0.88f, 0.28f),  // 黃
-        BlockType.QueryNear or BlockType.GetEntityProp or BlockType.SetEntityProp
-                                     => new Color(0.55f, 0.80f, 1.0f),   // 藍
-        BlockType.Broadcast or BlockType.BroadcastAndWait or BlockType.OnReceive
-                                     => new Color(0.80f, 0.38f, 1.0f),   // 紫
-        BlockType.DetectHpThreshold or BlockType.DetectMpThreshold or
-        BlockType.DetectEntityEnter  => new Color(1.0f,  0.42f, 0.42f),  // 紅
-        BlockType.TaskCounterSet or BlockType.TaskCounterAdd or
-        BlockType.TaskCounterOnReach or BlockType.TaskCounterReset
-                                     => new Color(0.95f, 0.65f, 0.95f),  // 淡紫
-        _                            => new Color(0.75f, 0.75f, 0.75f),
-    };
+    // 顏色同樣委託給 ScratchCanvas._descs，與積木頭部色塊保持一致
+    private static Color BlockTypeColor(BlockType type) => ScratchCanvas.BlockColor(type);
 
     private void SaveSpell()
     {
@@ -1061,8 +938,9 @@ public partial class AbilityEditorUI : Control
 
     private static Color TotemClr(TotemType t) => t switch
     {
-        TotemType.Trigger      => new Color(0.55f, 0.80f, 1.0f),  // 藍
+        TotemType.Area         => new Color(0.55f, 0.80f, 1.0f),  // 藍
         TotemType.Technique    => new Color(1.0f,  0.72f, 0.35f), // 橙
+        TotemType.Projectile   => new Color(0.90f, 0.60f, 1.0f),  // 淺紫
         TotemType.Morph        => new Color(0.40f, 0.90f, 0.80f), // 青
         TotemType.Displacement => new Color(0.65f, 0.95f, 0.30f), // 黃綠
         TotemType.Summon       => new Color(1.0f,  0.75f, 0.20f), // 金
@@ -1070,10 +948,23 @@ public partial class AbilityEditorUI : Control
         _                      => new Color(0.8f,  0.8f,  0.8f),
     };
 
+    private static string TotemTypeTag(TotemType t) => t switch
+    {
+        TotemType.Area         => "[範圍]",
+        TotemType.Technique    => "[武技]",
+        TotemType.Projectile   => "[投射]",
+        TotemType.Morph        => "[變幻]",
+        TotemType.Displacement => "[位移]",
+        TotemType.Summon       => "[召喚]",
+        TotemType.Domain       => "[領域]",
+        _                      => "[?]",
+    };
+
     private static string TotemTypeName(TotemType t) => t switch
     {
-        TotemType.Trigger      => "── 觸發圖騰 ──",
+        TotemType.Area         => "── 範圍圖騰 ──",
         TotemType.Technique    => "── 武技圖騰 ──",
+        TotemType.Projectile   => "── 投射物圖騰 ──",
         TotemType.Morph        => "── 變幻圖騰 ──",
         TotemType.Displacement => "── 位移圖騰 ──",
         TotemType.Summon       => "── 召喚圖騰 ──",

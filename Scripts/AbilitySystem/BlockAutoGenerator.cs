@@ -16,50 +16,18 @@ public static class BlockAutoGenerator
     {
         var blocks = new List<BlockNode>();
 
-        var triggers = new List<(int idx, SpellSlot slot)>();
-        var actions  = new List<(int idx, SpellSlot slot)>();
+        var actions = new List<(int idx, SpellSlot slot)>();
 
         for (int i = 0; i < spell.Slots.Count; i++)
         {
             var s = spell.Slots[i];
             if (s.IsEmpty) continue;
-            if (s.Totem!.Type == TotemType.Trigger)
-                triggers.Add((i, s));
-            else
-                actions.Add((i, s));
+            actions.Add((i, s));
         }
 
-        if (triggers.Count == 0)
-        {
-            // 無觸發圖騰：直接依序執行所有動作圖騰
-            foreach (var (idx, _) in actions)
-                blocks.Add(Invoke(SlotRef(spell, idx)));
-        }
-        else
-        {
-            // 有觸發圖騰：先觸發條件，條件成立才執行動作
-            var actionBlocks = actions
-                .Select(a => Invoke(SlotRef(spell, a.idx)))
-                .ToList<BlockNode>();
-
-            foreach (var (tIdx, _) in triggers)
-            {
-                string tRef = SlotRef(spell, tIdx);
-                blocks.Add(Invoke(tRef));
-
-                // If 觸發完成 → 執行所有動作
-                blocks.Add(new BlockNode
-                {
-                    Type   = BlockType.If,
-                    Params = new Dictionary<string, object?>
-                    {
-                        ["conditionType"] = "totemDone",
-                        ["totemName"]     = tRef,
-                    },
-                    ThenBranch = new List<BlockNode>(actionBlocks),
-                });
-            }
-        }
+        // 所有插槽均為動作圖騰，依序執行
+        foreach (var (idx, _) in actions)
+            blocks.Add(Invoke(SlotRef(spell, idx)));
 
         return blocks;
     }
