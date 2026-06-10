@@ -290,12 +290,18 @@ public static class SpellCaster
         EnemyManager enemies, PlayerController player, float radius)
     {
         var origin = player.Position;
-        return enemies.Enemies
-            .Select(e => (e, dist: e.IsAlive ? e.Position.DistanceTo(origin) : float.MaxValue))
-            .Where(x => x.e.IsAlive && x.dist <= radius)
-            .OrderBy(x => x.dist)
-            .Select(x => new EntityInfo(x.e.Id, x.e.Position, x.e.Hp, x.e.MaxHp))
-            .ToList();
+        var tmp    = new List<(float Dist, EntityInfo Info)>();
+        foreach (var e in enemies.Enemies)
+        {
+            if (!e.IsAlive) continue;
+            float d = e.Position.DistanceTo(origin);
+            if (d <= radius)
+                tmp.Add((d, new EntityInfo(e.Id, e.Position, e.Hp, e.MaxHp)));
+        }
+        tmp.Sort(static (a, b) => a.Dist.CompareTo(b.Dist));
+        var result = new List<EntityInfo>(tmp.Count);
+        for (int i = 0; i < tmp.Count; i++) result.Add(tmp[i].Info);
+        return result;
     }
 
     // ── 建立插槽參考對照表 ─────────────────────────────────────────

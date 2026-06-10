@@ -117,16 +117,19 @@ public static class MapGenerator
             cells[x, y] = rng.NextSingle() < 0.45f;
 
         // 4 輪標準平滑 + 1 輪激進平滑（填碎孤島）
+        // ping-pong 雙緩衝：交替以 cells/buf 當讀寫面，省去 5 次 Clone()
+        var buf = new bool[W, H];
         for (int step = 0; step < 4; step++)
-            cells = SmoothCa(cells, W, H, caveTop, threshold: 5);
-        cells = SmoothCa(cells, W, H, caveTop, threshold: 4);
-
-        return cells;
+        {
+            SmoothCa(cells, buf, W, H, caveTop, threshold: 5);
+            (cells, buf) = (buf, cells);
+        }
+        SmoothCa(cells, buf, W, H, caveTop, threshold: 4);
+        return buf;
     }
 
-    private static bool[,] SmoothCa(bool[,] cells, int W, int H, int caveTop, int threshold)
+    private static void SmoothCa(bool[,] src, bool[,] dst, int W, int H, int caveTop, int threshold)
     {
-        var next = (bool[,])cells.Clone();
         for (int y = caveTop; y < H - 8; y++)
         for (int x = 0; x < W; x++)
         {
@@ -137,12 +140,11 @@ public static class MapGenerator
                 int nx = x + dx, ny = y + dy;
                 if (nx < 0 || nx >= W || ny < 0 || ny >= H || ny < caveTop)
                     stoneN++;
-                else if (!cells[nx, ny])
+                else if (!src[nx, ny])
                     stoneN++;
             }
-            next[x, y] = stoneN < threshold;
+            dst[x, y] = stoneN < threshold;
         }
-        return next;
     }
 
     private static void ApplyCaves(TileWorld world, bool[,] caves, int[] heights, int W, int H)
