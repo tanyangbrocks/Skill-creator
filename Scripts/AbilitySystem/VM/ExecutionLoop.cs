@@ -131,7 +131,7 @@ public class ExecutionLoop
         {
             case OpCode.Wait:
             {
-                float dur = Param<float>(instr, "duration", 0f);
+                float dur = ResolveNum(instr, "duration", ctx);
                 if (dur > 0f)
                 {
                     ctx.WaitRemaining = dur;
@@ -153,7 +153,7 @@ public class ExecutionLoop
                 break;
 
             case OpCode.RepeatPush:
-                ctx.LoopCounters.Push(ClampCount(instr));
+                ctx.LoopCounters.Push(ClampCount(instr, ctx));
                 ctx.PC++;
                 break;
 
@@ -327,7 +327,7 @@ public class ExecutionLoop
                 {
                     case "hp":
                     {
-                        float damage = Param<float>(instr, "damage", 0f);
+                        float damage = ResolveNum(instr, "damage", ctx);
                         if (damage > 0f)
                         {
                             ctx.PendingEntityDamageId     = ent.Id;
@@ -450,7 +450,7 @@ public class ExecutionLoop
 
             case OpCode.SleepFrames:
             {
-                int frames = Math.Max(1, (int)Param<float>(instr, "frames", 1f));
+                int frames = Math.Max(1, (int)ResolveNum(instr, "frames", ctx));
                 ctx.WaitFramesRemaining = frames;
                 ctx.State = ExecutionState.WaitingFrames;
                 // PC 不前進：等 Step 頂部遞減到 0 後 PC++
@@ -1080,11 +1080,10 @@ public class ExecutionLoop
 
     // ── 工具方法 ─────────────────────────────────────────────────────
 
-    private static int ClampCount(Instruction instr)
+    private static int ClampCount(Instruction instr, ExecutionContext ctx)
     {
-        object? raw = instr.Params.GetValueOrDefault("count");
-        int n = raw switch { float f => (int)f, int i => i, _ => 1 };
-        return Math.Clamp(n, 1, 20);
+        float val = ResolveNum(instr, "count", ctx);
+        return Math.Clamp((int)val, 1, 20);
     }
 
     private static T Param<T>(Instruction instr, string key, T def)

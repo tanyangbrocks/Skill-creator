@@ -9,10 +9,12 @@ using SkillCreator.AbilitySystem.VM;
 //   SyncFrom(blocks, getSlotOptions)
 //   event Action? Changed
 //
-// 互動邏輯：
-//   • Header 拖把（BlockScript 頂端細條）→ 拖整條腳本
-//   • 積木色條拖把 → 在該索引斷開，生成新浮動腳本
-//   • 放開時靠近另一條腳本底端 → 自動連結（磁吸距離 40px）
+// 互動邏輯（3-B 版）：
+//   • Header 拖把 → 拖整條腳本
+//   • 積木色條拖把 → 斷開，生成新浮動腳本
+//   • 放開時靠近另一腳本底端 → 自動連結（磁吸 40px）
+//   • 磁吸提示：靠近時底端顯示綠色橫條
+//   • 調色盤拖放：從 AbilityEditorUI 拖出積木，放到畫布任意位置
 public partial class ScriptCanvas : Control
 {
     public event Action? Changed;
@@ -22,11 +24,16 @@ public partial class ScriptCanvas : Control
     private readonly List<BlockScript>            _scripts    = new();
     private Control                               _freeCanvas = null!;
 
-    // Drag state
+    // Script drag state
     private BlockScript? _dragging;
     private Vector2      _dragOffset;
 
-    // Index 0 = main script (maps to _blocks / SpellArray.Blocks)
+    // Snap highlight
+    private Panel _snapHL = null!;
+
+    // Palette drop preview (shown when hovering canvas during palette drag)
+    private Label _palPreview = null!;
+
     private BlockScript? MainScript => _scripts.Count > 0 ? _scripts[0] : null;
 
     public override void _Ready()
@@ -44,12 +51,32 @@ public partial class ScriptCanvas : Control
         _freeCanvas.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(_freeCanvas);
 
-        var hint = new Label { Text = "← 點擊積木庫以加入積木" };
-        hint.AddThemeColorOverride("font_color", new Color(0.35f, 0.35f, 0.45f));
-        hint.AddThemeFontSizeOverride("font_size", 12);
+        var hint = new Label { Text = "← 點擊積木庫以加入積木，或拖入此區域" };
+        hint.AddThemeColorOverride("font_color", new Color(0.32f, 0.32f, 0.42f));
+        hint.AddThemeFontSizeOverride("font_size", 11);
         hint.SetAnchorsAndOffsetsPreset(LayoutPreset.Center);
         hint.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(hint);
+
+        // Snap highlight bar (hidden until near a snap target)
+        _snapHL = new Panel();
+        _snapHL.CustomMinimumSize = new Vector2(BlockScript.BlockMinW, 4);
+        var hlStyle = new StyleBoxFlat { BgColor = new Color(0.20f, 0.90f, 0.25f, 0.85f) };
+        hlStyle.CornerRadiusTopLeft = hlStyle.CornerRadiusTopRight =
+        hlStyle.CornerRadiusBottomLeft = hlStyle.CornerRadiusBottomRight = 2;
+        _snapHL.AddThemeStyleboxOverride("panel", hlStyle);
+        _snapHL.Visible = false;
+        _snapHL.ZIndex  = 20;
+        _snapHL.MouseFilter = MouseFilterEnum.Ignore;
+        _freeCanvas.AddChild(_snapHL);
+
+        // Palette drop preview label
+        _palPreview = new Label { MouseFilter = MouseFilterEnum.Ignore };
+        _palPreview.AddThemeColorOverride("font_color", new Color(1, 1, 1, 0.85f));
+        _palPreview.AddThemeFontSizeOverride("font_size", 11);
+        _palPreview.Visible = false;
+        _palPreview.ZIndex  = 30;
+        AddChild(_palPreview);
     }
 
     // ── 公開 API ─────────────────────────────────────────────────────
@@ -59,6 +86,7 @@ public partial class ScriptCanvas : Control
         _blocks      = blocks;
         _getSlotOpts = getSlotOpts;
         _dragging    = null;
+        _snapHL.Visible = false;
 
         foreach (var s in _scripts)
         {
@@ -117,19 +145,100 @@ public partial class ScriptCanvas : Control
 
     public override void _Input(InputEvent @event)
     {
-        if (_dragging == null) return;
-
         if (@event is InputEventMouseMotion mm)
         {
-            _dragging.GlobalPosition = mm.GlobalPosition + _dragOffset;
-            GetViewport().SetInputAsHandled();
+            if (_dragging != null)
+            {
+                _dragging.GlobalPosition = mm.GlobalPosition + _dragOffset;
+                UpdateSnapHighlight(mm.GlobalPosition);
+                GetViewport().SetInputAsHandled();
+            }
+            else if (BlockDrag.Active && BlockDrag.SourceList == null)
+            {
+                UpdatePalettePreview(mm.GlobalPosition);
+            }
+            return;
         }
-        else if (@event is InputEventMouseButton mb
-                 && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
+
+        if (@event is InputEventMouseButton mb && !mb.Pressed && mb.ButtonIndex == MouseButton.Left)
         {
-            FinishDrag();
-            GetViewport().SetInputAsHandled();
+            // Palette drop on canvas
+            if (BlockDrag.Active && BlockDrag.SourceList == null && BlockDrag.Block != null)
+            {
+                HidePalettePreview();
+                if (GetGlobalRect().HasPoint(mb.GlobalPosition))
+                {
+                    var localPos = mb.GlobalPosition - GlobalPosition;
+                    var newBlocks = new List<BlockNode> { BlockDrag.Block };
+                    SpawnScript(newBlocks, localPos, isMain: false);
+                }
+                BlockDrag.Clear();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            // Script drag release
+            if (_dragging != null)
+            {
+                _snapHL.Visible = false;
+                FinishDrag();
+                GetViewport().SetInputAsHandled();
+            }
         }
+    }
+
+    private void UpdateSnapHighlight(Vector2 mouseGlobal)
+    {
+        if (_dragging == null) { _snapHL.Visible = false; return; }
+
+        const float ShowDist = 60f;
+        BlockScript? best = null;
+        float bestD = ShowDist;
+        var droppedTop = _dragging.GetTopSnapGlobal();
+
+        foreach (var s in _scripts)
+        {
+            if (s == _dragging) continue;
+            float d = s.GetBottomSnapGlobal().DistanceTo(droppedTop);
+            if (d < bestD) { bestD = d; best = s; }
+        }
+
+        if (best != null)
+        {
+            var bottomGlobal = best.GetBottomSnapGlobal();
+            _snapHL.GlobalPosition = bottomGlobal - new Vector2(BlockScript.BlockMinW * 0.5f, 2f);
+            _snapHL.Visible = true;
+        }
+        else
+        {
+            _snapHL.Visible = false;
+        }
+    }
+
+    private void UpdatePalettePreview(Vector2 mouseGlobal)
+    {
+        if (!BlockDrag.Active || BlockDrag.Block == null)
+        {
+            HidePalettePreview();
+            return;
+        }
+
+        bool overCanvas = GetGlobalRect().HasPoint(mouseGlobal);
+        if (overCanvas)
+        {
+            _palPreview.Text = $"[ {ScratchCanvas.BlockName(BlockDrag.Block.Type)} ]";
+            _palPreview.GlobalPosition = mouseGlobal + new Vector2(10f, -16f);
+            _palPreview.Visible = true;
+        }
+        else
+        {
+            HidePalettePreview();
+        }
+    }
+
+    private void HidePalettePreview()
+    {
+        _palPreview.Visible = false;
     }
 
     private void FinishDrag()
@@ -139,7 +248,6 @@ public partial class ScriptCanvas : Control
         if (dropped == null) return;
         dropped.ZIndex = 0;
 
-        // Snap: find nearest script whose bottom is close to dropped's top
         const float Threshold = 40f;
         BlockScript? target = null;
         float bestDist = Threshold;

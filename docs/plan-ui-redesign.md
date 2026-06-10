@@ -215,11 +215,11 @@
 - [x] `ScratchCanvas.cs` 重構：`BuildUI` delegate 改傳 `Func<opts>?`；`SlotPicker` 與全輔助方法改為 `internal static`；加 `TryGetDescriptor`
 - [x] `AbilityEditorUI.cs`：`_canvas` 型別由 `ScratchCanvas` 改為 `ScriptCanvas`
 
-#### Stage 3-B：完整 Scratch 互動（待實作）
-- [ ] 調色盤拖入畫布（從左側積木庫拖入 ScriptCanvas 任意位置）
-- [ ] C-shape 容器的 `_Draw()` 繪製（視覺上「包住」子積木）
-- [ ] Reporter 積木槽（NUMBER 型參數支援嵌入報告器）
-- [ ] SnapPoint 視覺高亮（靠近時顯示綠色吸附提示）
+#### Stage 3-B：完整 Scratch 互動 ✅（2026-06-10）
+- [x] 調色盤拖入畫布（AbilityEditorUI._Input 4px 門檻啟動 BlockDrag.BeginNew，ScriptCanvas drop 生成新腳本）
+- [x] C-shape 容器視覺（body Panel 左邊框 + closeRow armEnd+shelf，不用 _Draw()）
+- [x] Reporter 積木槽（RepeatN/Wait/Sleep/SetEntityProp 改 SmallEdit，ExecutionLoop 改呼叫 ResolveNum）
+- [x] SnapPoint 視覺高亮（_snapHL 綠色橫條，60px 範圍內顯示在目標底端；_palPreview 游標預覽 Label）
 
 #### Stage 3-C：其他（待實作）
 - [ ] 新版左側面板（母/子分類標籤 + 可捲動積木清單）

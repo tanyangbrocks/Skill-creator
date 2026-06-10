@@ -29,6 +29,10 @@ public partial class AbilityEditorUI : Control
     // 由 Main.cs 每幀更新，用於刻印庫境界門檻顯示
     public  int       PlayerLevel   { get; set; } = 1;
 
+    // 調色盤拖放狀態
+    private BlockType? _palDragType;
+    private Vector2    _palDragStart;
+
     // ── UI 節點引用 ───────────────────────────────────────────────
     private LineEdit      _nameInput      = null!;
     private HBoxContainer _slotsRow       = null!;
@@ -339,7 +343,24 @@ public partial class AbilityEditorUI : Control
                 btn.CustomMinimumSize = new Vector2(0, 24);
                 btn.AddThemeFontSizeOverride("font_size", 11);
                 btn.AddThemeColorOverride("font_color", BlockTypeColor(bt));
-                btn.Pressed += () => { _spell.Blocks.Add(ScratchCanvas.MakeDefaultBlock(captBt)); SyncCanvas(); };
+                btn.Pressed += () =>
+                {
+                    // If drag already started via _Input, Pressed fires on release — ignore plain click
+                    // during an active drag; otherwise add normally.
+                    if (!BlockDrag.Active)
+                    {
+                        _spell.Blocks.Add(ScratchCanvas.MakeDefaultBlock(captBt));
+                        SyncCanvas();
+                    }
+                };
+                btn.GuiInput += @event =>
+                {
+                    if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+                    {
+                        _palDragType  = captBt;
+                        _palDragStart = mb.GlobalPosition;
+                    }
+                };
                 vbox.AddChild(btn);
             }
         }
@@ -896,6 +917,33 @@ public partial class AbilityEditorUI : Control
     // ════════════════════════════════════════════════════════════
 
     // 有色背景的 Panel（子節點自行用 FullRect anchor 填滿）
+    // ── 調色盤拖放輸入處理 ────────────────────────────────────────────
+
+    public override void _Input(InputEvent @event)
+    {
+        if (_palDragType == null && !BlockDrag.Active) return;
+
+        if (@event is InputEventMouseMotion mm)
+        {
+            // 移動超過 4px 才啟動拖放（避免普通點擊誤觸）
+            if (_palDragType != null && !BlockDrag.Active)
+            {
+                if (mm.GlobalPosition.DistanceTo(_palDragStart) > 4f)
+                {
+                    BlockDrag.BeginNew(ScratchCanvas.MakeDefaultBlock(_palDragType.Value));
+                    _palDragType = null;
+                }
+            }
+            return;
+        }
+
+        if (@event is InputEventMouseButton mb && !mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+        {
+            // 放開滑鼠：清除待拖狀態（ScriptCanvas 的 _Input 先於此處處理真正的拖放落點）
+            _palDragType = null;
+        }
+    }
+
     private static Panel Tinted(Color c)
     {
         var p = new Panel();

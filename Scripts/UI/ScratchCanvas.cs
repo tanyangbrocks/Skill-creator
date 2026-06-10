@@ -470,8 +470,8 @@ public partial class ScratchCanvas : Control
         // ── 控制流 ────────────────────────────────────────────────────
         { BlockType.If,           new(CFlow, "如果",        () => B(BlockType.If, ("conditionType", "totemDone"), ("totemName", "")),
             ConditionUI) },
-        { BlockType.RepeatN,      new(CFlow, "重複 N 次",   () => B(BlockType.RepeatN,   ("count", 2f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "count", 1f, 20f, 1f, 36)); r.AddChild(TinyLbl("次")); }) },
+        { BlockType.RepeatN,      new(CFlow, "重複 N 次",   () => B(BlockType.RepeatN,   ("count", "2")),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "count", "次數/變數", 60)); r.AddChild(TinyLbl("次")); }) },
         { BlockType.RepeatWhile,  new(CFlow, "條件成立，重複", () => B(BlockType.RepeatWhile, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
             ConditionUI) },
         { BlockType.RandomChoice, new(CFlow, "隨機選擇",    () => B(BlockType.RandomChoice, ("count", 2f)),
@@ -484,10 +484,10 @@ public partial class ScratchCanvas : Control
             null) },
 
         // ── 時序 ──────────────────────────────────────────────────────
-        { BlockType.Wait,         new(CGrn,  "等待",        () => B(BlockType.Wait, ("duration", 1f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "duration", 0.1f, 30f, 0.1f, 42)); r.AddChild(TinyLbl("秒")); }) },
-        { BlockType.Sleep,        new(CGrn,  "等待 N 幀",   () => B(BlockType.Sleep, ("frames", 1f)),
-            (r, b, _) => { r.AddChild(SmallSpin(b, "frames", 1f, 300f, 1f, 44)); r.AddChild(TinyLbl("幀")); }) },
+        { BlockType.Wait,         new(CGrn,  "等待",        () => B(BlockType.Wait, ("duration", "1")),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "duration", "秒數/變數", 60)); r.AddChild(TinyLbl("秒")); }) },
+        { BlockType.Sleep,        new(CGrn,  "等待 N 幀",   () => B(BlockType.Sleep, ("frames", "1")),
+            (r, b, _) => { r.AddChild(SmallEdit(b, "frames", "幀數/變數", 60)); r.AddChild(TinyLbl("幀")); }) },
 
         // ── 觸發時機 ──────────────────────────────────────────────────
         { BlockType.RisingEdge,   new(CCyan, "條件剛成立時",
@@ -581,7 +581,7 @@ public partial class ScratchCanvas : Control
                 r.AddChild(TinyLbl("→"));
                 r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64));
             }) },
-        { BlockType.SetEntityProp,new(CBlue, "設定敵人屬性",    () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", 10f)),
+        { BlockType.SetEntityProp,new(CBlue, "設定敵人屬性",    () => B(BlockType.SetEntityProp, ("property", "hp"), ("damage", "10")),
             (r, b, _) =>
             {
                 string[] props = { "hp", "x", "y" };
@@ -591,7 +591,7 @@ public partial class ScratchCanvas : Control
                 if (prop == "hp")
                 {
                     r.AddChild(TinyLbl("扣除"));
-                    r.AddChild(SmallSpin(b, "damage", 1f, 999f, 1f, 52));
+                    r.AddChild(SmallEdit(b, "damage", "傷害/變數", 60));
                 }
                 else
                 {

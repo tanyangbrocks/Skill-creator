@@ -220,43 +220,46 @@ public partial class BlockScript : Control
     // C-shape container for a branch's child block list
     private Control MakeBranch(string label, List<BlockNode> children)
     {
-        var wrap = new Panel();
-        var wStyle = new StyleBoxFlat
-        {
-            BgColor          = new Color(0.10f, 0.12f, 0.10f),
-            BorderColor      = new Color(0.22f, 0.38f, 0.22f),
-            BorderWidthLeft  = 2,
-            BorderWidthBottom = 1,
-        };
-        wStyle.CornerRadiusBottomLeft = wStyle.CornerRadiusBottomRight = 3;
-        wrap.AddThemeStyleboxOverride("panel", wStyle);
-        wrap.MouseFilter = MouseFilterEnum.Ignore;
+        const float ArmW   = 14f;
+        const float ArmClr = 0.22f;
+        var arm   = new Color(ArmClr, 0.38f, ArmClr);
+        var darkBg = new Color(0.09f, 0.11f, 0.09f);
+
+        var outer = new VBoxContainer();
+        outer.AddThemeConstantOverride("separation", 0);
+        outer.MouseFilter = MouseFilterEnum.Ignore;
+
+        // ── Content area ─────────────────────────────────────────────
+        var body = new Panel();
+        var bStyle = new StyleBoxFlat { BgColor = darkBg };
+        bStyle.BorderWidthLeft = 2;
+        bStyle.BorderColor = arm;
+        body.AddThemeStyleboxOverride("panel", bStyle);
+        body.MouseFilter = MouseFilterEnum.Ignore;
 
         var inner = new VBoxContainer();
         inner.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         inner.AddThemeConstantOverride("separation", 0);
-        inner.OffsetLeft  = 16f;
+        inner.OffsetLeft  = ArmW;
         inner.OffsetTop   = 2f;
         inner.OffsetBottom = -2f;
         inner.MouseFilter = MouseFilterEnum.Ignore;
-        wrap.AddChild(inner);
+        body.AddChild(inner);
 
         var hdr = new Label { Text = label };
-        hdr.AddThemeColorOverride("font_color", new Color(0.38f, 0.65f, 0.38f));
+        hdr.AddThemeColorOverride("font_color", new Color(0.42f, 0.70f, 0.42f));
         hdr.AddThemeFontSizeOverride("font_size", 9);
         hdr.CustomMinimumSize = new Vector2(0, 14);
         hdr.VerticalAlignment = VerticalAlignment.Center;
         hdr.MouseFilter = MouseFilterEnum.Ignore;
         inner.AddChild(hdr);
 
-        // Sub-block cards (not split-draggable, simpler)
         for (int ci = 0; ci < children.Count; ci++)
             inner.AddChild(MakeCard(ci, children[ci], children, topLevel: false));
 
-        // Add-block shortcut
         var addBtn = new Button { Text = "＋ 加入積木", Flat = true, Alignment = HorizontalAlignment.Left };
         addBtn.CustomMinimumSize = new Vector2(0, 20);
-        addBtn.AddThemeColorOverride("font_color", new Color(0.38f, 0.62f, 0.38f));
+        addBtn.AddThemeColorOverride("font_color", new Color(0.40f, 0.65f, 0.40f));
         addBtn.AddThemeFontSizeOverride("font_size", 9);
         addBtn.MouseFilter = MouseFilterEnum.Stop;
         var captList = children;
@@ -268,7 +271,34 @@ public partial class BlockScript : Control
         };
         inner.AddChild(addBtn);
 
-        return wrap;
+        outer.AddChild(body);
+
+        // ── Closing strip (bottom of C) ───────────────────────────────
+        var closeRow = new HBoxContainer();
+        closeRow.MouseFilter = MouseFilterEnum.Ignore;
+        closeRow.AddThemeConstantOverride("separation", 0);
+
+        var armEnd = new Panel();
+        armEnd.CustomMinimumSize = new Vector2(ArmW, 8);
+        armEnd.SizeFlagsVertical = SizeFlags.Fill;
+        var aStyle = new StyleBoxFlat { BgColor = arm };
+        aStyle.CornerRadiusBottomLeft = 3;
+        armEnd.AddThemeStyleboxOverride("panel", aStyle);
+        armEnd.MouseFilter = MouseFilterEnum.Ignore;
+        closeRow.AddChild(armEnd);
+
+        var shelf = new Panel();
+        shelf.CustomMinimumSize = new Vector2(0, 8);
+        shelf.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        shelf.SizeFlagsVertical = SizeFlags.Fill;
+        var shStyle = new StyleBoxFlat { BgColor = darkBg };
+        shelf.AddThemeStyleboxOverride("panel", shStyle);
+        shelf.MouseFilter = MouseFilterEnum.Ignore;
+        closeRow.AddChild(shelf);
+
+        outer.AddChild(closeRow);
+
+        return outer;
     }
 
     // Split off blocks starting at idx; returns the detached blocks
