@@ -356,6 +356,57 @@ public static class SpellCompiler
                 code.Add(new Instruction(OpCode.RollbackSnapshot, block.Params));
                 break;
 
+            // ── 補完實作（第二批）────────────────────────────────────────
+            case BlockType.Discard:
+            case BlockType.EffectLabel:
+                // 純 UI 提示積木，不產生任何指令
+                break;
+
+            case BlockType.GetVar:
+            {
+                // 讀取具名變數 → 寫入 resultVar（複用 SetVar；ResolveNum 支援字串→變數查詢）
+                code.Add(new Instruction(OpCode.SetVar, new()
+                {
+                    ["name"]   = block.Params.GetValueOrDefault("resultVar",
+                                     block.Params.GetValueOrDefault("name", (object?)"_var")),
+                    ["value"]  = block.Params.GetValueOrDefault("name", (object?)""),
+                    ["global"] = block.Params.GetValueOrDefault("global", (object?)false),
+                }));
+                break;
+            }
+
+            case BlockType.GetComboCount:
+                code.Add(new Instruction(OpCode.ReadExecStat,
+                    new(block.Params) { ["stat"] = (object?)"comboCount" }));
+                break;
+
+            case BlockType.AlternateTrigger:
+            {
+                // 第 0, 2, 4... 次 → ThenBranch；第 1, 3, 5... 次 → ElseBranch
+                var altJump = new Instruction(OpCode.AlternateJump, new());
+                code.Add(altJump);
+                int evenStart = code.Count;
+                EmitList(block.ThenBranch, code);
+                var jmpEven = new Instruction(OpCode.Jump);
+                code.Add(jmpEven);
+                int oddStart = code.Count;
+                EmitList(block.ElseBranch, code);
+                altJump.Params["__target_even"] = (object?)evenStart;
+                altJump.Params["__target_odd"]  = (object?)oddStart;
+                jmpEven.Params["__target"]      = (object?)code.Count;
+                break;
+            }
+
+            case BlockType.SetActivationInstant:
+                code.Add(new Instruction(OpCode.SetActivationMode, new() { ["mode"] = (object?)0 }));
+                break;
+            case BlockType.SetActivationDeclare:
+                code.Add(new Instruction(OpCode.SetActivationMode, new() { ["mode"] = (object?)1 }));
+                break;
+            case BlockType.SetActivationSustained:
+                code.Add(new Instruction(OpCode.SetActivationMode, new() { ["mode"] = (object?)2 }));
+                break;
+
             default:
                 GD.PushWarning($"[SpellCompiler] 未處理的 BlockType: {block.Type}");
                 break;

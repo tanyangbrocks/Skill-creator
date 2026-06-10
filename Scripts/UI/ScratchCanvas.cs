@@ -175,6 +175,12 @@ public partial class ScratchCanvas : Control
             outer.AddChild(BuildBranch(block.ElseBranch, "選項 B（50%）", indent + 1));
         }
 
+        if (block.Type == BlockType.AlternateTrigger)
+        {
+            outer.AddChild(BuildBranch(block.ThenBranch, "偶數次執行（0,2,4...）", indent + 1));
+            outer.AddChild(BuildBranch(block.ElseBranch, "奇數次執行（1,3,5...）", indent + 1));
+        }
+
         if (block.Type == BlockType.TaskCounterOnReach)
             outer.AddChild(BuildBranch(block.ThenBranch, "到達時執行（僅一次）", indent + 1));
 

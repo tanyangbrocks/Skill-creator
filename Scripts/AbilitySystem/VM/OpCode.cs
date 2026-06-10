@@ -79,4 +79,8 @@ public enum OpCode
     // ── Phase 4：狀態快照（S-10）────────────────────────────────────
     AnchorSnapshot,    // 擷取圓形區域快照，壓入 SnapshotManager 棧（param: radius）
     RollbackSnapshot,  // 彈出棧頂快照，還原實體 + Tile + 退還 MP
+
+    // ── 補完實作（第二批）────────────────────────────────────────────
+    AlternateJump,     // 奇/偶次呼叫交替跳入 ThenBranch / ElseBranch（__target_even / __target_odd）
+    SetActivationMode, // 動態修改本法陣發動類型（mode: 0=Instant, 1=Declare, 2=Sustained）
 }

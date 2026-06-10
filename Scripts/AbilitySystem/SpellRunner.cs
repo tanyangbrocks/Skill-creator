@@ -87,6 +87,9 @@ public sealed class SpellRunner
             _       => 0f,
         };
         ctx.FixedOrigin     = fixedOrigin;
+        var capturedSpell = spell;
+        ctx.SetActivationMode = mode =>
+            capturedSpell.ActivationType = (AbilityActivationType)mode;
         var loop = new ExecutionLoop(new SafetyGuard());
         var slotByRef = SpellCaster.BuildSlotLookup(spell);
 

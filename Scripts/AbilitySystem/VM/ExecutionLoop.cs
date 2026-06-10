@@ -467,6 +467,7 @@ public class ExecutionLoop
                 {
                     "loopcastIndex" => ctx.LoopcastIndex,
                     "successCount"  => ctx.HitTotems.Count,
+                    "comboCount"    => ctx.HitTotems.Count,
                     _               => 0f,
                 };
                 if (!string.IsNullOrEmpty(resultVar))
@@ -954,6 +955,22 @@ public class ExecutionLoop
                 ctx.PC++;
                 break;
             }
+
+            // ── 補完實作（第二批）────────────────────────────────────────
+            case OpCode.AlternateJump:
+            {
+                ctx.AlternateCounts.TryGetValue(ctx.PC, out int calls);
+                ctx.AlternateCounts[ctx.PC] = calls + 1;
+                ctx.PC = (calls % 2 == 0)
+                    ? Param<int>(instr, "__target_even", ctx.PC + 1)
+                    : Param<int>(instr, "__target_odd",  ctx.PC + 1);
+                break;
+            }
+
+            case OpCode.SetActivationMode:
+                ctx.SetActivationMode?.Invoke(Param<int>(instr, "mode", 1));
+                ctx.PC++;
+                break;
 
             // ── Phase 4：狀態快照（S-10）────────────────────────────────
             case OpCode.AnchorSnapshot:

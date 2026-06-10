@@ -60,9 +60,17 @@ if ($missAE) { Fail "AbilityEditorUI palette missing: $($missAE -join ', ')" }
 else         { Pass "AbilityEditorUI palette covers all BlockTypes (3 Totem conditions intentionally excluded)" }
 
 # 1c: SpellCompiler (warn only)
-$missSP = $allBTs | Where-Object { $spText -notmatch "BlockType\.$_\b" }
+# TotemDone/Hit/Fizzle — handled as conditionType params in EvalCondition, not as compiler cases
+# SequentialGate — blocked: BlockNode has no ExtraBranches
+# EndOfChain / Detect* / OnEffect* — blocked: need event infrastructure
+$spExclude = @('TotemDone','TotemHit','TotemFizzle',
+               'SequentialGate',
+               'EndOfChain',
+               'DetectProjectile','DetectAttack','DetectStatusChange',
+               'OnEffectStart','OnEffectEnd')
+$missSP = $allBTs | Where-Object { $spText -notmatch "BlockType\.$_\b" -and $_ -notin $spExclude }
 if ($missSP) { Warn "SpellCompiler does not reference (may be handled elsewhere): $($missSP -join ', ')" }
-else         { Pass "SpellCompiler references all BlockTypes" }
+else         { Pass "SpellCompiler references all implemented BlockTypes ($($spExclude.Count) pending blocked)" }
 
 # ----------------------------------------------------------------
 Head "2. ItemId / ItemRegistry completeness"

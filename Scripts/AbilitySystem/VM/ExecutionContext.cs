@@ -91,6 +91,12 @@ public class ExecutionContext
     public Action<int>? AnchorAction   { get; set; }  // (radius) → TakeSnapshot
     public Action?      RollbackAction { get; set; }  // () → ApplyLatest
 
+    // AlternateTrigger 呼叫計數器（per-PC；偶次→ThenBranch，奇次→ElseBranch）
+    public Dictionary<int, int> AlternateCounts { get; } = new();
+
+    // SetActivation* 積木代理（SpellRunner 注入；null 時靜默忽略）
+    public Action<int>? SetActivationMode { get; set; }
+
     // 偵錯追蹤：Main._Input F3 切換；true 時 ExecutionLoop.Step 每指令前印一行
     public static bool TraceMode { get; set; } = false;
 
