@@ -66,8 +66,17 @@ public partial class TileWorldRenderer : Node2D
     public override void _Process(double delta)
     {
         if (!Paused)
+        {
+            World.ClearOccupied();
+            if (Player != null)
+                World.SetOccupied(Player.Position.X, Player.Position.Y);
+            if (Enemies != null)
+                foreach (var e in Enemies.Enemies)
+                    if (e.IsAlive) World.SetOccupied(e.Position.X, e.Position.Y);
+
             for (int i = 0; i < SimStepsPerFrame; i++)
                 World.Tick();
+        }
 
         RenderToBuffer();
         _image.SetData(World.Width, World.Height, false, Image.Format.Rgb8, _renderBuf);

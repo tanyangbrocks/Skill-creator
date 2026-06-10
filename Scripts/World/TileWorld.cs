@@ -13,6 +13,7 @@ public class TileWorld : IWorldInterface
 
     private readonly TileCell[] _cells;
     private readonly bool[] _updated;   // 防止同幀雙重更新
+    private readonly bool[] _occupied;  // 實體佔用格，CA 粒子無法穿越
     private readonly Random _rng = new(42);
     private int _frame = 0;
 
@@ -36,8 +37,9 @@ public class TileWorld : IWorldInterface
     {
         Width  = width;
         Height = height;
-        _cells  = new TileCell[Width * Height];
-        _updated = new bool[Width * Height];
+        _cells    = new TileCell[Width * Height];
+        _updated  = new bool[Width * Height];
+        _occupied = new bool[Width * Height];
         FillDefault();
     }
 
@@ -65,6 +67,17 @@ public class TileWorld : IWorldInterface
             for (int by = Height - 20; by < Height - 8; by++)
                 Set(bx, by, MaterialType.Wood);
         }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  實體佔用登記（每幀 Tick 前由 TileWorldRenderer 更新）
+    // ════════════════════════════════════════════════════════════
+
+    public void ClearOccupied() => Array.Clear(_occupied, 0, _occupied.Length);
+
+    public void SetOccupied(int x, int y)
+    {
+        if (InBounds(x, y)) _occupied[Idx(x, y)] = true;
     }
 
     // ════════════════════════════════════════════════════════════
@@ -217,9 +230,10 @@ public class TileWorld : IWorldInterface
         var from = _cells[Idx(fx, fy)].Type;
         var to   = _cells[Idx(tx, ty)].Type;
 
-        // 可移動條件：目標是空氣，或目標密度更低（液體沉降）
+        // 可移動條件：目標是空氣（且無實體），或目標密度更低（液體沉降）
         var fromData = MaterialRegistry.Get(from);
         var toData   = MaterialRegistry.Get(to);
+        if (to == MaterialType.Air && _occupied[Idx(tx, ty)]) return false;
         if (to != MaterialType.Air && !(toData.Physics == PhysicsCategory.Liquid && fromData.Density > toData.Density))
             return false;
 

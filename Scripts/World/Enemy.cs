@@ -38,7 +38,8 @@ public class Enemy : IElementalTarget, ISnapshottable
     // 面向（用於發射方向）
     public int FacingX { get; private set; } = 1;
 
-    private float _gravityTimer;
+    private float _vy     = 0f;  // 縱向速度（tiles/s，正向下）
+    private float _fractY = 0f; // 次格累積量
     private float _moveTimer;
     private float _attackTimer;
     private float _respawnTimer;
@@ -47,7 +48,8 @@ public class Enemy : IElementalTarget, ISnapshottable
     public const float RespawnTime = 8f;
 
     // ── 類型特化常數 ──────────────────────────────────────────────
-    private const float GravityInterval = 0.25f;
+    private const float Gravity      = 30f;
+    private const float MaxFallSpeed = 20f;
     private const int   PatrolRange     = 12;   // Patrol 離出生點最遠距離
 
     private float BaseMoveInterval => Type switch
@@ -122,8 +124,9 @@ public class Enemy : IElementalTarget, ISnapshottable
         Hp            = MaxHp;
         State         = EnemyState.Idle;
         WantsToFire   = false;
-        _gravityTimer = 0f;
-        _moveTimer    = 0f;
+        _vy        = 0f;
+        _fractY    = 0f;
+        _moveTimer = 0f;
         _attackTimer  = 0f;
         _respawnTimer = 0f;
         _patrolDir    = 1;
@@ -165,6 +168,8 @@ public class Enemy : IElementalTarget, ISnapshottable
             Position = snap.Position;
             Hp       = snap.Hp;
         }
+        _vy     = 0f;
+        _fractY = 0f;
         Aura.RestoreFromSnapshot(snap.Aura);
     }
 
@@ -355,12 +360,18 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     private void ApplyGravity(TileWorld world, float delta)
     {
-        _gravityTimer -= delta;
-        if (_gravityTimer > 0f) return;
-        _gravityTimer = GravityInterval;
-        var below = new GridPos(Position.X, Position.Y + 1);
-        if (world.TypeAt(below.X, below.Y) == MaterialType.Air)
+        _vy     = Math.Min(_vy + Gravity * delta, MaxFallSpeed);
+        _fractY += _vy * delta;
+        while (_fractY >= 1f)
+        {
+            var below = new GridPos(Position.X, Position.Y + 1);
+            if (world.TypeAt(below.X, below.Y) != MaterialType.Air)
+            { _vy = 0f; _fractY = 0f; return; }
             Position = below;
+            _fractY -= 1f;
+        }
+        if (_vy > 0f && world.TypeAt(Position.X, Position.Y + 1) != MaterialType.Air)
+        { _vy = 0f; _fractY = 0f; }
     }
 
     public float XpReward => Type switch

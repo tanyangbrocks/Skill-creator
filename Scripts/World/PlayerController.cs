@@ -105,13 +105,12 @@ public class PlayerController : IElementalTarget, ISnapshottable
     private float _castCooldown = 0f;
     private const float MoveInterval = 0.12f;
 
-    // 重力與跳躍
-    private float _gravityTimer  = 0f;
-    private float _jumpTimer     = 0f;
-    private int   _jumpRemaining = 0;
-    private const float GravityInterval = 0.2f;
-    private const float JumpInterval    = 0.09f;
-    private const int   JumpTiles       = 7;
+    // 重力與跳躍（等加速度物理）
+    private float _vy     = 0f;   // 縱向速度（tiles/s，正向下）
+    private float _fractY = 0f;   // 次格累積量（保留小數）
+    private const float Gravity      = 30f;  // tiles/s²
+    private const float MaxFallSpeed = 20f;  // tiles/s
+    private const float JumpSpeed    = 20f;  // tiles/s（向上）
 
     public bool IsAlive  => Hp > 0f;
     public bool CanMove  => _moveCooldown <= 0f;
@@ -206,29 +205,30 @@ public class PlayerController : IElementalTarget, ISnapshottable
     // 重力 + 跳躍物理（每幀由 Main._Process 呼叫）
     public void ApplyPhysics(TileWorld world, float delta)
     {
-        if (_jumpRemaining > 0)
+        _vy     = Math.Clamp(_vy + Gravity * delta, -MaxFallSpeed, MaxFallSpeed);
+        _fractY += _vy * delta;
+
+        // 向下移動
+        while (_fractY >= 1f)
         {
-            _jumpTimer -= delta;
-            if (_jumpTimer <= 0f)
-            {
-                _jumpTimer = JumpInterval;
-                var above = new GridPos(Position.X, Position.Y - 1);
-                if (world.TypeAt(above.X, above.Y) == MaterialType.Air)
-                    Position = above;
-                _jumpRemaining--;
-            }
+            var below = new GridPos(Position.X, Position.Y + 1);
+            if (world.TypeAt(below.X, below.Y) != MaterialType.Air)
+            { _vy = 0f; _fractY = 0f; return; }
+            Position = below;
+            _fractY -= 1f;
         }
-        else
+        // 向上移動（跳躍弧線）
+        while (_fractY <= -1f)
         {
-            _gravityTimer -= delta;
-            if (_gravityTimer <= 0f)
-            {
-                _gravityTimer = GravityInterval;
-                var below = new GridPos(Position.X, Position.Y + 1);
-                if (world.TypeAt(below.X, below.Y) == MaterialType.Air)
-                    Position = below;
-            }
+            var above = new GridPos(Position.X, Position.Y - 1);
+            if (world.TypeAt(above.X, above.Y) != MaterialType.Air)
+            { _vy = 0f; _fractY = 0f; return; }
+            Position = above;
+            _fractY += 1f;
         }
+        // 已落地時歸零，防止 _vy 持續累積
+        if (_vy > 0f && world.TypeAt(Position.X, Position.Y + 1) != MaterialType.Air)
+        { _vy = 0f; _fractY = 0f; }
     }
 
     public bool IsOnGround(TileWorld world)
@@ -239,9 +239,8 @@ public class PlayerController : IElementalTarget, ISnapshottable
 
     public void StartJump()
     {
-        _jumpRemaining = JumpTiles;
-        _jumpTimer     = 0f;
-        _gravityTimer  = 0f;
+        _vy     = -JumpSpeed;
+        _fractY = 0f;
     }
 
     public void SetCastCooldown(float seconds) => _castCooldown = seconds;
@@ -264,6 +263,8 @@ public class PlayerController : IElementalTarget, ISnapshottable
         Position = snap.Position;
         Hp       = snap.Hp;
         Mp       = snap.Mp;
+        _vy      = 0f;
+        _fractY  = 0f;
         Aura.RestoreFromSnapshot(snap.Aura);
         if (snap.CharState is { } cs)  State.RestoreFromSnapshot(cs);
         if (snap.CharStats is { } cst) cst.ApplyTo(Stats);
