@@ -465,7 +465,7 @@ public partial class ScratchCanvas : Control
     {
         // ── 技能呼叫 ──────────────────────────────────────────────────
         { BlockType.InvokeTotem,  new(COrng, "使用技能", () => B(BlockType.InvokeTotem,  ("totemName", "")),
-            (r, b, opts) => r.AddChild(SlotPicker(b, "totemName", opts))) },
+            (r, b, _) => r.AddChild(new TotemDropZone(b))) },
         { BlockType.InvokeSpell,  new(COrng, "施放其他法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "法陣名", 90))) },
 
@@ -807,7 +807,11 @@ public partial class ScratchCanvas : Control
         // ── 圖騰／刻印（Direction A）─────────────────────────────────
         { BlockType.Totem,     new(CTotem,   "▸ 圖騰",
             () => B(BlockType.Totem, ("totemId", "")),
-            null) },
+            (r, b, _) => {
+                string tid = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
+                if (tid == "custom")
+                    r.AddChild(SmallEdit(b, "customName", "圖騰名稱", 80));
+            }) },
         { BlockType.Engraving, new(CEngrave, "◆ 刻印",
             () => B(BlockType.Engraving, ("engraveId", ""), ("pts", 0f)),
             (r, b, _) => {
@@ -827,6 +831,11 @@ public partial class ScratchCanvas : Control
         if (node.Type == BlockType.Totem)
         {
             var id = node.Params.TryGetValue("totemId", out var v) && v is string s ? s : "";
+            if (id == "custom")
+            {
+                var cn = node.Params.TryGetValue("customName", out var cv) ? cv?.ToString() ?? "" : "";
+                return $"▸ {(string.IsNullOrEmpty(cn) ? "自定義" : cn)}";
+            }
             return TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == id)?.DisplayName is { } n
                 ? $"▸ {n}" : $"▸ {id}";
         }
@@ -937,6 +946,82 @@ public partial class ScratchCanvas : Control
             BlockDrag.Clear();
             _onChanged();
         }
+    }
+}
+
+// ── InvokeTotem 圖騰插槽拖放目標 ────────────────────────────────────────────────
+// 取代 SlotPicker 下拉選單；直接把圖騰積木（Totem script）拖進來即完成綁定
+internal sealed partial class TotemDropZone : Panel
+{
+    internal static readonly List<TotemDropZone> ActiveZones = new();
+
+    private readonly BlockNode _block;
+    private readonly Label     _label;
+
+    private static readonly StyleBoxFlat _normalSb = BuildSb(false);
+    private static readonly StyleBoxFlat _hoverSb  = BuildSb(true);
+
+    internal TotemDropZone(BlockNode block)
+    {
+        _block = block;
+        CustomMinimumSize = new Vector2(100, 24);
+        MouseFilter = MouseFilterEnum.Ignore; // ScriptCanvas._Input 負責偵測，不需要自己攔截
+
+        _label = new Label
+        {
+            AutowrapMode        = TextServer.AutowrapMode.Off,
+            ClipText            = true,
+            VerticalAlignment   = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        _label.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _label.AddThemeFontSizeOverride("font_size", 10);
+        _label.MouseFilter = MouseFilterEnum.Ignore;
+        AddChild(_label);
+
+        AddThemeStyleboxOverride("panel", _normalSb);
+        Refresh();
+    }
+
+    // 由 ScriptCanvas 在偵測到拖放時呼叫
+    internal void Bind(BlockNode totemBlock)
+    {
+        var id = totemBlock.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
+        _block.Params["totemName"] = id;
+        Refresh();
+    }
+
+    internal void SetHighlight(bool on)
+        => AddThemeStyleboxOverride("panel", on ? _hoverSb : _normalSb);
+
+    internal void Refresh()
+    {
+        var bound = _block.Params.TryGetValue("totemName", out var v) ? v?.ToString() ?? "" : "";
+        if (string.IsNullOrEmpty(bound))
+        {
+            _label.Text = "拖入圖騰";
+            _label.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f));
+        }
+        else
+        {
+            var name = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == bound)?.DisplayName ?? bound;
+            _label.Text = name;
+            _label.AddThemeColorOverride("font_color", new Color(1f, 0.85f, 0.5f));
+        }
+    }
+
+    public override void _EnterTree() => ActiveZones.Add(this);
+    public override void _ExitTree()  => ActiveZones.Remove(this);
+
+    private static StyleBoxFlat BuildSb(bool hover)
+    {
+        var sb = new StyleBoxFlat();
+        sb.SetBorderWidthAll(hover ? 2 : 1);
+        sb.BorderColor = hover ? new Color(1f, 1f, 0.3f, 0.9f) : new Color(1f, 0.72f, 0.35f, 0.6f);
+        sb.BgColor     = hover ? new Color(0.3f, 0.25f, 0f, 0.5f) : new Color(0.12f, 0.08f, 0.03f, 0.6f);
+        sb.CornerRadiusTopLeft = sb.CornerRadiusTopRight =
+        sb.CornerRadiusBottomLeft = sb.CornerRadiusBottomRight = 3;
+        return sb;
     }
 }
 

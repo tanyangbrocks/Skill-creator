@@ -10,4 +10,5 @@ public enum TotemType
     Displacement, // 位移圖騰：衝刺/瞬移/閃避（LV20+）
     Summon,       // 召喚圖騰：召喚實體（LV30+）
     Domain,       // 領域圖騰：改變環境/地形/天候（LV50+）
+    Custom,       // 自定義圖騰：玩家自由命名，語意由刻印決定
 }

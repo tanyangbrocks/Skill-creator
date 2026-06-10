@@ -150,6 +150,14 @@ public partial class AbilityEditorUI : Control
         var flex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         row.AddChild(flex);
 
+        var gearBtn = Btn("⚙", new Color(0.18f, 0.18f, 0.24f));
+        gearBtn.CustomMinimumSize = new Vector2(30, 30);
+        gearBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        gearBtn.TooltipText = "編輯器設定";
+        gearBtn.Pressed += ShowSettingsPopup;
+        row.AddChild(gearBtn);
+        HSpacer(row, 6);
+
         _status = new Label();
         _status.AddThemeColorOverride("font_color", new Color(0.9f, 0.85f, 0.4f));
         _status.AddThemeFontSizeOverride("font_size", 12);
@@ -159,25 +167,55 @@ public partial class AbilityEditorUI : Control
         HSpacer(row, 12);
     }
 
+    // ── 設定 Popup ────────────────────────────────────────────────────
+
+    private void ShowSettingsPopup()
+    {
+        var popup = new PopupPanel();
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left",   14);
+        margin.AddThemeConstantOverride("margin_right",  14);
+        margin.AddThemeConstantOverride("margin_top",    10);
+        margin.AddThemeConstantOverride("margin_bottom", 12);
+        popup.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 8);
+        margin.AddChild(vbox);
+
+        var title = new Label { Text = "編輯器設定" };
+        title.AddThemeFontSizeOverride("font_size", 13);
+        title.AddThemeColorOverride("font_color", new Color(0.85f, 0.85f, 0.45f));
+        vbox.AddChild(title);
+        vbox.AddChild(new HSeparator());
+
+        var chk = new CheckButton { Text = "圖騰加入時自動插入基礎 Action 刻印" };
+        chk.ButtonPressed = EditorSettings.AutoInsertBaseEngraving;
+        chk.AddThemeFontSizeOverride("font_size", 12);
+        chk.Toggled += on => EditorSettings.AutoInsertBaseEngraving = on;
+        vbox.AddChild(chk);
+
+        AddChild(popup);
+        popup.PopupCentered(new Vector2I(330, 0));
+    }
+
     // ── 容器導覽 ──────────────────────────────────────────────────────
 
-    private void EnterContainerEffect()
+    private void EnterContainerEffect(string totemDisplayName)
     {
-        if (_spell.Container == ContainerType.DirectCast) return;
         if (_navStack.Count >= SafetyGuard.MaxContainerDepth) return;
 
-        var containerName = ContainerTypeName(_spell.Container);
         var dlg = new ConfirmationDialog
         {
             Title      = "進入容器效果",
-            DialogText = $"編輯「{containerName}」的內部效果？",
+            DialogText = $"編輯「{totemDisplayName}」的內部效果？",
         };
         AddChild(dlg);
         dlg.PopupCentered(new Vector2I(340, 0));
         dlg.Confirmed += () =>
         {
             _spell.ContainerEffect ??= new SpellArray();
-            _navStack.Add((_spell.ContainerEffect, containerName));
+            _navStack.Add((_spell.ContainerEffect, totemDisplayName));
             dlg.QueueFree();
             RefreshAll();
         };
@@ -370,6 +408,7 @@ public partial class AbilityEditorUI : Control
             {
                 var subs = new (string lbl, EngraveColor clr)[]
                 {
+                    ("動作", EngraveColor.Action),
                     ("白", EngraveColor.White),  ("橙", EngraveColor.Orange),
                     ("藍", EngraveColor.Blue),   ("紅", EngraveColor.Red),
                     ("綠", EngraveColor.Green),  ("紫", EngraveColor.Purple),
@@ -446,6 +485,42 @@ public partial class AbilityEditorUI : Control
             };
             _leftContent.AddChild(btn);
         }
+
+        // 自定義圖騰按鈕（每個子分頁底部）
+        VSpacer(_leftContent, 6);
+        var captType = filterType;
+        var customBtn = Btn("  ＋ 自定義圖騰", new Color(0.14f, 0.22f, 0.20f));
+        customBtn.Alignment = HorizontalAlignment.Left;
+        customBtn.CustomMinimumSize = new Vector2(0, 28);
+        customBtn.AddThemeFontSizeOverride("font_size", 11);
+        customBtn.AddThemeColorOverride("font_color", new Color(0.50f, 0.85f, 0.72f));
+        customBtn.Pressed += () => AddCustomTotemBlock();
+        customBtn.GuiInput += @event =>
+        {
+            if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed && !mb.DoubleClick)
+            {
+                _palDragBlock = new BlockNode { Type = BlockType.Totem,
+                    Params = new Dictionary<string, object?> { ["totemId"] = "custom", ["customName"] = "" } };
+                _palDragStart = mb.GlobalPosition;
+            }
+        };
+        _leftContent.AddChild(customBtn);
+    }
+
+    private void AddCustomTotemBlock()
+    {
+        _spell.Blocks.Insert(0, new BlockNode
+        {
+            Type   = BlockType.Totem,
+            Params = new Dictionary<string, object?> { ["totemId"] = "custom", ["customName"] = "" },
+        });
+        // custom 不在 DefaultActionEngraveId，AutoInsert 只標記 _actInserted 不插入 Action 刻印
+        AutoInsertBaseEngravings();
+        SyncSlotsFromBlocks();
+        RefreshHeaderState();
+        SyncCanvas();
+        RefreshCost();
+        RefreshDescription();
     }
 
     private void AddTotemBlock(TotemData totem)
@@ -455,6 +530,7 @@ public partial class AbilityEditorUI : Control
             Type   = BlockType.Totem,
             Params = new Dictionary<string, object?> { ["totemId"] = (object?)totem.Id },
         });
+        AutoInsertBaseEngravings();
         SyncSlotsFromBlocks();
         RefreshHeaderState();
         SyncCanvas();
@@ -620,14 +696,41 @@ public partial class AbilityEditorUI : Control
 
         _canvas = new ScriptCanvas();
         _canvas.SizeFlagsVertical = SizeFlags.ExpandFill;
-        _canvas.Changed += () => { SyncSlotsFromBlocks(); RefreshHeaderState(); RefreshCost(); RefreshDescription(); };
-        // 雙擊 Totem 積木 → 進入容器效果（須有 Container 且未達深度上限）
+        _canvas.Changed += () =>
+        {
+            bool inserted = AutoInsertBaseEngravings();
+            SyncSlotsFromBlocks();
+            RefreshHeaderState();
+            RefreshCost();
+            RefreshDescription();
+            if (inserted) SyncCanvas();
+        };
+        // 雙擊圖騰積木 → 若該圖騰後面有容器型 Action 刻印則進入容器效果編輯
         _canvas.BlockDoubleClicked += node =>
         {
-            if (node.Type == BlockType.Totem
-                && _spell.Container != ContainerType.DirectCast
-                && _navStack.Count < SafetyGuard.MaxContainerDepth)
-                EnterContainerEffect();
+            if (node.Type != BlockType.Totem) return;
+            if (_navStack.Count >= SafetyGuard.MaxContainerDepth) return;
+
+            string totemId = node.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
+            string customName = node.Params.TryGetValue("customName", out var cn) ? cn?.ToString() ?? "" : "";
+            string displayName = totemId == "custom"
+                ? (string.IsNullOrEmpty(customName) ? "自定義圖騰" : customName)
+                : (TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == totemId)?.DisplayName ?? totemId);
+
+            int idx = _spell.Blocks.IndexOf(node);
+            if (idx < 0) return;
+            for (int i = idx + 1; i < _spell.Blocks.Count; i++)
+            {
+                var b = _spell.Blocks[i];
+                if (b.Type == BlockType.Totem) break;
+                if (b.Type != BlockType.Engraving) continue;
+                string eid = b.Params.TryGetValue("engraveId", out var ev) ? ev?.ToString() ?? "" : "";
+                if (TotemLibrary.ContainerActionIds.Contains(eid))
+                {
+                    EnterContainerEffect(displayName);
+                    return;
+                }
+            }
         };
         vbox.AddChild(_canvas);
     }
@@ -786,7 +889,16 @@ public partial class AbilityEditorUI : Control
             if (b.Type == BlockType.Totem)
             {
                 string id = b.Params.TryGetValue("totemId", out var v) && v is string s ? s : "";
-                var totem = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == id);
+                TotemData? totem;
+                if (id == "custom")
+                {
+                    string cn = b.Params.TryGetValue("customName", out var cv) ? cv?.ToString() ?? "" : "";
+                    totem = new TotemData { Id = "custom", DisplayName = string.IsNullOrEmpty(cn) ? "自定義" : cn, Type = TotemType.Custom };
+                }
+                else
+                {
+                    totem = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == id);
+                }
                 if (totem is not null)
                 {
                     _spell.Slots.Add(new SpellSlot { Totem = totem });
@@ -805,6 +917,8 @@ public partial class AbilityEditorUI : Control
                         Id                  = template.Id,
                         DisplayName         = template.DisplayName,
                         Color               = template.Color,
+                        Category            = template.Category,
+                        Trigger             = template.Trigger,
                         ScalingType         = template.ScalingType,
                         ScalingCoefficient  = template.ScalingCoefficient,
                         BaseEffect          = template.BaseEffect,
@@ -818,6 +932,34 @@ public partial class AbilityEditorUI : Control
         }
 
         _spell.Container = TotemToContainer(firstNonPassive);
+    }
+
+    // 掃描主腳本，對尚未處理的 Totem 積木自動插入預設 Action 刻印。
+    // 標記 _actInserted = true 防止重複插入（即使使用者手動刪除後也不重插）。
+    // 回傳 true 表示有插入，呼叫端應呼叫 SyncCanvas() 更新畫面。
+    private bool AutoInsertBaseEngravings()
+    {
+        if (!EditorSettings.AutoInsertBaseEngraving) return false;
+        bool inserted = false;
+        for (int i = 0; i < _spell.Blocks.Count; i++)
+        {
+            var b = _spell.Blocks[i];
+            if (b.Type != BlockType.Totem) continue;
+            if (b.Params.ContainsKey("_actInserted")) continue;
+            b.Params["_actInserted"] = (object?)true;
+
+            string tid = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
+            if (!TotemLibrary.DefaultActionEngraveId.TryGetValue(tid, out var actId)) continue;
+
+            _spell.Blocks.Insert(i + 1, new BlockNode
+            {
+                Type   = BlockType.Engraving,
+                Params = new Dictionary<string, object?> { ["engraveId"] = (object?)actId, ["pts"] = (object?)0f },
+            });
+            i++;
+            inserted = true;
+        }
+        return inserted;
     }
 
     private static ContainerType TotemToContainer(TotemData? totem) => totem?.Type switch
@@ -1029,6 +1171,7 @@ public partial class AbilityEditorUI : Control
         TotemType.Displacement => new Color(0.65f, 0.95f, 0.30f), // 黃綠
         TotemType.Summon       => new Color(1.0f,  0.75f, 0.20f), // 金
         TotemType.Domain       => new Color(0.85f, 0.40f, 1.0f),  // 紫
+        TotemType.Custom       => new Color(0.50f, 0.85f, 0.72f), // 淡綠
         _                      => new Color(0.8f,  0.8f,  0.8f),
     };
 
@@ -1042,6 +1185,7 @@ public partial class AbilityEditorUI : Control
         TotemType.Displacement => "[位移]",
         TotemType.Summon       => "[召喚]",
         TotemType.Domain       => "[領域]",
+        TotemType.Custom       => "[自訂]",
         _                      => "[?]",
     };
 
@@ -1055,11 +1199,13 @@ public partial class AbilityEditorUI : Control
         TotemType.Displacement => "── 位移圖騰 ──",
         TotemType.Summon       => "── 召喚圖騰 ──",
         TotemType.Domain       => "── 領域圖騰 ──",
+        TotemType.Custom       => "── 自定義圖騰 ──",
         _                      => "──",
     };
 
     private static Color EngraveClr(EngraveColor c) => c switch
     {
+        EngraveColor.Action    => new Color(0.35f, 0.90f, 0.82f), // 青色
         EngraveColor.White     => new Color(0.93f, 0.93f, 0.93f),
         EngraveColor.Red       => new Color(1.0f,  0.38f, 0.38f),
         EngraveColor.Green     => new Color(0.38f, 0.88f, 0.48f),
@@ -1075,6 +1221,7 @@ public partial class AbilityEditorUI : Control
 
     private static string ColorGroupName(EngraveColor c) => c switch
     {
+        EngraveColor.Action    => "  ── 動作（基礎行為）",
         EngraveColor.White     => "  ── 白（傷害）",
         EngraveColor.Orange    => "  ── 橙（控制）",
         EngraveColor.Blue      => "  ── 藍（改造）",

@@ -123,13 +123,13 @@ public static class TotemLibrary
         // ── 綠：輔助效果 ─────────────────────────────────────────
         new EngraveData { Id = "green_shield",       DisplayName = "護盾值",       Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 10f,  BaseEffect = 50f, BaseCost = 3 }, // TODO-STUB: 護盾系統未實作
         new EngraveData { Id = "green_heal",         DisplayName = "回復效果",     Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 5f,   BaseEffect = 20f, BaseCost = 2 }, // TODO-STUB: 治療計算未接 HP 系統
-        new EngraveData { Id = "green_death_replace",DisplayName = "死亡替代",     Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f,               BaseCost = 8 }, // TODO-STUB: 替代效果（正向）— 致命傷改為 HP 剩 1
+        new EngraveData { Id = "green_death_replace",DisplayName = "死亡替代",     Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f,               BaseCost = 8 },
         new EngraveData { Id = "green_dmg_to_heal",  DisplayName = "傷害轉治療",   Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 6 }, // TODO-STUB: 替代效果（正向）— 傷害事件替換為等量回復
         new EngraveData { Id = "green_observe",      DisplayName = "觀測強化",     Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 1f,   BaseEffect = 0f,  BaseCost = 2 }, // TODO-STUB: 觀測/資訊系統未實作
         new EngraveData { Id = "green_evasion",      DisplayName = "閃避強化",     Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 4 }, // TODO-STUB: 閃避率加成未接 CharacterStats
         new EngraveData { Id = "green_lifesteal",    DisplayName = "吸血",         Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 5 }, // TODO-STUB: 傷害轉回血（按比例），未接傷害事件
         new EngraveData { Id = "green_reflect",      DisplayName = "反彈",         Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 6 }, // TODO-STUB: 將受到的攻擊反彈給攻擊者，未接 ActionBus
-        new EngraveData { Id = "green_invincible",   DisplayName = "無敵",         Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 10}, // TODO-STUB: 短暫無敵幀，未接傷害攔截
+        new EngraveData { Id = "green_invincible",   DisplayName = "無敵",         Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 10},
         new EngraveData { Id = "green_super_armor",  DisplayName = "霸體",         Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 7 }, // TODO-STUB: 免疫打斷（不免傷），未接姿態系統
         new EngraveData { Id = "green_tracking",     DisplayName = "追蹤",         Color = EngraveColor.Green, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.8f,               BaseCost = 5 }, // TODO-STUB: 技能/投射物自動追蹤最近目標，未實作
         new EngraveData { Id = "green_mark",         DisplayName = "附加標記",     Color = EngraveColor.Green, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 3 }, // TODO-STUB: 對目標施加可被其他效果讀取的標記，未接標籤系統
@@ -162,6 +162,25 @@ public static class TotemLibrary
         new EngraveData { Id = "elem_thunder", DisplayName = "雷屬性",  Color = EngraveColor.Elemental, Element = ElementType.Thunder, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.2f, BaseCost = 6 },
         new EngraveData { Id = "elem_poison",  DisplayName = "毒屬性",  Color = EngraveColor.Elemental, Element = ElementType.Poison,  ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f, BaseCost = 5 }, // TODO-STUB: 毒屬性反應未實作
 
+        // ── 動作（Action）刻印：各圖騰預設基礎行為，圖騰加入時自動插入 ──────
+        // TODO-STUB: 所有 act_ 刻印均為資料佔位，SpellCaster 尚未讀取 Category/Trigger
+        new EngraveData { Id = "act_area_fan",         DisplayName = "扇形衝擊發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_area_around",      DisplayName = "周身衝擊發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_area_distant",     DisplayName = "遠距圓形衝擊發動",Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_area_beam",        DisplayName = "射線衝擊發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_technique_sword",  DisplayName = "劍技發動",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_technique_punch",  DisplayName = "拳擊發動",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_technique_shield", DisplayName = "盾防發動",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_fire_projectile",  DisplayName = "發射投射物",      Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_passive_tick",     DisplayName = "持續偵測發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnTick,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_morph_apply",      DisplayName = "套用形態",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_dash",             DisplayName = "衝刺",            Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_teleport",         DisplayName = "瞬移",            Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_dodge",            DisplayName = "閃避翻滾",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_portal",           DisplayName = "傳送門建立",      Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_summon_entity",    DisplayName = "生成實體",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+        new EngraveData { Id = "act_domain_activate",  DisplayName = "啟動領域",        Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
+
         // ── 法則：14 種（LV 50 解鎖）————————————————————————————
         // TODO-STUB: 所有法則刻印均為資料佔位，法則碰撞系統待高層實作（§9 第三～五層）
         new EngraveData { Id = "law_time",      DisplayName = "時間", Color = EngraveColor.Law, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f, BaseCost = 15, RequiredPlayerLevel = 50 }, // TODO-STUB
@@ -178,5 +197,52 @@ public static class TotemLibrary
         new EngraveData { Id = "law_dimension", DisplayName = "次元", Color = EngraveColor.Law, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.2f, BaseCost = 25, RequiredPlayerLevel = 80 }, // TODO-STUB
         new EngraveData { Id = "law_world",     DisplayName = "世界", Color = EngraveColor.Law, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.1f, BaseCost = 30, RequiredPlayerLevel = 100 }, // TODO-STUB
         new EngraveData { Id = "law_chaos",     DisplayName = "混沌", Color = EngraveColor.Law, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.1f, BaseCost = 30, RequiredPlayerLevel = 100 }, // TODO-STUB
+    };
+
+    // ════════════════════════════════════════════════════════════
+    //  Action 刻印 Id → 此 Action 需要容器效果編輯（雙擊圖騰可進入）
+    // ════════════════════════════════════════════════════════════
+
+    public static readonly HashSet<string> ContainerActionIds = new()
+    {
+        "act_fire_projectile",
+        "act_summon_entity",
+    };
+
+    // ════════════════════════════════════════════════════════════
+    //  圖騰 → 預設 Action 刻印對照（圖騰 Id → Action 刻印 Id）
+    // ════════════════════════════════════════════════════════════
+
+    public static readonly Dictionary<string, string> DefaultActionEngraveId = new()
+    {
+        ["area_fan"]            = "act_area_fan",
+        ["area_around"]         = "act_area_around",
+        ["area_distant"]        = "act_area_distant",
+        ["area_beam"]           = "act_area_beam",
+        ["technique_sword"]     = "act_technique_sword",
+        ["technique_punch"]     = "act_technique_punch",
+        ["technique_shield"]    = "act_technique_shield",
+        ["projectile_energy"]   = "act_fire_projectile",
+        ["projectile_physical"] = "act_fire_projectile",
+        ["passive_continuous"]  = "act_passive_tick",
+        ["passive_switch"]      = "act_passive_tick",
+        ["morph_speed"]         = "act_morph_apply",
+        ["morph_flight"]        = "act_morph_apply",
+        ["morph_invisible"]     = "act_morph_apply",
+        ["morph_strengthen"]    = "act_morph_apply",
+        ["morph_possession"]    = "act_morph_apply",
+        ["displace_dash"]       = "act_dash",
+        ["displace_teleport"]   = "act_teleport",
+        ["displace_dodge"]      = "act_dodge",
+        ["displace_portal"]     = "act_portal",
+        ["summon_minion"]       = "act_summon_entity",
+        ["summon_turret"]       = "act_summon_entity",
+        ["summon_guardian"]     = "act_summon_entity",
+        ["summon_weapon"]       = "act_summon_entity",
+        ["summon_building"]     = "act_summon_entity",
+        ["summon_vehicle"]      = "act_summon_entity",
+        ["domain_barrier"]      = "act_domain_activate",
+        ["domain_terrain"]      = "act_domain_activate",
+        ["domain_weather"]      = "act_domain_activate",
     };
 }
