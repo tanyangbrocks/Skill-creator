@@ -65,7 +65,6 @@ public partial class Main : Node
     private StyleBoxFlat[]   _invSlotStyles  = null!;
     private StyleBoxFlat[]   _invIconStyles  = null!;
     private Label[]          _invSlotCounts  = null!;
-    private Label            _invInfoLabel   = null!;
     private bool             _inventoryOpen  = false;
 
     // 裝備欄面板（P 鍵）
@@ -73,8 +72,16 @@ public partial class Main : Node
     private StyleBoxFlat[]   _eqSlotStyles     = new StyleBoxFlat[3];
     private StyleBoxFlat[]   _eqIconStyles     = new StyleBoxFlat[3];
     private Label[]          _eqNameLabels     = new Label[3];
-    private Label            _eqInfoLabel      = null!;
     private bool             _equipPanelOpen   = false;
+
+    // 通用懸浮 Tooltip（跟隨游標，物品欄/裝備欄/熱鍵欄共用）
+    private PanelContainer   _floatTooltip      = null!;
+    private Label            _floatTooltipLabel = null!;
+
+    // 物品欄拖曳
+    private int            _dragSrcSlot   = -1;
+    private Panel?         _dragFloatIcon  = null;
+    private StyleBoxFlat?  _dragFloatStyle = null;
 
     // 偵錯 overlay（F2 座標驗證）
     private Panel  _debugCoordPanel   = null!;
@@ -128,6 +135,24 @@ public partial class Main : Node
         _player.Inventory.TryAdd(ItemId.EquipBasicSword,    1);
         _player.Inventory.TryAdd(ItemId.EquipLeatherArmor,  1);
         _player.Inventory.TryAdd(ItemId.EquipAmulet,        1);
+
+        // 初始裝備自動穿戴（對應裝備欄空時）
+        for (int i = 0; i < Inventory.TotalSize; i++)
+        {
+            var s = _player.Inventory.Slots[i];
+            if (s.IsEmpty) continue;
+            var itemData = ItemRegistry.Get(s.ItemId);
+            if (itemData.EquipSlot == EquipmentSlotType.None) continue;
+            bool slotEmpty = itemData.EquipSlot switch
+            {
+                EquipmentSlotType.Weapon    => _player.Equipment.WeaponId    == ItemId.None,
+                EquipmentSlotType.Armor     => _player.Equipment.ArmorId     == ItemId.None,
+                EquipmentSlotType.Accessory => _player.Equipment.AccessoryId == ItemId.None,
+                _                           => false,
+            };
+            if (slotEmpty) _player.Equipment.TryEquip(_player.Inventory, i);
+        }
+
         _world.Player          = _player;
         _world.Enemies         = _enemies;
         _world.Projectiles     = _projectiles;
@@ -270,6 +295,8 @@ public partial class Main : Node
         BuildSurvivalDebugOverlay(hud);
         BuildInventoryPanel(hud);
         BuildEquipPanel(hud);
+        BuildFloatTooltip(hud);
+        BuildDragIcon(hud);
 
         // 畫筆模式指示器（F1 切換時顯示）
         _paintModeLabel = new Label();
@@ -452,6 +479,12 @@ public partial class Main : Node
         if (_statsPanelOpen)    RefreshStatsPanel();
         if (_inventoryOpen)    RefreshInventoryPanel();
         if (_equipPanelOpen)   RefreshEquipPanel();
+        if (_floatTooltip.Visible) UpdateFloatTooltipPos();
+        if (_dragSrcSlot >= 0 && _dragFloatIcon != null)
+        {
+            var mouse = GetViewport().GetMousePosition();
+            _dragFloatIcon.Position = mouse - new Vector2(15f, 15f);
+        }
         _paintModeLabel.Visible = _world.PaintingEnabled;
 
         // 境界門檻同步至刻印庫（讓鎖定狀態即時反映）
@@ -483,7 +516,10 @@ public partial class Main : Node
         {
             var screenMouse  = GetViewport().GetMousePosition();
             var viewportSize = GetViewport().GetVisibleRect().Size;
-            var camCenter    = _world.Camera.GetScreenCenterPosition(); // canvas 座標，含 Limit 修正
+            // 直接用玩家當前位置換算畫布中心（避免 GetScreenCenterPosition 單幀落後問題）
+            var camCenter    = new Vector2(
+                (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
+                (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
             var canvasMouse  = camCenter + (screenMouse - viewportSize * 0.5f) / _cameraZoom;
             _player.MouseGridPos = new GridPos(
                 Math.Clamp((int)(canvasMouse.X / TileWorldRenderer.TilePixels), 0, _world.World.Width  - 1),
@@ -599,6 +635,49 @@ public partial class Main : Node
                 else _player.Inventory.ActiveHotbarIndex =
                     (_player.Inventory.ActiveHotbarIndex + 1) % Inventory.HotbarSize;
                 return;
+            }
+        }
+
+        // 物品欄拖曳 / 格內點擊裝備（左鍵，物品欄開啟時）
+        if (!_editorOpen && _inventoryOpen && e is InputEventMouseButton imb && imb.ButtonIndex == MouseButton.Left)
+        {
+            if (imb.Pressed)
+            {
+                int src = GetInvSlotUnderMouse();
+                if (src >= 0)
+                {
+                    _dragSrcSlot = src;
+                    var srcStack = _player.Inventory.Slots[src];
+                    if (!srcStack.IsEmpty)
+                    {
+                        _dragFloatStyle!.BgColor = GetItemIconColor(srcStack.ItemId);
+                        _dragFloatIcon!.Visible  = true;
+                    }
+                    GetViewport().SetInputAsHandled();
+                }
+            }
+            else if (_dragSrcSlot >= 0)
+            {
+                if (_dragFloatIcon != null) _dragFloatIcon.Visible = false;
+                int dst = GetInvSlotUnderMouse();
+                if (dst >= 0 && dst != _dragSrcSlot)
+                {
+                    _player.Inventory.SwapSlots(_dragSrcSlot, dst);
+                    RefreshInventoryPanel();
+                    RefreshEquipPanel();
+                }
+                else if (dst == _dragSrcSlot)
+                {
+                    var s = _player.Inventory.Slots[_dragSrcSlot];
+                    if (!s.IsEmpty && ItemRegistry.Get(s.ItemId).EquipSlot != EquipmentSlotType.None)
+                    {
+                        _player.Equipment.TryEquip(_player.Inventory, _dragSrcSlot);
+                        RefreshInventoryPanel();
+                        RefreshEquipPanel();
+                    }
+                }
+                _dragSrcSlot = -1;
+                GetViewport().SetInputAsHandled();
             }
         }
 
@@ -759,6 +838,78 @@ public partial class Main : Node
 
     private void HideTooltip() { _mouseOverHotbar = false; _tooltip.Visible = false; }
 
+    // ── 通用懸浮 Tooltip（跟隨游標）─────────────────────────────────────
+    private void BuildFloatTooltip(CanvasLayer hud)
+    {
+        var bgStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.05f, 0.05f, 0.12f, 0.95f),
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor = new Color(0.50f, 0.50f, 0.75f),
+            ContentMarginLeft = 8f, ContentMarginRight = 8f,
+            ContentMarginTop = 4f,  ContentMarginBottom = 4f,
+        };
+        bgStyle.CornerRadiusTopLeft = bgStyle.CornerRadiusTopRight =
+        bgStyle.CornerRadiusBottomLeft = bgStyle.CornerRadiusBottomRight = 3;
+
+        _floatTooltip = new PanelContainer();
+        _floatTooltip.AddThemeStyleboxOverride("panel", bgStyle);
+        _floatTooltip.Visible    = false;
+        _floatTooltip.MouseFilter = Control.MouseFilterEnum.Ignore;
+        hud.AddChild(_floatTooltip);
+
+        _floatTooltipLabel = new Label();
+        _floatTooltipLabel.AddThemeFontSizeOverride("font_size", 12);
+        _floatTooltipLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.92f, 0.75f));
+        _floatTooltip.AddChild(_floatTooltipLabel);
+    }
+
+    private void ShowFloatTooltip(string text)
+    {
+        if (string.IsNullOrEmpty(text)) { _floatTooltip.Visible = false; return; }
+        _floatTooltipLabel.Text = text;
+        _floatTooltip.Visible   = true;
+        UpdateFloatTooltipPos();
+    }
+
+    private void HideFloatTooltip() => _floatTooltip.Visible = false;
+
+    private void UpdateFloatTooltipPos()
+    {
+        var mouse    = GetViewport().GetMousePosition();
+        var vpSize   = GetViewport().GetVisibleRect().Size;
+        _floatTooltip.ResetSize();
+        var tipSize  = _floatTooltip.Size;
+        float x = mouse.X + 14f;
+        float y = mouse.Y - tipSize.Y - 8f;
+        if (x + tipSize.X > vpSize.X) x = mouse.X - tipSize.X - 6f;
+        if (y < 0) y = mouse.Y + 18f;
+        _floatTooltip.Position = new Vector2(x, y);
+    }
+
+    // ── 拖曳圖示（跟隨游標的小色塊）──────────────────────────────────────
+    private void BuildDragIcon(CanvasLayer hud)
+    {
+        _dragFloatStyle = new StyleBoxFlat { BgColor = Colors.Transparent };
+        _dragFloatIcon  = new Panel();
+        _dragFloatIcon.Size        = new Vector2(30f, 30f);
+        _dragFloatIcon.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _dragFloatIcon.Visible     = false;
+        _dragFloatIcon.AddThemeStyleboxOverride("panel", _dragFloatStyle);
+        hud.AddChild(_dragFloatIcon);
+    }
+
+    private int GetInvSlotUnderMouse()
+    {
+        if (!_inventoryOpen || _invSlotPanels == null) return -1;
+        var mouse = GetViewport().GetMousePosition();
+        for (int i = 0; i < _invSlotPanels.Length; i++)
+        {
+            if (_invSlotPanels[i].GetGlobalRect().HasPoint(mouse)) return i;
+        }
+        return -1;
+    }
+
     private void RefreshLevelHUD()
     {
         int xpReq = PlayerController.XpRequired(_player.Level);
@@ -814,6 +965,7 @@ public partial class Main : Node
     private static Button MakeBtn(string text, Color bg)
     {
         var b = new Button { Text = text };
+        b.FocusMode = Control.FocusModeEnum.None; // 防止空白鍵意外觸發已聚焦按鈕
         var s = new StyleBoxFlat { BgColor = bg };
         s.CornerRadiusTopLeft = s.CornerRadiusTopRight =
         s.CornerRadiusBottomLeft = s.CornerRadiusBottomRight = 3;
@@ -1175,8 +1327,7 @@ public partial class Main : Node
         for (int r = 1; r < rows; r++)
             rowY[r] = row1Y + (r - 1) * (slotH + gapY);
 
-        float infoY  = rowY[rows - 1] + slotH + gapY;
-        float panelH = infoY + 16f + padY;
+        float panelH = rowY[rows - 1] + slotH + padY;
 
         var bg = new StyleBoxFlat
         {
@@ -1266,30 +1417,11 @@ public partial class Main : Node
             slot.MouseEntered += () =>
             {
                 var s = _player.Inventory.Slots[idx];
-                _invInfoLabel.Text = s.IsEmpty ? "" : ItemRegistry.Get(s.ItemId).DisplayName;
+                if (!s.IsEmpty) ShowFloatTooltip(ItemRegistry.Get(s.ItemId).DisplayName);
             };
-            slot.MouseExited  += () => _invInfoLabel.Text = "";
-            slot.GuiInput     += (InputEvent ev) =>
-            {
-                if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
-                {
-                    var s = _player.Inventory.Slots[idx];
-                    if (!s.IsEmpty && ItemRegistry.Get(s.ItemId).EquipSlot != EquipmentSlotType.None)
-                    {
-                        _player.Equipment.TryEquip(_player.Inventory, idx);
-                        RefreshInventoryPanel();
-                        RefreshEquipPanel();
-                    }
-                }
-            };
+            slot.MouseExited  += () => HideFloatTooltip();
         }
 
-        _invInfoLabel = new Label();
-        _invInfoLabel.Position = new Vector2(padX, infoY);
-        _invInfoLabel.Size     = new Vector2(innerW, 16f);
-        _invInfoLabel.AddThemeFontSizeOverride("font_size", 11);
-        _invInfoLabel.AddThemeColorOverride("font_color", new Color(0.90f, 0.85f, 0.70f));
-        _inventoryPanel.AddChild(_invInfoLabel);
     }
 
     private void RefreshInventoryPanel()
@@ -1319,6 +1451,11 @@ public partial class Main : Node
     {
         _inventoryOpen          = !_inventoryOpen;
         _inventoryPanel.Visible = _inventoryOpen;
+        if (!_inventoryOpen)
+        {
+            _dragSrcSlot = -1;
+            if (_dragFloatIcon != null) _dragFloatIcon.Visible = false;
+        }
         if (_inventoryOpen) RefreshInventoryPanel();
     }
 
@@ -1333,8 +1470,7 @@ public partial class Main : Node
         const float titleH = 20f;
         float rowH   = iconS + gapY;
         float panelW = padX + typeW + midGap + iconS + midGap + nameW + padX;
-        float infoY  = padY + titleH + 3 * rowH;
-        float panelH = infoY + 16f + padY;
+        float panelH = padY + titleH + 3 * rowH + padY;
 
         var bg = new StyleBoxFlat
         {
@@ -1416,10 +1552,10 @@ public partial class Main : Node
                     1 => _player.Equipment.ArmorId,
                     _ => _player.Equipment.AccessoryId,
                 };
-                _eqInfoLabel.Text = eid != ItemId.None
-                    ? $"點擊卸下：{ItemRegistry.Get(eid).DisplayName}" : "";
+                ShowFloatTooltip(eid != ItemId.None
+                    ? $"點擊卸下：{ItemRegistry.Get(eid).DisplayName}" : "");
             };
-            slotPanel.MouseExited  += () => _eqInfoLabel.Text = "";
+            slotPanel.MouseExited  += () => HideFloatTooltip();
             slotPanel.GuiInput     += (InputEvent ev) =>
             {
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
@@ -1437,12 +1573,6 @@ public partial class Main : Node
             };
         }
 
-        _eqInfoLabel = new Label();
-        _eqInfoLabel.Position = new Vector2(padX, infoY);
-        _eqInfoLabel.Size     = new Vector2(panelW - 2 * padX, 16f);
-        _eqInfoLabel.AddThemeFontSizeOverride("font_size", 10);
-        _eqInfoLabel.AddThemeColorOverride("font_color", new Color(0.70f, 0.88f, 0.70f));
-        _equipPanel.AddChild(_eqInfoLabel);
     }
 
     private void RefreshEquipPanel()

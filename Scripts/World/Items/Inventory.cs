@@ -71,6 +71,13 @@ public class Inventory
         }
     }
 
+    // 交換兩格物品（拖曳移動用）
+    public void SwapSlots(int a, int b)
+    {
+        if (a < 0 || a >= TotalSize || b < 0 || b >= TotalSize || a == b) return;
+        (Slots[a], Slots[b]) = (Slots[b], Slots[a]);
+    }
+
     // 取得熱鍵欄採掘速度倍率
     public float ActiveMiningSpeedMult
     {

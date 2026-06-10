@@ -39,6 +39,32 @@ public class DroppedItemManager
             if (dx <= 2 && dy <= 2)
             {
                 int added = player.Inventory.TryAdd(item.Stack.ItemId, item.Stack.Count);
+                if (added > 0)
+                {
+                    // 拾取裝備時，若對應裝備欄空則自動穿戴
+                    var data = ItemRegistry.Get(item.Stack.ItemId);
+                    if (data.EquipSlot != EquipmentSlotType.None)
+                    {
+                        bool slotEmpty = data.EquipSlot switch
+                        {
+                            EquipmentSlotType.Weapon    => player.Equipment.WeaponId    == ItemId.None,
+                            EquipmentSlotType.Armor     => player.Equipment.ArmorId     == ItemId.None,
+                            EquipmentSlotType.Accessory => player.Equipment.AccessoryId == ItemId.None,
+                            _                           => false,
+                        };
+                        if (slotEmpty)
+                        {
+                            for (int j = 0; j < Inventory.TotalSize; j++)
+                            {
+                                if (player.Inventory.Slots[j].ItemId == item.Stack.ItemId)
+                                {
+                                    player.Equipment.TryEquip(player.Inventory, j);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 if (added >= item.Stack.Count)
                 {
                     _items.RemoveAt(i);
