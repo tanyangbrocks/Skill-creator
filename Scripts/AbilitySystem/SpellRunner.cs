@@ -68,7 +68,7 @@ public sealed class SpellRunner
             : BlockAutoGenerator.Generate(spell);
         if (blocks.Count == 0) return;
 
-        var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks, spell));
         if (hitTarget.HasValue) ctx.CurrentIterEntity = hitTarget;
         if (enemies != null)
             ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);

@@ -161,7 +161,7 @@ public static class SpellCaster
         if (blocks.Count == 0) return;
 
         var slotByRef = BuildSlotLookup(spell);
-        var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks, spell));
         if (hitTarget.HasValue) ctx.CurrentIterEntity = hitTarget;
         if (enemies != null)
             ctx.EntityQuery = r => QueryEnemies(enemies, player, r);

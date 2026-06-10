@@ -18,6 +18,7 @@ using SkillCreator.AbilitySystem.VM;
 public partial class ScriptCanvas : Control
 {
     public event Action? Changed;
+    public Action<BlockNode>? BlockDoubleClicked { get; set; }
 
     private List<BlockNode>                       _blocks     = new();
     private Func<List<(string, string)>>?         _getSlotOpts;
@@ -109,7 +110,8 @@ public partial class ScriptCanvas : Control
             _getSlotOpts,
             onChanged: s => { if (captMain) Changed?.Invoke(); },
             onHeaderDrag: StartScriptDrag,
-            onBlockSplitDrag: StartSplitDrag);
+            onBlockSplitDrag: StartSplitDrag,
+            onDoubleClick: BlockDoubleClicked);
         script.Position = localPos;
         _freeCanvas.AddChild(script);
         _scripts.Add(script);
@@ -226,7 +228,7 @@ public partial class ScriptCanvas : Control
         bool overCanvas = GetGlobalRect().HasPoint(mouseGlobal);
         if (overCanvas)
         {
-            _palPreview.Text = $"[ {ScratchCanvas.BlockName(BlockDrag.Block.Type)} ]";
+            _palPreview.Text = $"[ {ScratchCanvas.BlockName(BlockDrag.Block)} ]";
             _palPreview.GlobalPosition = mouseGlobal + new Vector2(10f, -16f);
             _palPreview.Visible = true;
         }

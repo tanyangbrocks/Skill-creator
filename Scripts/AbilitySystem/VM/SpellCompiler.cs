@@ -1,24 +1,39 @@
 namespace SkillCreator.AbilitySystem.VM;
 
 using Godot;
+using SkillCreator.AbilitySystem.Data;
 
 // 將 BlockNode AST 編譯成扁平指令序列（方便 Wait 在任意深度暫停執行）
 public static class SpellCompiler
 {
-    public static List<Instruction> Compile(List<BlockNode> blocks)
+    public static List<Instruction> Compile(List<BlockNode> blocks, SpellArray? spell = null)
     {
+        // 建立 totemId → slotRef 對照表（供 BlockType.Totem 積木轉換為 InvokeTotem 指令）
+        var tsm = new Dictionary<string, string>();
+        if (spell != null)
+        {
+            for (int i = 0; i < spell.Slots.Count; i++)
+            {
+                var s = spell.Slots[i];
+                if (!s.IsEmpty && s.Totem != null)
+                    tsm[s.Totem.Id] = string.IsNullOrEmpty(s.Name) ? $"slot_{i}" : s.Name;
+            }
+        }
+
         var code = new List<Instruction>();
-        EmitList(blocks, code);
+        EmitList(blocks, code, tsm);
         return code;
     }
 
-    private static void EmitList(IEnumerable<BlockNode> blocks, List<Instruction> code)
+    private static void EmitList(IEnumerable<BlockNode> blocks, List<Instruction> code,
+                                  Dictionary<string, string> tsm)
     {
         foreach (var b in blocks)
-            EmitBlock(b, code);
+            EmitBlock(b, code, tsm);
     }
 
-    private static void EmitBlock(BlockNode block, List<Instruction> code)
+    private static void EmitBlock(BlockNode block, List<Instruction> code,
+                                   Dictionary<string, string> tsm)
     {
         switch (block.Type)
         {
@@ -34,13 +49,13 @@ public static class SpellCompiler
                 // ── 條件跳轉（目標暫時為 0，稍後 patch）──
                 var jif = new Instruction(OpCode.JumpIfFalse, new(block.Params));
                 code.Add(jif);
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 // ── 跳過 else 分支 ──
                 var jmp = new Instruction(OpCode.Jump);
                 code.Add(jmp);
                 // ── patch jif → else 起點 ──
                 jif.Params["__target"] = (object?)code.Count;
-                EmitList(block.ElseBranch, code);
+                EmitList(block.ElseBranch, code, tsm);
                 // ── patch jmp → 結尾 ──
                 jmp.Params["__target"] = (object?)code.Count;
                 break;
@@ -51,7 +66,7 @@ public static class SpellCompiler
                 // 無 else 分支的條件容器
                 var jif = new Instruction(OpCode.JumpIfFalse, new(block.Params));
                 code.Add(jif);
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 jif.Params["__target"] = (object?)code.Count;
                 break;
             }
@@ -78,7 +93,7 @@ public static class SpellCompiler
             {
                 code.Add(new Instruction(OpCode.RepeatPush, new(block.Params)));
                 int loopStart = code.Count;
-                EmitList(block.LoopBody, code);
+                EmitList(block.LoopBody, code, tsm);
                 code.Add(new Instruction(OpCode.RepeatStep,
                     new() { ["__loopStart"] = (object?)loopStart }));
                 break;
@@ -89,7 +104,7 @@ public static class SpellCompiler
                 int loopStart = code.Count;
                 var whileCheck = new Instruction(OpCode.WhileCheck, new(block.Params));
                 code.Add(whileCheck);
-                EmitList(block.LoopBody, code);
+                EmitList(block.LoopBody, code, tsm);
                 code.Add(new Instruction(OpCode.Jump,
                     new() { ["__target"] = (object?)loopStart }));
                 // patch：條件不成立時跳到迴圈結尾
@@ -106,7 +121,7 @@ public static class SpellCompiler
                 int loopStart = code.Count;
                 var forStart = new Instruction(OpCode.ForEachStart, new(block.Params));
                 code.Add(forStart);
-                EmitList(block.LoopBody, code);
+                EmitList(block.LoopBody, code, tsm);
                 code.Add(new Instruction(OpCode.ForEachStep,
                     new() { ["__loopStart"] = (object?)loopStart }));
                 forStart.Params["__loopEnd"] = (object?)code.Count;
@@ -245,7 +260,7 @@ public static class SpellCompiler
             {
                 var jif = new Instruction(OpCode.EdgeSinglePulse, new(block.Params));
                 code.Add(jif);
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 jif.Params["__target"] = (object?)code.Count;
                 break;
             }
@@ -298,11 +313,11 @@ public static class SpellCompiler
                 var rj = new Instruction(OpCode.RandomJump, new());
                 code.Add(rj);
                 int addrA = code.Count;
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 var jmpA = new Instruction(OpCode.Jump);
                 code.Add(jmpA);
                 int addrB = code.Count;
-                EmitList(block.ElseBranch, code);
+                EmitList(block.ElseBranch, code, tsm);
                 rj.Params["__target_0"] = (object?)addrA;
                 rj.Params["__target_1"] = (object?)addrB;
                 rj.Params["count"]      = (object?)2;
@@ -327,7 +342,7 @@ public static class SpellCompiler
             {
                 var checkInstr = new Instruction(OpCode.TaskCounterOnReach, new(block.Params));
                 code.Add(checkInstr);
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 checkInstr.Params["__target"] = (object?)code.Count;
                 break;
             }
@@ -386,11 +401,11 @@ public static class SpellCompiler
                 var altJump = new Instruction(OpCode.AlternateJump, new());
                 code.Add(altJump);
                 int evenStart = code.Count;
-                EmitList(block.ThenBranch, code);
+                EmitList(block.ThenBranch, code, tsm);
                 var jmpEven = new Instruction(OpCode.Jump);
                 code.Add(jmpEven);
                 int oddStart = code.Count;
-                EmitList(block.ElseBranch, code);
+                EmitList(block.ElseBranch, code, tsm);
                 altJump.Params["__target_even"] = (object?)evenStart;
                 altJump.Params["__target_odd"]  = (object?)oddStart;
                 jmpEven.Params["__target"]      = (object?)code.Count;
@@ -405,6 +420,20 @@ public static class SpellCompiler
                 break;
             case BlockType.SetActivationSustained:
                 code.Add(new Instruction(OpCode.SetActivationMode, new() { ["mode"] = (object?)2 }));
+                break;
+
+            // ── Direction A：圖騰／刻印宣告積木 ──────────────────────────
+            case BlockType.Totem:
+            {
+                // 查 totemId → slotRef，emit InvokeTotem（使圖騰積木兼具宣告與執行語義）
+                var id = block.Params.TryGetValue("totemId", out var v) && v is string s ? s : "";
+                if (tsm.TryGetValue(id, out var slotRef))
+                    code.Add(new Instruction(OpCode.InvokeTotem,
+                        new() { ["totemName"] = (object?)slotRef }));
+                break;
+            }
+            case BlockType.Engraving:
+                // 純宣告積木（刻印效果由 slot/engraving 系統在施放前套用），不產生 VM 指令
                 break;
 
             default:
