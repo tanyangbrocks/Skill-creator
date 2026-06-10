@@ -1010,7 +1010,8 @@ public class ExecutionLoop
     {
         float left  = ResolveNum(instr, "left",  ctx);
         float right = ResolveNum(instr, "right", ctx);
-        return Param<string>(instr, "op", "=") switch
+        string op = Param<string>(instr, "op", "=");
+        return op switch
         {
             ">"  => left > right,
             "<"  => left < right,
@@ -1018,7 +1019,7 @@ public class ExecutionLoop
             "≠"  => MathF.Abs(left - right) >= 0.0001f,
             ">=" => left >= right,
             "<=" => left <= right,
-            _    => false,
+            _    => throw new System.InvalidOperationException($"EvalCompare: 未知運算子 '{op}'"),
         };
     }
 

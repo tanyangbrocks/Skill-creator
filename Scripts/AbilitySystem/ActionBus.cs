@@ -71,9 +71,12 @@ public static class ActionBus
         GameAction? current = action;
         var toRemove = new List<FilterEntry>();
 
-        // 快照清單，避免過濾器內部再次 Register 影響本輪迭代
-        foreach (var entry in _filters.ToList())
+        // 注意：過濾器 lambda 不得在執行期間呼叫 Register/UnregisterByTag，否則需恢復 .ToList() 防護
+        // 已知限制：ActionBus._filters 不在 SnapshotManager 的快照範圍內；
+        //           Rollback 後 oneShot 過濾器（DamageShield/DeathGuard）不會自動還原。
+        for (int fi = 0; fi < _filters.Count; fi++)
         {
+            var entry = _filters[fi];
             if (current == null) break; // 已取消，後續過濾器不再執行
 
             current = entry.Filter(current);

@@ -23,7 +23,8 @@ public partial class Main : Node
 
     private Label   _hpLabel    = null!;
     private Label   _mpLabel    = null!;
-    private Label[] _slotLabels = null!;
+    private Label[]  _slotLabels      = null!;
+    private string[] _slotLabelCache  = null!;
 
     // 物品熱鍵欄 HUD
     private Panel[]          _hotbarPanels  = null!;
@@ -353,9 +354,11 @@ public partial class Main : Node
             lbl.CustomMinimumSize = new Vector2(slotW2, 22);
             lbl.HorizontalAlignment = HorizontalAlignment.Center;
             lbl.AddThemeFontSizeOverride("font_size", 10);
+            lbl.AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.55f));
             hud.AddChild(lbl);
             _slotLabels[i] = lbl;
         }
+        _slotLabelCache = new string[SpellLoadout.MaxSlots];
 
         var hint = new Label();
         hint.Text = "A/D 移動  W 跳躍  U/I/O/P 組合鍵施放  E 編輯器  C 數值  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
@@ -867,10 +870,10 @@ public partial class Main : Node
     {
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
         {
-            string keyHint = _slotKeys[i];
-            string name    = _editor.Loadout.SlotLabel(i);
-            _slotLabels[i].Text = $"[{keyHint}]{name}";
-            _slotLabels[i].AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.55f));
+            string text = $"[{_slotKeys[i]}]{_editor.Loadout.SlotLabel(i)}";
+            if (text == _slotLabelCache[i]) continue;
+            _slotLabelCache[i]  = text;
+            _slotLabels[i].Text = text;
         }
     }
 
