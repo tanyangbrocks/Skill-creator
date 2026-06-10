@@ -674,7 +674,8 @@ public partial class Main : Node
         _runner.Update(dt);
 
         // 投射物更新
-        _projectiles.RemoveAll(p => !p.IsAlive);
+        for (int i = _projectiles.Count - 1; i >= 0; i--)
+            if (!_projectiles[i].IsAlive) _projectiles.RemoveAt(i);
         foreach (var p in _projectiles) p.Update(_world.World, _enemies, dt);
 
         // 物理

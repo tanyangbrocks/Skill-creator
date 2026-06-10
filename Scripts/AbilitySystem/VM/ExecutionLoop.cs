@@ -9,6 +9,7 @@ public class ExecutionLoop
 {
     private readonly SafetyGuard _safety;
     private int _executionsThisTick = 0;
+    private static readonly Random _rng = new();
 
     public ExecutionLoop(SafetyGuard safety) => _safety = safety;
     public void ResetTick() => _executionsThisTick = 0;
@@ -844,7 +845,7 @@ public class ExecutionLoop
             case OpCode.RandomJump:
             {
                 int count  = Param<int>(instr, "count", 2);
-                int choice = new System.Random().Next(count);
+                int choice = _rng.Next(count);
                 ctx.PC = Param<int>(instr, $"__target_{choice}", ctx.PC + 1);
                 break;
             }

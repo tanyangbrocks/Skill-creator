@@ -16,6 +16,8 @@ public class TileWorld : IWorldInterface
     private readonly Random _rng = new(42);
     private int _frame = 0;
 
+    private static readonly (int dx, int dy)[] _neighbors = { (0,-1),(0,1),(-1,0),(1,0) };
+
     // 實體層（Phase 2 基礎，Phase 3 擴充）
     private readonly List<WorldEntity> _entities = new();
     private int _nextEntityId = 1;
@@ -229,8 +231,7 @@ public class TileWorld : IWorldInterface
 
     private void TryIgniteAround(int x, int y, float chance)
     {
-        Span<(int, int)> neighbors = stackalloc (int, int)[] { (0,-1),(0,1),(-1,0),(1,0) };
-        foreach (var (dx, dy) in neighbors)
+        foreach (var (dx, dy) in _neighbors)
         {
             int nx = x + dx, ny = y + dy;
             if (!InBounds(nx, ny)) continue;
@@ -260,8 +261,7 @@ public class TileWorld : IWorldInterface
     {
         Set(x, y, MaterialType.Air);
         // 將附近水格轉為蒸汽
-        Span<(int, int)> neighbors = stackalloc (int, int)[] { (0,-1),(0,1),(-1,0),(1,0) };
-        foreach (var (dx, dy) in neighbors)
+        foreach (var (dx, dy) in _neighbors)
         {
             int nx = x + dx, ny = y + dy;
             if (InBounds(nx, ny) && TypeAt(nx, ny) == MaterialType.Water)
@@ -289,8 +289,7 @@ public class TileWorld : IWorldInterface
         var matData  = MaterialRegistry.Get(mat);
         if (matData.NativeElement == ElementType.None) return;
 
-        Span<(int, int)> dirs = stackalloc (int, int)[] { (0,-1),(0,1),(-1,0),(1,0) };
-        foreach (var (dx, dy) in dirs)
+        foreach (var (dx, dy) in _neighbors)
         {
             int nx = x + dx, ny = y + dy;
             if (!InBounds(nx, ny)) continue;
@@ -359,8 +358,7 @@ public class TileWorld : IWorldInterface
 
     private bool HasAdjacent(int x, int y, MaterialType mat)
     {
-        Span<(int, int)> n = stackalloc (int, int)[] { (0,-1),(0,1),(-1,0),(1,0) };
-        foreach (var (dx, dy) in n)
+        foreach (var (dx, dy) in _neighbors)
         {
             int nx = x + dx, ny = y + dy;
             if (InBounds(nx, ny) && TypeAt(nx, ny) == mat) return true;
