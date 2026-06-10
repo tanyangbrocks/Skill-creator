@@ -20,7 +20,12 @@ public partial class AbilityEditorUI : Control
     private readonly SpellArray[] _spells =
         new SpellArray[SpellLoadout.MaxSlots];
     private int _activeEditorSlot = 0;
-    private SpellArray _spell => _spells[_activeEditorSlot];
+    // 容器導覽棧：每層記錄（該層的 SpellArray, 顯示標籤）
+    private readonly List<(SpellArray arr, string label)> _navStack = new();
+    // 當前編輯目標：主體 或 容器效果深處
+    private SpellArray _spell => _navStack.Count > 0
+        ? _navStack[^1].arr
+        : _spells[_activeEditorSlot];
 
     private Mode      _mode         = Mode.Idle;
     private TotemData? _pendingTotem;
@@ -46,6 +51,18 @@ public partial class AbilityEditorUI : Control
     // Header 主/被動切換（供 RefreshAll 同步）
     private Button _activeModeBtn  = null!;
     private Button _passiveModeBtn = null!;
+    // Header 導覽元素
+    private Button   _backBtn           = null!;
+    private Control  _depth0Only        = null!; // 主被動/發動/槽位（depth>0 時隱藏）
+    private Label    _breadcrumbLabel   = null!; // depth>0 時顯示路徑
+    private Button   _enterContainerBtn = null!; // 進入容器效果
+    // 施放方式按鈕（所有深度可見，需在 RefreshHeaderState 更新 ButtonPressed）
+    private static readonly ContainerType[] _ctValues =
+    {
+        ContainerType.DirectCast, ContainerType.Projectile,
+        ContainerType.SummonMinion, ContainerType.SummonTurret, ContainerType.SummonGuardian,
+    };
+    private readonly Button[] _containerTypeBtns = new Button[5];
     // 左側面板：0=圖騰 1=積木 2=刻印
     private int           _activeLeftTab  = 1;
     private VBoxContainer _leftContent    = null!;
@@ -115,48 +132,52 @@ public partial class AbilityEditorUI : Control
 
         var row = new HBoxContainer();
         row.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        row.AddThemeConstantOverride("separation", 10);
+        row.AddThemeConstantOverride("separation", 8);
         bar.AddChild(row);
 
-        // ← 返回按鈕
-        var backBtn = Btn("← 返回", new Color(0.20f, 0.20f, 0.28f));
-        backBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-        backBtn.CustomMinimumSize = new Vector2(80, 30);
-        backBtn.Pressed += () => EmitSignal(SignalName.BackPressed);
-        row.AddChild(backBtn);
+        // ── 返回 / 上一層 ──
+        _backBtn = Btn("← 返回", new Color(0.20f, 0.20f, 0.28f));
+        _backBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        _backBtn.CustomMinimumSize = new Vector2(84, 30);
+        _backBtn.Pressed += () =>
+        {
+            if (_navStack.Count > 0) { _navStack.RemoveAt(_navStack.Count - 1); RefreshAll(); }
+            else                     { EmitSignal(SignalName.BackPressed); }
+        };
+        row.AddChild(_backBtn);
 
-        HSpacer(row, 4);
+        // ── depth-0 only：名稱 / 主被動 / 發動 / 槽位 ──
+        _depth0Only = new HBoxContainer();
+        ((HBoxContainer)_depth0Only).AddThemeConstantOverride("separation", 8);
+        _depth0Only.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        row.AddChild(_depth0Only);
 
-        row.AddChild(Lbl("法陣名稱：", vcenter: true));
+        var d0 = (HBoxContainer)_depth0Only;
+        d0.AddChild(Lbl("法陣名稱：", vcenter: true));
 
         _nameInput = new LineEdit();
         _nameInput.PlaceholderText = "輸入法陣名稱（必填）";
-        _nameInput.CustomMinimumSize = new Vector2(180, 34);
+        _nameInput.CustomMinimumSize = new Vector2(160, 34);
         _nameInput.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         _nameInput.TextChanged += t => _spell.Name = t;
-        row.AddChild(_nameInput);
+        d0.AddChild(_nameInput);
 
-        HSpacer(row, 8);
-        row.AddChild(Lbl("主被動：", vcenter: true));
+        d0.AddChild(Lbl("主被動：", vcenter: true));
         var passiveGrp = new ButtonGroup();
-
         _activeModeBtn = Btn("主動", new Color(0.22f, 0.30f, 0.22f));
         _activeModeBtn.ToggleMode = true; _activeModeBtn.ButtonGroup = passiveGrp;
         _activeModeBtn.ButtonPressed = !_spell.IsPassive;
         _activeModeBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         _activeModeBtn.Toggled += on => { if (on) _spell.IsPassive = false; };
-        row.AddChild(_activeModeBtn);
-
+        d0.AddChild(_activeModeBtn);
         _passiveModeBtn = Btn("被動", new Color(0.30f, 0.22f, 0.22f));
         _passiveModeBtn.ToggleMode = true; _passiveModeBtn.ButtonGroup = passiveGrp;
         _passiveModeBtn.ButtonPressed = _spell.IsPassive;
         _passiveModeBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         _passiveModeBtn.Toggled += on => { if (on) _spell.IsPassive = true; };
-        row.AddChild(_passiveModeBtn);
+        d0.AddChild(_passiveModeBtn);
 
-        HSpacer(row, 12);
-        row.AddChild(Lbl("發動：", vcenter: true));
-
+        d0.AddChild(Lbl("發動：", vcenter: true));
         var actGrp = new ButtonGroup();
         foreach (var (atype, albl) in new (AbilityActivationType, string)[]
         {
@@ -171,36 +192,10 @@ public partial class AbilityEditorUI : Control
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             var t2 = atype;
             btn.Toggled += on => { if (on) { _spell.ActivationType = t2; RefreshCost(); } };
-            row.AddChild(btn);
+            d0.AddChild(btn);
         }
 
-        HSpacer(row, 12);
-        row.AddChild(Lbl("施放方式：", vcenter: true));
-
-        var ctGrp = new ButtonGroup();
-        foreach (var (ct, ctLbl, ctColor) in new (ContainerType, string, Color)[]
-        {
-            // 直接施放：非容器，玩家本體直接執行
-            (ContainerType.DirectCast,     "直接施放", new Color(0.22f, 0.28f, 0.22f)),
-            // 容器類型：裝載效果的實體
-            (ContainerType.Projectile,     "投射物",   new Color(0.18f, 0.26f, 0.36f)),
-            (ContainerType.SummonMinion,   "精靈",     new Color(0.28f, 0.22f, 0.35f)),
-            (ContainerType.SummonTurret,   "砲台",     new Color(0.28f, 0.22f, 0.35f)),
-            (ContainerType.SummonGuardian, "護衛",     new Color(0.28f, 0.22f, 0.35f)),
-        })
-        {
-            var btn = Btn(ctLbl, ctColor);
-            btn.ToggleMode = true; btn.ButtonGroup = ctGrp;
-            btn.ButtonPressed = _spell.Container == ct;
-            btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-            var cap = ct;
-            btn.Toggled += on => { if (on) _spell.Container = cap; };
-            row.AddChild(btn);
-        }
-
-        HSpacer(row, 16);
-        row.AddChild(Lbl("槽位：", vcenter: true));
-
+        d0.AddChild(Lbl("槽位：", vcenter: true));
         var slotGrp = new ButtonGroup();
         for (int si = 0; si < SpellLoadout.MaxSlots; si++)
         {
@@ -208,12 +203,60 @@ public partial class AbilityEditorUI : Control
             btn.ToggleMode = true; btn.ButtonGroup = slotGrp;
             btn.ButtonPressed = si == _activeEditorSlot;
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-            btn.CustomMinimumSize = new Vector2(32, 30);
+            btn.CustomMinimumSize = new Vector2(28, 28);
             _headerSlotBtns[si] = btn;
             var captSi = si;
             btn.Toggled += on => { if (on) SelectEditorSlot(captSi); };
-            row.AddChild(btn);
+            d0.AddChild(btn);
         }
+
+        // ── 麵包屑（depth>0 時顯示，與 _depth0Only 互斥）──
+        _breadcrumbLabel = new Label();
+        _breadcrumbLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.82f, 1.0f));
+        _breadcrumbLabel.AddThemeFontSizeOverride("font_size", 12);
+        _breadcrumbLabel.VerticalAlignment = VerticalAlignment.Center;
+        _breadcrumbLabel.Visible = false;
+        row.AddChild(_breadcrumbLabel);
+
+        HSpacer(row, 6);
+        row.AddChild(Lbl("施放方式：", vcenter: true));
+
+        // ── 施放方式（所有深度都可見，供設定容器效果的子容器）──
+        var ctEntries = new (ContainerType ct, string lbl, Color clr)[]
+        {
+            (ContainerType.DirectCast,     "直接施放", new Color(0.22f, 0.28f, 0.22f)),
+            (ContainerType.Projectile,     "投射物",   new Color(0.18f, 0.26f, 0.36f)),
+            (ContainerType.SummonMinion,   "精靈",     new Color(0.28f, 0.22f, 0.35f)),
+            (ContainerType.SummonTurret,   "砲台",     new Color(0.28f, 0.22f, 0.35f)),
+            (ContainerType.SummonGuardian, "護衛",     new Color(0.28f, 0.22f, 0.35f)),
+        };
+        var ctGrp = new ButtonGroup();
+        for (int ci = 0; ci < ctEntries.Length; ci++)
+        {
+            var (ct, ctLbl, ctClr) = ctEntries[ci];
+            var btn = Btn(ctLbl, ctClr);
+            btn.ToggleMode = true; btn.ButtonGroup = ctGrp;
+            btn.ButtonPressed = _spell.Container == ct;
+            btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            var cap = ct;
+            btn.Toggled += on =>
+            {
+                if (on)
+                {
+                    _spell.Container = cap;
+                    RefreshHeaderState(); // 讓進入容器效果按鈕即時顯示/隱藏
+                }
+            };
+            row.AddChild(btn);
+            _containerTypeBtns[ci] = btn;
+        }
+
+        // ── 進入容器效果按鈕 ──
+        _enterContainerBtn = Btn("進入容器效果 ▸", new Color(0.28f, 0.38f, 0.48f));
+        _enterContainerBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        _enterContainerBtn.Visible = false;
+        _enterContainerBtn.Pressed += EnterContainerEffect;
+        row.AddChild(_enterContainerBtn);
 
         var flex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         row.AddChild(flex);
@@ -226,6 +269,77 @@ public partial class AbilityEditorUI : Control
 
         HSpacer(row, 12);
     }
+
+    // ── 容器導覽 ──────────────────────────────────────────────────────
+
+    private void EnterContainerEffect()
+    {
+        if (_spell.Container == ContainerType.DirectCast) return;
+        if (_navStack.Count >= SafetyGuard.MaxContainerDepth) return;
+
+        var containerName = ContainerTypeName(_spell.Container);
+        var dlg = new ConfirmationDialog
+        {
+            Title      = "進入容器效果",
+            DialogText = $"編輯「{containerName}」的內部效果？",
+        };
+        AddChild(dlg);
+        dlg.PopupCentered(new Vector2I(340, 0));
+        dlg.Confirmed += () =>
+        {
+            _spell.ContainerEffect ??= new SpellArray();
+            _navStack.Add((_spell.ContainerEffect, containerName));
+            dlg.QueueFree();
+            RefreshAll();
+        };
+        dlg.Canceled      += () => dlg.QueueFree();
+        dlg.CloseRequested += () => dlg.QueueFree();
+    }
+
+    private void RefreshHeaderState()
+    {
+        bool inContainer = _navStack.Count > 0;
+        _depth0Only.Visible      = !inContainer;
+        _breadcrumbLabel.Visible = inContainer;
+        if (inContainer)
+            _breadcrumbLabel.Text = BuildBreadcrumb();
+
+        _backBtn.Text = inContainer ? "← 上一層" : "← 返回";
+
+        // 同步施放方式按鈕的選中狀態（容器內可能有不同的 Container）
+        for (int i = 0; i < _containerTypeBtns.Length; i++)
+            _containerTypeBtns[i].ButtonPressed = _spell.Container == _ctValues[i];
+
+        // 進入容器效果按鈕：選了非 DirectCast 且未達深度上限才顯示
+        bool canEnter = _spell.Container != ContainerType.DirectCast
+                     && _navStack.Count < SafetyGuard.MaxContainerDepth;
+        _enterContainerBtn.Visible = canEnter;
+        if (_navStack.Count == SafetyGuard.MaxContainerDepth - 1 && canEnter)
+            _enterContainerBtn.Text = $"進入容器效果 ▸（第{_navStack.Count + 1}層，最深）";
+        else
+            _enterContainerBtn.Text = "進入容器效果 ▸";
+    }
+
+    private string BuildBreadcrumb()
+    {
+        var parts = new List<string>();
+        string rootName = _spells[_activeEditorSlot].Name is { Length: > 0 } n
+            ? n : $"槽位 {_activeEditorSlot + 1}";
+        parts.Add(rootName);
+        foreach (var (_, lbl) in _navStack)
+            parts.Add(lbl);
+        return string.Join(" › ", parts);
+    }
+
+    private static string ContainerTypeName(ContainerType ct) => ct switch
+    {
+        ContainerType.DirectCast     => "直接施放",
+        ContainerType.Projectile     => "投射物",
+        ContainerType.SummonMinion   => "精靈",
+        ContainerType.SummonTurret   => "砲台",
+        ContainerType.SummonGuardian => "護衛",
+        _                            => "容器",
+    };
 
     // ── 左側面板（母分類 tabs：圖騰 / 積木 / 刻印） ──────────────
 
@@ -608,6 +722,7 @@ public partial class AbilityEditorUI : Control
 
     private void RefreshAll()
     {
+        RefreshHeaderState();
         if (_nameInput != null) _nameInput.Text = _spell.Name;
         if (_activeModeBtn  != null) _activeModeBtn.ButtonPressed  = !_spell.IsPassive;
         if (_passiveModeBtn != null) _passiveModeBtn.ButtonPressed = _spell.IsPassive;
@@ -992,6 +1107,7 @@ public partial class AbilityEditorUI : Control
     private void SelectEditorSlot(int i)
     {
         _activeEditorSlot = i;
+        _navStack.Clear();
         _mode       = Mode.Idle;
         _activeSlot = -1;
         RefreshAll();
@@ -1002,6 +1118,7 @@ public partial class AbilityEditorUI : Control
     {
         if (index < 0 || index >= _spells.Length) return;
         _activeEditorSlot = index;
+        _navStack.Clear();
         _mode       = Mode.Idle;
         _activeSlot = -1;
         if (_headerSlotBtns[index] is { } b) b.ButtonPressed = true;

@@ -18,6 +18,9 @@ public class SafetyGuard
     // 場上存活實體上限（⚠️ 數值待調整）
     public const int MaxEntityCount = 100;
 
+    // 容器效果巢狀深度上限（0=技能主體，1=第一層容器效果，2=容器內容器，3=三層容器）
+    public const int MaxContainerDepth = 3;
+
     // 檢查 MP 是否足夠（MP 熔斷）
     public static bool HasMp(float currentMp, float cost) => currentMp >= cost;
 

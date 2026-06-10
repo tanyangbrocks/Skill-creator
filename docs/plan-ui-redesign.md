@@ -226,11 +226,16 @@
 - [x] Header 主被動 toggle（`[主動][被動]`，RefreshAll 同步）
 - [x] 儲存驗證 AcceptDialog（收集名稱空白 / AP 超限錯誤後一次彈出警示）
 
-### Stage 4：容器效果編輯頁面
-- [ ] 雙擊容器圖騰觸發確認對話框
-- [ ] 容器效果頁（與技能編輯頁共用同一組件，但換標題 + 麵包屑）
-- [ ] 深度限制（建議上限 2，`SafetyGuard` 加新常數）
-- [ ] `SpellCompiler` 遞迴容器編譯
+### Stage 4：容器效果編輯頁面 ✅（2026-06-10）
+- [x] 深度上限改為 3（使用者確認），`SafetyGuard.MaxContainerDepth = 3`
+- [x] Header「進入容器效果 ▸」按鈕：選非 DirectCast 容器且 depth < MaxContainerDepth 時出現，第 MaxContainerDepth-1 層加「最深」提示
+- [x] ConfirmationDialog 確認對話框（「編輯此容器效果？」）
+- [x] `_navStack` 導覽棧：`_spell` property 自動指向當前深度的 SpellArray，所有現有邏輯（Slots/Blocks/Container/ContainerEffect）無縫適用
+- [x] `_depth0Only` / `_breadcrumbLabel` 互斥顯示（depth=0 顯示全控，depth>0 顯示麵包屑路徑）
+- [x] 施放方式按鈕所有深度可見（容器效果可設定子容器類型）
+- [x] 返回行為改為：depth>0 pop navStack，depth=0 才 BackPressed
+- [x] 切換主槽位時 navStack.Clear()（不殘留舊路徑）
+- [ ] `SpellCompiler` 遞迴容器編譯（待容器實體 runtime 解除 TODO-STUB 後接入）
 
 ### Stage 5：效果文案生成（可最後實作）
 - [ ] `SpellDescriptionGenerator.cs` 模板引擎
