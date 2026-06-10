@@ -19,8 +19,9 @@ public static class SaveSystem
 
     private sealed class DtoLoadout
     {
-        public int        ActiveIndex { get; set; }
-        public DtoSpell?[] Slots      { get; set; } = [];
+        public int          ActiveIndex   { get; set; }
+        public DtoSpell?[]  Slots         { get; set; } = [];
+        public List<DtoSpell> PassiveSpells { get; set; } = [];
     }
 
     private sealed class DtoSpell
@@ -32,9 +33,11 @@ public static class SaveSystem
         public float    BaseMpCost     { get; set; }
         public int      SceneUseLimit  { get; set; }
         public string?  NextInCombo    { get; set; }
+        public bool     IsPassive      { get; set; }
         public List<DtoSlot>      SpellSlots       { get; set; } = [];
         public List<DtoEngraving> GlobalEngravings { get; set; } = [];
         public List<DtoBlock>     Blocks           { get; set; } = [];
+        public DtoSpell?          ContainerEffect  { get; set; }  // 遞迴，最深 SafetyGuard.MaxContainerDepth
     }
 
     private sealed class DtoSlot
@@ -64,14 +67,20 @@ public static class SaveSystem
     //  Public API
     // ─────────────────────────────────────────────────────────────
 
-    public static void Save(SpellArray?[] spells, int activeIndex)
+    public static void Save(SpellArray?[] spells, int activeIndex,
+        IReadOnlyList<SpellArray>? passiveSpells = null)
     {
         try
         {
             var dto = new DtoLoadout
             {
-                ActiveIndex = activeIndex,
-                Slots       = spells.Select(ToDto).ToArray(),
+                ActiveIndex   = activeIndex,
+                Slots         = spells.Select(s => ToDto(s)).ToArray(),
+                PassiveSpells = (passiveSpells ?? Array.Empty<SpellArray>())
+                                    .Select(s => ToDto(s))
+                                    .Where(d => d is not null)
+                                    .Select(d => d!)
+                                    .ToList(),
             };
             System.IO.File.WriteAllText(SavePath, JsonSerializer.Serialize(dto, Opts));
             GD.Print($"[SaveSystem] 存檔成功：{SavePath}");
@@ -83,11 +92,11 @@ public static class SaveSystem
     }
 
     // totemMap / engraveMap 由呼叫方（UI 層）傳入，避免循環依賴
-    public static (SpellArray?[] spells, int activeIndex) Load(
+    public static (SpellArray?[] spells, int activeIndex, List<SpellArray> passiveSpells) Load(
         Dictionary<string, TotemData>   totemMap,
         Dictionary<string, EngraveData> engraveMap)
     {
-        var empty = (new SpellArray?[SpellLoadout.MaxSlots], 0);
+        var empty = (new SpellArray?[SpellLoadout.MaxSlots], 0, new List<SpellArray>());
         if (!System.IO.File.Exists(SavePath)) return empty;
 
         try
@@ -100,8 +109,12 @@ public static class SaveSystem
             for (int i = 0; i < Math.Min(dto.Slots.Length, SpellLoadout.MaxSlots); i++)
                 spells[i] = dto.Slots[i] is { } s ? FromDto(s, totemMap, engraveMap) : null;
 
+            var passive = dto.PassiveSpells
+                .Select(s => FromDto(s, totemMap, engraveMap))
+                .ToList();
+
             GD.Print($"[SaveSystem] 讀檔成功");
-            return (spells, Math.Clamp(dto.ActiveIndex, 0, SpellLoadout.MaxSlots - 1));
+            return (spells, Math.Clamp(dto.ActiveIndex, 0, SpellLoadout.MaxSlots - 1), passive);
         }
         catch (Exception ex)
         {
@@ -114,7 +127,7 @@ public static class SaveSystem
     //  Serialize（SpellArray → DTO）
     // ─────────────────────────────────────────────────────────────
 
-    private static DtoSpell? ToDto(SpellArray? s) => s is null ? null : new DtoSpell
+    private static DtoSpell? ToDto(SpellArray? s, int depth = 0) => s is null ? null : new DtoSpell
     {
         Name             = s.Name,
         ActivationType   = (int)s.ActivationType,
@@ -123,9 +136,13 @@ public static class SaveSystem
         BaseMpCost       = s.BaseMpCost,
         SceneUseLimit    = s.SceneUseLimit,
         NextInCombo      = s.NextInCombo,
+        IsPassive        = s.IsPassive,
         SpellSlots       = s.Slots.Select(SlotToDto).ToList(),
         GlobalEngravings = s.GlobalEngravings.Select(EngrToDto).ToList(),
         Blocks           = s.Blocks.Select(BlockToDto).ToList(),
+        ContainerEffect  = depth < SafetyGuard.MaxContainerDepth
+                               ? ToDto(s.ContainerEffect, depth + 1)
+                               : null,
     };
 
     private static DtoSlot SlotToDto(SpellSlot s) => new()
@@ -166,7 +183,8 @@ public static class SaveSystem
 
     private static SpellArray FromDto(DtoSpell dto,
         Dictionary<string, TotemData>   totemMap,
-        Dictionary<string, EngraveData> engraveMap)
+        Dictionary<string, EngraveData> engraveMap,
+        int depth = 0)
     {
         var spell = new SpellArray
         {
@@ -196,6 +214,29 @@ public static class SaveSystem
 
         foreach (var bd in dto.Blocks)
             spell.Blocks.Add(BlockFromDto(bd));
+
+        if (dto.ContainerEffect is not null && depth < SafetyGuard.MaxContainerDepth)
+            spell.ContainerEffect = FromDto(dto.ContainerEffect, totemMap, engraveMap, depth + 1);
+
+        // 向後相容：舊存檔用 IsPassive flag，新版改由 Passive 圖騰決定
+        if (dto.IsPassive && !spell.IsPassive && totemMap.TryGetValue("passive_continuous", out var pt))
+            spell.Slots.Insert(0, new SpellSlot { Totem = pt });
+
+        // Direction A 向後相容：舊存檔無 Totem/Engraving 積木，從 Slots + GlobalEngravings 自動生成
+        if (!spell.Blocks.Any(b => b.Type == BlockType.Totem) && spell.Slots.Any(s => !s.IsEmpty))
+        {
+            var totemNodes   = spell.Slots.Where(s => !s.IsEmpty).Select(s => new BlockNode
+            {
+                Type   = BlockType.Totem,
+                Params = new Dictionary<string, object?> { ["totemId"] = (object?)s.Totem!.Id },
+            });
+            var engraveNodes = spell.GlobalEngravings.Select(e => new BlockNode
+            {
+                Type   = BlockType.Engraving,
+                Params = new Dictionary<string, object?> { ["engraveId"] = (object?)e.Id, ["pts"] = (object?)(float)e.PointsInvested },
+            });
+            spell.Blocks.InsertRange(0, totemNodes.Concat(engraveNodes));
+        }
 
         return spell;
     }

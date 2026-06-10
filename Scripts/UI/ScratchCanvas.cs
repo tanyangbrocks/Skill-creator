@@ -130,7 +130,7 @@ public partial class ScratchCanvas : Control
         Spacer(row, 4, 0);
 
         // ── 積木名稱 ─────────────────────────────────────────────
-        var nameLbl = new Label { Text = BlockName(block.Type) };
+        var nameLbl = new Label { Text = BlockName(block) };
         nameLbl.AddThemeColorOverride("font_color", BlockColor(block.Type));
         nameLbl.AddThemeFontSizeOverride("font_size", 12);
         nameLbl.VerticalAlignment = VerticalAlignment.Center;
@@ -272,7 +272,7 @@ public partial class ScratchCanvas : Control
             CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
         };
         p.AddThemeStyleboxOverride("panel", s);
-        var l = new Label { Text = "  " + BlockName(block.Type) };
+        var l = new Label { Text = "  " + BlockName(block) };
         l.AddThemeColorOverride("font_color", BlockColor(block.Type));
         l.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         p.AddChild(l);
@@ -428,6 +428,8 @@ public partial class ScratchCanvas : Control
     private static readonly Color CLvnd  = new(0.95f, 0.65f, 0.95f); // 淡紫 TaskCounter
     private static readonly Color CVec   = new(0.30f, 0.88f, 0.80f); // 青綠 Vector
     private static readonly Color CGray  = new(0.75f, 0.75f, 0.75f); // 灰   fallback
+    private static readonly Color CTotem   = new(0.28f, 0.78f, 0.88f); // 青藍  圖騰
+    private static readonly Color CEngrave = new(0.72f, 0.55f, 0.92f); // 淡紫  刻印
 
     // 積木描述器（顏色、UI 名稱、預設積木工廠、參數 UI 建構器）
     // BuildUI = null 表示無參數列
@@ -801,11 +803,42 @@ public partial class ScratchCanvas : Control
                 r.AddChild(TinyLbl("標籤"));
                 r.AddChild(SmallEdit(b, "label", "標籤名", 80));
             }) },
+
+        // ── 圖騰／刻印（Direction A）─────────────────────────────────
+        { BlockType.Totem,     new(CTotem,   "▸ 圖騰",
+            () => B(BlockType.Totem, ("totemId", "")),
+            null) },
+        { BlockType.Engraving, new(CEngrave, "◆ 刻印",
+            () => B(BlockType.Engraving, ("engraveId", ""), ("pts", 0f)),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("投入"));
+                r.AddChild(SmallSpin(b, "pts", 0f, 100f, 1f, 36));
+                r.AddChild(TinyLbl("pt"));
+            }) },
     };
 
     // ── 統一查表的三個舊介面（保持對外 API 不變）─────────────────
     internal static Color     BlockColor(BlockType t) =>
         _descs.TryGetValue(t, out var d) ? d.Color : CGray;
+
+    // 圖騰／刻印積木用動態名稱；其他積木 fallback 到靜態版本
+    internal static string    BlockName(BlockNode node)
+    {
+        if (node.Type == BlockType.Totem)
+        {
+            var id = node.Params.TryGetValue("totemId", out var v) && v is string s ? s : "";
+            return TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == id)?.DisplayName is { } n
+                ? $"▸ {n}" : $"▸ {id}";
+        }
+        if (node.Type == BlockType.Engraving)
+        {
+            var id = node.Params.TryGetValue("engraveId", out var v) && v is string s ? s : "";
+            return TotemLibrary.AllEngravings.FirstOrDefault(e => e.Id == id)?.DisplayName is { } n
+                ? $"◆ {n}" : $"◆ {id}";
+        }
+        return BlockName(node.Type);
+    }
+
     internal static string    BlockName(BlockType t)  =>
         _descs.TryGetValue(t, out var d) ? d.Name  : t.ToString();
     internal static BlockNode MakeDefaultBlock(BlockType t) =>

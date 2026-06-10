@@ -33,6 +33,12 @@ public class SpellArray
     // 場景唯一次刻印：本場最多宣告次數（0 = 無限制）
     public int SceneUseLimit { get; set; } = 0;
 
+    // 是否為被動技能：由插槽中是否包含 Passive 圖騰決定（計算屬性）
+    public bool IsPassive => Slots.Any(s => s.Totem?.Type == TotemType.Passive);
+
+    // 容器效果：此法陣投射物 / 召喚物的內部積木邏輯（巢狀最深 SafetyGuard.MaxContainerDepth 層）
+    public SpellArray? ContainerEffect { get; set; }
+
     public bool IsValid => !string.IsNullOrWhiteSpace(Name) && Slots.Any(s => !s.IsEmpty);
 
     /// <summary>

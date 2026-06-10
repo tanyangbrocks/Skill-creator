@@ -32,6 +32,11 @@ public static class TotemLibrary
         new TotemData { Id = "projectile_energy",   DisplayName = "能量投射", Type = TotemType.Projectile, BaseAbilityPointCost = 10 }, // TODO-STUB: 無形能量彈，可附加元素/法則，未接完整能量彈系統
         new TotemData { Id = "projectile_physical",  DisplayName = "實物投射", Type = TotemType.Projectile, BaseAbilityPointCost = 12 }, // TODO-STUB: 具現物體投出（石塊/武器等），物理碰撞未實作
 
+        // ── 被動圖騰（無門檻）────────────────────────────────────
+        // 讓法陣以被動模式運行；兩種變體決定觸發機制
+        new TotemData { Id = "passive_continuous", DisplayName = "持續偵測", Type = TotemType.Passive, BaseAbilityPointCost = 3 }, // TODO-STUB: 每幀/每 Tick 持續執行條件判斷，未接 SpellRunner 持續輪詢
+        new TotemData { Id = "passive_switch",     DisplayName = "開關式",   Type = TotemType.Passive, BaseAbilityPointCost = 4 }, // TODO-STUB: 首次觸發啟動、再次觸發關閉，開關狀態機未實作
+
         // ── 變幻圖騰（LV 20+）────────────────────────────────────
         new TotemData { Id = "morph_speed",      DisplayName = "加速形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 10, RequiredPlayerLevel = 20 }, // TODO-STUB: 速度加成未接 PlayerController 移速屬性
         new TotemData { Id = "morph_flight",     DisplayName = "飛行形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 15, RequiredPlayerLevel = 20 }, // TODO-STUB: 飛行物理未實作，暫以爆炸佔位
@@ -88,8 +93,8 @@ public static class TotemLibrary
 
         // ── 藍：圖騰改造 ─────────────────────────────────────────
         new EngraveData { Id = "blue_multi",            DisplayName = "多段發動",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 1f,   BaseEffect = 1f,  BaseCost = 5 },
-        new EngraveData { Id = "blue_passive",          DisplayName = "被動模式",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 3 }, // TODO-STUB: 被動持續偵測未接 SpellRunner
-        new EngraveData { Id = "blue_switch_mode",      DisplayName = "開關式",     Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 4 }, // TODO-STUB: 開關模式邏輯未實作
+        // [移至被動圖騰層] blue_passive → passive_continuous / passive_switch（見 TotemType.Passive）
+        // [移至被動圖騰層] blue_switch_mode → passive_switch
         new EngraveData { Id = "blue_chargeable",       DisplayName = "可儲存式",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0.5f, BaseEffect = 1f,  BaseCost = 5 }, // TODO-STUB: 儲存集氣後一次爆發，集氣系統未實作
         new EngraveData { Id = "blue_condition_trigger",DisplayName = "條件觸發",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 4 }, // TODO-STUB: 條件觸發邏輯未實作
         new EngraveData { Id = "blue_no_interrupt",     DisplayName = "不可打斷",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 4 }, // TODO-STUB: 姿態系統未實作（Phase 2）

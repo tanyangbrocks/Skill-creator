@@ -13,6 +13,7 @@ public partial class BlockScript : Control
     private readonly Action<BlockScript>                        _onChanged;
     private readonly Action<BlockScript, Vector2>               _onHeaderDrag;
     private readonly Action<BlockScript, int, Vector2>          _onBlockSplitDrag;
+    private readonly Action<BlockNode>?                         _onDoubleClick;
 
     private VBoxContainer _vbox = null!;
 
@@ -24,13 +25,15 @@ public partial class BlockScript : Control
         Func<List<(string, string)>>? getSlotOpts,
         Action<BlockScript> onChanged,
         Action<BlockScript, Vector2> onHeaderDrag,
-        Action<BlockScript, int, Vector2> onBlockSplitDrag)
+        Action<BlockScript, int, Vector2> onBlockSplitDrag,
+        Action<BlockNode>? onDoubleClick = null)
     {
         Blocks            = blocks;
         _getSlotOpts      = getSlotOpts;
         _onChanged        = onChanged;
         _onHeaderDrag     = onHeaderDrag;
         _onBlockSplitDrag = onBlockSplitDrag;
+        _onDoubleClick    = onDoubleClick;
     }
 
     public override void _Ready()
@@ -181,7 +184,7 @@ public partial class BlockScript : Control
         // Block name
         var lbl = new Label
         {
-            Text               = ScratchCanvas.BlockName(block.Type),
+            Text               = ScratchCanvas.BlockName(block),
             VerticalAlignment  = VerticalAlignment.Center,
         };
         lbl.AddThemeColorOverride("font_color", clr);
@@ -213,6 +216,21 @@ public partial class BlockScript : Control
         };
         row.AddChild(del);
         row.AddChild(Spacer(4));
+
+        // Totem 積木：雙擊進入容器效果
+        if (block.Type == BlockType.Totem && _onDoubleClick != null)
+        {
+            card.MouseFilter = MouseFilterEnum.Stop;
+            var captBlock = block;
+            card.GuiInput += @ev =>
+            {
+                if (@ev is InputEventMouseButton mb && mb.DoubleClick && mb.ButtonIndex == MouseButton.Left)
+                {
+                    _onDoubleClick(captBlock);
+                    card.GetViewport().SetInputAsHandled();
+                }
+            };
+        }
 
         return card;
     }

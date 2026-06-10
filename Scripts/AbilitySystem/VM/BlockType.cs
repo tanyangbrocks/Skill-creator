@@ -123,4 +123,8 @@ public enum BlockType
     // ── Phase 4：狀態快照積木（S-11）────────────────────────────────
     Anchor,    // 錨點刻印：擷取圓形區域快照，壓入 Anchor 棧（群星 LV50+）
     Rollback,  // 回朔刻印：彈出棧頂快照，還原實體 + Tile + 退還 MP（群星 LV50+）
+
+    // ── 圖騰／刻印（Direction A）────────────────────────────────────
+    Totem,     // 圖騰積木；Params["totemId"] 指定圖騰 ID
+    Engraving, // 刻印積木；Params["engraveId"] 指定刻印 ID，Params["pts"] 投入點數
 }

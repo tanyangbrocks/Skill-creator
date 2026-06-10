@@ -15,6 +15,7 @@ public partial class Main : Node
 {
     private TileWorldRenderer        _world      = null!;
     private AbilityEditorUI          _editor     = null!;
+    private SpellListUI              _spellList  = null!;
     private PlayerController         _player     = null!;
     private EnemyManager             _enemies    = new();
     private readonly List<SpellProjectile> _projectiles = new();
@@ -216,6 +217,15 @@ public partial class Main : Node
         _editor = new AbilityEditorUI();
         _editor.Visible = false;
         hud.AddChild(_editor);
+        _editor.BackPressed += OnEditorBack;
+
+        // ── 技能創建空間（圓球列表）───────────────────────────
+        _spellList = new SpellListUI();
+        _spellList.Loadout  = _editor.Loadout;
+        _spellList.Visible  = false;
+        hud.AddChild(_spellList);
+        _spellList.ActiveSpellClicked += OnListActiveSpellClicked;
+        _spellList.AddSpellRequested  += OnListAddSpellRequested;
 
         CombatState.OnHit = (pos, amount, isPlayer) => SpawnDmgNum(pos, amount, isPlayer);
     }
@@ -1109,10 +1119,61 @@ public partial class Main : Node
 
     private void ToggleEditor()
     {
-        _editorOpen    = !_editorOpen;
-        _editor.Visible = _editorOpen;
-        _world.Visible  = !_editorOpen;
-        _world.Paused   = _editorOpen;
+        _editorOpen = !_editorOpen;
+        if (_editorOpen)
+        {
+            _spellList.Refresh();
+            _spellList.Visible = true;
+            _editor.Visible    = false;
+        }
+        else
+        {
+            _spellList.Visible = false;
+            _editor.Visible    = false;
+        }
+        _world.Visible = !_editorOpen;
+        _world.Paused  = _editorOpen;
+    }
+
+    // 圓球列表：點擊主動技能圓球 → 進入對應槽位編輯
+    private void OnListActiveSpellClicked(int slotIndex)
+    {
+        _spellList.Visible = false;
+        _editor.OpenSlot(slotIndex);
+        _editor.Visible = true;
+    }
+
+    // 圓球列表：點擊「+」→ 新增技能
+    private void OnListAddSpellRequested()
+    {
+        // 優先找第一個空主動槽（Loadout 中未儲存過的槽位）
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+        {
+            if (_editor.Loadout.GetSlot(i) is null)
+            {
+                _spellList.Visible = false;
+                _editor.OpenSlot(i);
+                _editor.Visible = true;
+                return;
+            }
+        }
+        // 主動全滿：新增被動技能（尚無被動編輯 UI，先建立空物件並提示）
+        if (_editor.Loadout.PassiveCount < SpellLoadout.MaxPassiveSlots)
+        {
+            var newPassive = new SpellArray();
+            var pt = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == "passive_continuous");
+            if (pt is not null) newPassive.Slots.Add(new SpellSlot { Totem = pt });
+            _editor.Loadout.AddPassive(newPassive);
+            _spellList.Refresh();
+        }
+    }
+
+    // 法陣編輯器：點擊「← 返回」→ 回到圓球列表
+    private void OnEditorBack()
+    {
+        _editor.Visible = false;
+        _spellList.Refresh();
+        _spellList.Visible = true;
     }
 
     // ── Helper ────────────────────────────────────────────────────
