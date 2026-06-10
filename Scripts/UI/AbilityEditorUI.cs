@@ -43,6 +43,13 @@ public partial class AbilityEditorUI : Control
     private ScriptCanvas  _canvas         = null!;
     // Header 槽位按鈕（1-10），供 OpenSlot 同步視覺選中狀態
     private readonly Button[] _headerSlotBtns = new Button[SpellLoadout.MaxSlots];
+    // Header 主/被動切換（供 RefreshAll 同步）
+    private Button _activeModeBtn  = null!;
+    private Button _passiveModeBtn = null!;
+    // 左側面板：0=圖騰 1=積木 2=刻印
+    private int           _activeLeftTab  = 1;
+    private VBoxContainer _leftContent    = null!;
+    private readonly Button[] _leftTabBtns = new Button[3];
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
@@ -124,10 +131,28 @@ public partial class AbilityEditorUI : Control
 
         _nameInput = new LineEdit();
         _nameInput.PlaceholderText = "輸入法陣名稱（必填）";
-        _nameInput.CustomMinimumSize = new Vector2(200, 34);
+        _nameInput.CustomMinimumSize = new Vector2(180, 34);
         _nameInput.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         _nameInput.TextChanged += t => _spell.Name = t;
         row.AddChild(_nameInput);
+
+        HSpacer(row, 8);
+        row.AddChild(Lbl("主被動：", vcenter: true));
+        var passiveGrp = new ButtonGroup();
+
+        _activeModeBtn = Btn("主動", new Color(0.22f, 0.30f, 0.22f));
+        _activeModeBtn.ToggleMode = true; _activeModeBtn.ButtonGroup = passiveGrp;
+        _activeModeBtn.ButtonPressed = !_spell.IsPassive;
+        _activeModeBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        _activeModeBtn.Toggled += on => { if (on) _spell.IsPassive = false; };
+        row.AddChild(_activeModeBtn);
+
+        _passiveModeBtn = Btn("被動", new Color(0.30f, 0.22f, 0.22f));
+        _passiveModeBtn.ToggleMode = true; _passiveModeBtn.ButtonGroup = passiveGrp;
+        _passiveModeBtn.ButtonPressed = _spell.IsPassive;
+        _passiveModeBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        _passiveModeBtn.Toggled += on => { if (on) _spell.IsPassive = true; };
+        row.AddChild(_passiveModeBtn);
 
         HSpacer(row, 12);
         row.AddChild(Lbl("發動：", vcenter: true));
@@ -202,91 +227,114 @@ public partial class AbilityEditorUI : Control
         HSpacer(row, 12);
     }
 
-    // ── 左側面板（圖騰庫 + 刻印庫） ──────────────────────────────
+    // ── 左側面板（母分類 tabs：圖騰 / 積木 / 刻印） ──────────────
 
     private void BuildLeftPanel(HBoxContainer body)
     {
-        var panel = Tinted(new Color(0.14f, 0.14f, 0.18f));
-        panel.CustomMinimumSize = new Vector2(175, 0);
+        var panel = Tinted(new Color(0.13f, 0.13f, 0.17f));
+        panel.CustomMinimumSize = new Vector2(185, 0);
         body.AddChild(panel);
 
+        var outer = new VBoxContainer();
+        outer.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        outer.AddThemeConstantOverride("separation", 0);
+        panel.AddChild(outer);
+
+        // ── 母分類 Tab Row ──
+        var tabRow = new HBoxContainer();
+        tabRow.CustomMinimumSize = new Vector2(0, 30);
+        tabRow.AddThemeConstantOverride("separation", 0);
+        outer.AddChild(tabRow);
+
+        var tabGrp  = new ButtonGroup();
+        var tabNames = new[] { "圖騰", "積木", "刻印" };
+        for (int ti = 0; ti < 3; ti++)
+        {
+            var captTi = ti;
+            var tabBtn = new Button { Text = tabNames[ti], ToggleMode = true, ButtonGroup = tabGrp };
+            tabBtn.ButtonPressed = (ti == _activeLeftTab);
+            tabBtn.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            tabBtn.CustomMinimumSize = new Vector2(0, 30);
+            tabBtn.AddThemeFontSizeOverride("font_size", 11);
+
+            var normSt  = new StyleBoxFlat { BgColor = new Color(0.12f, 0.12f, 0.18f) };
+            normSt.CornerRadiusTopLeft = normSt.CornerRadiusTopRight = 0;
+            var hovSt   = new StyleBoxFlat { BgColor = new Color(0.17f, 0.17f, 0.24f) };
+            var actSt   = new StyleBoxFlat { BgColor = new Color(0.20f, 0.22f, 0.32f) };
+            actSt.BorderWidthBottom = 2;
+            actSt.BorderColor = new Color(0.48f, 0.68f, 1.0f);
+            tabBtn.AddThemeStyleboxOverride("normal",     normSt);
+            tabBtn.AddThemeStyleboxOverride("hover",      hovSt);
+            tabBtn.AddThemeStyleboxOverride("pressed",    actSt);
+            tabBtn.AddThemeStyleboxOverride("focus",      actSt);
+            tabBtn.Toggled += on => { if (on) { _activeLeftTab = captTi; RebuildLeftContent(); } };
+            tabRow.AddChild(tabBtn);
+            _leftTabBtns[ti] = tabBtn;
+        }
+
+        outer.AddChild(new HSeparator());
+
         var scroll = new ScrollContainer();
-        scroll.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
         scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-        panel.AddChild(scroll);
+        outer.AddChild(scroll);
 
-        var vbox = new VBoxContainer();
-        vbox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        vbox.AddThemeConstantOverride("separation", 3);
-        scroll.AddChild(vbox);
+        _leftContent = new VBoxContainer();
+        _leftContent.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _leftContent.AddThemeConstantOverride("separation", 2);
+        scroll.AddChild(_leftContent);
 
-        VSpacer(vbox, 8);
-        vbox.AddChild(SectionLbl("▶ 圖騰庫"));
+        RebuildLeftContent();
+    }
 
+    // 根據 _activeLeftTab 填充左側可捲動內容區
+    private void RebuildLeftContent()
+    {
+        if (_leftContent is null) return;
+        foreach (var c in _leftContent.GetChildren().ToArray())
+            c.QueueFree();
+
+        VSpacer(_leftContent, 4);
+        switch (_activeLeftTab)
+        {
+            case 0: BuildTotemContent();   break;
+            case 1: BuildBlockContent();   break;
+            case 2: BuildEngraveContent(); break;
+        }
+        VSpacer(_leftContent, 8);
+    }
+
+    // 圖騰庫（按 TotemType 分組）
+    private void BuildTotemContent()
+    {
         TotemType? lastType = null;
         foreach (var totem in TotemLibrary.AllTotems)
         {
             if (totem.Type != lastType)
             {
-                var sep = new Label();
-                sep.Text = TotemTypeName(totem.Type);
+                var sep = new Label { Text = TotemTypeName(totem.Type) };
                 sep.AddThemeColorOverride("font_color", TotemClr(totem.Type).Darkened(0.2f));
                 sep.AddThemeFontSizeOverride("font_size", 11);
-                vbox.AddChild(sep);
+                _leftContent.AddChild(sep);
                 lastType = totem.Type;
             }
-
             var t = totem;
             string lvTag = totem.RequiredPlayerLevel > 1 ? $" LV{totem.RequiredPlayerLevel}+" : "";
-            var btn = Btn(
-                $"  {totem.DisplayName}{lvTag}  {totem.BaseAbilityPointCost}pt",
-                new Color(0.18f, 0.22f, 0.30f));
+            var btn = Btn($"  {totem.DisplayName}{lvTag}  {totem.BaseAbilityPointCost}pt",
+                          new Color(0.18f, 0.22f, 0.30f));
             btn.Alignment = HorizontalAlignment.Left;
-            btn.CustomMinimumSize = new Vector2(0, 32);
+            btn.CustomMinimumSize = new Vector2(0, 30);
             btn.AddThemeColorOverride("font_color", TotemClr(totem.Type));
+            btn.AddThemeFontSizeOverride("font_size", 11);
             btn.Pressed += () => SelectTotem(t);
-            vbox.AddChild(btn);
+            _leftContent.AddChild(btn);
         }
+    }
 
-        VSpacer(vbox, 6);
-        vbox.AddChild(new HSeparator());
-        VSpacer(vbox, 6);
-        vbox.AddChild(SectionLbl("▶ 刻印庫"));
-
-        EngraveColor? lastClr = null;
-        foreach (var eng in TotemLibrary.AllEngravings)
-        {
-            if (eng.Color != lastClr)
-            {
-                var clrLbl = new Label();
-                clrLbl.Text = ColorGroupName(eng.Color);
-                clrLbl.AddThemeColorOverride("font_color", EngraveClr(eng.Color));
-                clrLbl.AddThemeFontSizeOverride("font_size", 11);
-                vbox.AddChild(clrLbl);
-                lastClr = eng.Color;
-            }
-            var e = eng;
-            bool locked = eng.RequiredPlayerLevel > PlayerLevel;
-            string costTag  = eng.IsRestriction ? $"+{eng.BaseCost}pt" : $"{eng.BaseCost}pt";
-            string lockTag  = locked
-                ? $"  🔒{PlayerController.GetTierName(eng.RequiredPlayerLevel)}"
-                : "";
-            var btn = Btn($"  {eng.DisplayName}  {costTag}{lockTag}", new Color(0.18f, 0.20f, 0.20f));
-            btn.Alignment = HorizontalAlignment.Left;
-            btn.CustomMinimumSize = new Vector2(0, 26);
-            btn.Disabled = locked;
-            btn.AddThemeColorOverride("font_color",
-                locked ? new Color(0.40f, 0.40f, 0.42f) : EngraveClr(eng.Color));
-            btn.Pressed += () => AttachEngrave(e);
-            vbox.AddChild(btn);
-        }
-
-        VSpacer(vbox, 6);
-        vbox.AddChild(new HSeparator());
-        VSpacer(vbox, 6);
-        vbox.AddChild(SectionLbl("▶ 積木庫"));
-
-        var blockLibCats = new (string cat, BlockType[] bts)[]
+    // 積木庫（按功能分組，可拖放至畫布）
+    private void BuildBlockContent()
+    {
+        var cats = new (string cat, BlockType[] bts)[]
         {
             ("── 呼叫 ──",     new[] { BlockType.InvokeTotem, BlockType.InvokeSpell }),
             ("── 控制流 ──",   new[] { BlockType.If, BlockType.Evaluate, BlockType.RepeatN,
@@ -328,12 +376,12 @@ public partial class AbilityEditorUI : Control
             ("── 快照 ──",     new[] { BlockType.Anchor, BlockType.Rollback }),
         };
 
-        foreach (var (cat, bts) in blockLibCats)
+        foreach (var (cat, bts) in cats)
         {
             var catLbl = new Label { Text = cat };
-            catLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.65f));
+            catLbl.AddThemeColorOverride("font_color", new Color(0.50f, 0.50f, 0.62f));
             catLbl.AddThemeFontSizeOverride("font_size", 11);
-            vbox.AddChild(catLbl);
+            _leftContent.AddChild(catLbl);
 
             foreach (var bt in bts)
             {
@@ -345,8 +393,6 @@ public partial class AbilityEditorUI : Control
                 btn.AddThemeColorOverride("font_color", BlockTypeColor(bt));
                 btn.Pressed += () =>
                 {
-                    // If drag already started via _Input, Pressed fires on release — ignore plain click
-                    // during an active drag; otherwise add normally.
                     if (!BlockDrag.Active)
                     {
                         _spell.Blocks.Add(ScratchCanvas.MakeDefaultBlock(captBt));
@@ -361,11 +407,39 @@ public partial class AbilityEditorUI : Control
                         _palDragStart = mb.GlobalPosition;
                     }
                 };
-                vbox.AddChild(btn);
+                _leftContent.AddChild(btn);
             }
         }
+    }
 
-        VSpacer(vbox, 8);
+    // 刻印庫（按 EngraveColor 分組，含境界門檻鎖定）
+    private void BuildEngraveContent()
+    {
+        EngraveColor? lastClr = null;
+        foreach (var eng in TotemLibrary.AllEngravings)
+        {
+            if (eng.Color != lastClr)
+            {
+                var clrLbl = new Label { Text = ColorGroupName(eng.Color) };
+                clrLbl.AddThemeColorOverride("font_color", EngraveClr(eng.Color));
+                clrLbl.AddThemeFontSizeOverride("font_size", 11);
+                _leftContent.AddChild(clrLbl);
+                lastClr = eng.Color;
+            }
+            var e    = eng;
+            bool locked  = eng.RequiredPlayerLevel > PlayerLevel;
+            string cost  = eng.IsRestriction ? $"+{eng.BaseCost}pt" : $"{eng.BaseCost}pt";
+            string lock_ = locked ? $"  🔒{PlayerController.GetTierName(eng.RequiredPlayerLevel)}" : "";
+            var btn = Btn($"  {eng.DisplayName}  {cost}{lock_}", new Color(0.18f, 0.20f, 0.20f));
+            btn.Alignment = HorizontalAlignment.Left;
+            btn.CustomMinimumSize = new Vector2(0, 26);
+            btn.Disabled = locked;
+            btn.AddThemeFontSizeOverride("font_size", 11);
+            btn.AddThemeColorOverride("font_color",
+                locked ? new Color(0.40f, 0.40f, 0.42f) : EngraveClr(eng.Color));
+            btn.Pressed += () => AttachEngrave(e);
+            _leftContent.AddChild(btn);
+        }
     }
 
     // ── 中央插槽區 ─────────────────────────────────────────────────
@@ -535,6 +609,8 @@ public partial class AbilityEditorUI : Control
     private void RefreshAll()
     {
         if (_nameInput != null) _nameInput.Text = _spell.Name;
+        if (_activeModeBtn  != null) _activeModeBtn.ButtonPressed  = !_spell.IsPassive;
+        if (_passiveModeBtn != null) _passiveModeBtn.ButtonPressed = _spell.IsPassive;
         RefreshSlots();
         RefreshCost();
         RefreshStatus();
@@ -868,29 +944,49 @@ public partial class AbilityEditorUI : Control
 
     private void SaveSpell()
     {
+        // ── 收集所有驗證錯誤 ──
+        var errors = new List<string>();
+
         if (string.IsNullOrWhiteSpace(_spell.Name))
-        {
-            _status.Text = "⚠ 請先填寫法陣名稱！";
-            return;
-        }
+            errors.Add("• 請填寫法陣名稱（必填）");
+
+        // 主動技能必須有發動方式（此處用 ActivationType 有無 None 值判斷）
+        // ActivationType 預設為 Instant，無 None 值，故無需額外驗證
+
         if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel))
         {
-            _status.Text = "⚠ 能力點超過上限，無法儲存！";
+            int ap  = AbilityPointCalculator.CalculateTotalCost(_spell);
+            int cap = LvCap(PlayerLevel);
+            errors.Add($"• 能力點 {ap} 超過境界上限 {cap}");
+        }
+
+        if (errors.Count > 0)
+        {
+            var dlg = new AcceptDialog
+            {
+                Title      = "⚠ 儲存失敗",
+                DialogText = string.Join("\n", errors),
+            };
+            AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(300, 0));
+            dlg.Confirmed    += () => dlg.QueueFree();
+            dlg.Canceled     += () => dlg.QueueFree();
+            dlg.CloseRequested += () => dlg.QueueFree();
             return;
         }
-        Loadout.SetSlot(_activeEditorSlot, _spell);
 
-        // 寫入磁碟
+        // ── 儲存 ──
+        Loadout.SetSlot(_activeEditorSlot, _spell);
         var allSpells = Enumerable.Range(0, SpellLoadout.MaxSlots)
                                   .Select(i => Loadout.GetSlot(i))
                                   .ToArray();
         SaveSystem.Save(allSpells, _activeEditorSlot, Loadout.PassiveSpells);
 
         GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 法陣「{_spell.Name}」  " +
+                 $"主被動：{(_spell.IsPassive ? "被動" : "主動")}  " +
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
-                 $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}  " +
-                 $"容器：{_spell.Container}");
-        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存　按 E 切回世界";
+                 $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}");
+        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」（{(_spell.IsPassive ? "被動" : "主動")}）已存";
     }
 
     private void SelectEditorSlot(int i)

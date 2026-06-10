@@ -221,9 +221,10 @@
 - [x] Reporter 積木槽（RepeatN/Wait/Sleep/SetEntityProp 改 SmallEdit，ExecutionLoop 改呼叫 ResolveNum）
 - [x] SnapPoint 視覺高亮（_snapHL 綠色橫條，60px 範圍內顯示在目標底端；_palPreview 游標預覽 Label）
 
-#### Stage 3-C：其他（待實作）
-- [ ] 新版左側面板（母/子分類標籤 + 可捲動積木清單）
-- [ ] 儲存驗證邏輯（名稱 + 主被動 + 主動類型）
+#### Stage 3-C：其他 ✅（2026-06-10）
+- [x] 新版左側面板（圖騰/積木/刻印 三 Tab，切換重建可捲動子內容；積木按鈕保留拖放 + GuiInput）
+- [x] Header 主被動 toggle（`[主動][被動]`，RefreshAll 同步）
+- [x] 儲存驗證 AcceptDialog（收集名稱空白 / AP 超限錯誤後一次彈出警示）
 
 ### Stage 4：容器效果編輯頁面
 - [ ] 雙擊容器圖騰觸發確認對話框
