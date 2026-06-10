@@ -478,7 +478,7 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "count", 2f, 8f, 1f, 36)); r.AddChild(TinyLbl("支")); }) },
         { BlockType.ForEachNearby,new(CFlow, "對每個附近敵人", () => B(BlockType.ForEachNearby, ("radius", 5f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
-        { BlockType.Evaluate,     new(CFlow, "條件執行",     () => B(BlockType.Evaluate, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
+        { BlockType.Evaluate,     new(CFlow, "條件成立執行（無 ELSE）", () => B(BlockType.Evaluate, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
             ConditionUI) },
         { BlockType.Die,          new(CRed,  "終止法陣",     () => B(BlockType.Die),
             null) },
@@ -490,10 +490,10 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "frames", 1f, 300f, 1f, 44)); r.AddChild(TinyLbl("幀")); }) },
 
         // ── 觸發時機 ──────────────────────────────────────────────────
-        { BlockType.RisingEdge,   new(CCyan, "條件成立時（邊緣）",
+        { BlockType.RisingEdge,   new(CCyan, "條件剛成立時",
             () => B(BlockType.RisingEdge,  ("conditionType","compare"),("left","x"),("op",">"),("right","0")),
             ConditionUI) },
-        { BlockType.FallingEdge,  new(CCyan, "條件結束時（邊緣）",
+        { BlockType.FallingEdge,  new(CCyan, "條件剛結束時",
             () => B(BlockType.FallingEdge, ("conditionType","compare"),("left","x"),("op",">"),("right","0")),
             ConditionUI) },
         { BlockType.SinglePulse,  new(CCyan, "條件首次成立時",
@@ -506,11 +506,11 @@ public partial class ScratchCanvas : Control
                            r.AddChild(SmallEdit(b, "value", "值", 52)); r.AddChild(CheckBox(b, "global", "全域")); }) },
         { BlockType.GetVar,       new(CYlw,  "讀取變數",    () => B(BlockType.GetVar, ("name", "x")),
             (r, b, _) => r.AddChild(SmallEdit(b, "name", "變數名", 72))) },
-        { BlockType.SetVarBool,   new(CYlw,  "設定布林",    () => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false)),
+        { BlockType.SetVarBool,   new(CYlw,  "設定布林值",  () => B(BlockType.SetVarBool, ("name", "b"), ("value", "true"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "變數名", 52)); r.AddChild(TinyLbl("="));
                            r.AddChild(SmallDrop(b, "value", new[]{"true","false"}, new[]{"真","假"}, 44));
                            r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.GetVarBool,   new(CYlw,  "讀取布林→",  () => B(BlockType.GetVarBool, ("name", "b"), ("resultVar", "_bool"), ("global", false)),
+        { BlockType.GetVarBool,   new(CYlw,  "讀取布林值",  () => B(BlockType.GetVarBool, ("name", "b"), ("resultVar", "_bool"), ("global", false)),
             (r, b, _) => { r.AddChild(SmallEdit(b, "name", "源變數", 52)); r.AddChild(TinyLbl("→"));
                            r.AddChild(SmallEdit(b, "resultVar", "存入變數", 56));
                            r.AddChild(CheckBox(b, "global", "全域")); }) },
@@ -529,7 +529,7 @@ public partial class ScratchCanvas : Control
         // ── 執行追蹤 ──────────────────────────────────────────────────
         { BlockType.LoopcastIndex,new(CYlw,  "本陣觸發次數", () => B(BlockType.LoopcastIndex, ("resultVar", "loop_idx"), ("global", false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.SuccessCount, new(CYlw,  "命中圖騰數",  () => B(BlockType.SuccessCount,  ("resultVar", "hit_count"), ("global", false)),
+        { BlockType.SuccessCount, new(CYlw,  "命中圖騰數量", () => B(BlockType.SuccessCount,  ("resultVar", "hit_count"), ("global", false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
 
         // ── 列表 ──────────────────────────────────────────────────────
@@ -603,7 +603,7 @@ public partial class ScratchCanvas : Control
         // ── 廣播訊號 ──────────────────────────────────────────────────
         { BlockType.Broadcast,       new(CPurp, "廣播訊號",          () => B(BlockType.Broadcast,       ("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
-        { BlockType.BroadcastAndWait,new(CPurp, "廣播訊號（等待）",   () => B(BlockType.BroadcastAndWait,("signal", "")),
+        { BlockType.BroadcastAndWait,new(CPurp, "廣播訊號（等同廣播）", () => B(BlockType.BroadcastAndWait,("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
         { BlockType.OnReceive,       new(CPurp, "收到訊號時",          () => B(BlockType.OnReceive,       ("signal", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "signal", "訊號名", 80))) },
@@ -651,10 +651,10 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallEdit(b,"vecA","A",44)); r.AddChild(TinyLbl("×"));
                            r.AddChild(SmallEdit(b,"vecB","B",44)); r.AddChild(TinyLbl("→"));
                            r.AddChild(SmallEdit(b,"resultVar","存入",48)); r.AddChild(CheckBox(b,"global","全域")); }) },
-        { BlockType.VecFromEntity,new(CVec, "實體位置→向量", () => B(BlockType.VecFromEntity, ("result","e_pos"),("global",false)),
+        { BlockType.VecFromEntity,new(CVec, "目標位置→向量",  () => B(BlockType.VecFromEntity, ("result","e_pos"),("global",false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"result","結果向量",64));
                            r.AddChild(CheckBox(b,"global","全域")); }) },
-        { BlockType.FocalPoint,   new(CVec, "焦點位置（滑鼠）", () => B(BlockType.FocalPoint, ("result","focal"),("global",false)),
+        { BlockType.FocalPoint,   new(CVec, "游標所在位置",    () => B(BlockType.FocalPoint, ("result","focal"),("global",false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b,"result","結果向量",64));
                            r.AddChild(CheckBox(b,"global","全域")); }) },
         { BlockType.Raycast,      new(CVec, "射線投射",     () => B(BlockType.Raycast, ("startVec","pos"),("dirVec","dir"),("maxDist","20"),("resultVec","ray"),("global",false)),
@@ -669,8 +669,8 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
         { BlockType.DetectMpThreshold,new(CRed, "魔力值低於 N%",  () => B(BlockType.DetectMpThreshold, ("percent", 30f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "percent", 1f, 99f, 1f, 44)); r.AddChild(TinyLbl("%")); }) },
-        { BlockType.DetectHitReceived, new(CRed, "偵測到受到攻擊",  () => B(BlockType.DetectHitReceived)) },
-        { BlockType.DetectEntityEnter, new(CRed, "偵測敵人進入範圍", () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f)),
+        { BlockType.DetectHitReceived, new(CRed, "受到攻擊時",       () => B(BlockType.DetectHitReceived)) },
+        { BlockType.DetectEntityEnter, new(CRed, "敵人進入範圍時",   () => B(BlockType.DetectEntityEnter, ("faction", "敵方"), ("radius", 5f)),
             (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內有敵人")); }) },
 
         // ── 戰鬥統計查詢 ───────────────────────────────────────────────
@@ -730,7 +730,7 @@ public partial class ScratchCanvas : Control
                 r.AddChild(SmallSpin(b, "radius", 1f, 60f, 1f, 44));
                 r.AddChild(TinyLbl("格"));
             }) },
-        { BlockType.Rollback, new(new Color(0.72f, 0.28f, 0.95f), "回朔刻印（群星 LV50+）",
+        { BlockType.Rollback, new(new Color(0.72f, 0.28f, 0.95f), "回溯刻印（群星 LV50+）",
             () => B(BlockType.Rollback),
             null) },
 
@@ -738,7 +738,7 @@ public partial class ScratchCanvas : Control
         { BlockType.Discard, new(CGray, "捨棄輸出",
             () => B(BlockType.Discard), null) },
 
-        { BlockType.SequentialGate, new(CFlow, "序列條件閘門",
+        { BlockType.SequentialGate, new(CFlow, "按順序輪流執行",
             () => B(BlockType.SequentialGate, ("stages", 3f)),
             (r, b, _) => {
                 r.AddChild(TinyLbl("階段"));
@@ -748,10 +748,10 @@ public partial class ScratchCanvas : Control
         { BlockType.AlternateTrigger, new(CFlow, "奇/偶次輪流執行",
             () => B(BlockType.AlternateTrigger), null) },
 
-        { BlockType.EndOfChain, new(CGrn, "結算鏈末端時機",
+        { BlockType.EndOfChain, new(CGrn, "連擊結束時",
             () => B(BlockType.EndOfChain), null) },
 
-        { BlockType.GetComboCount, new(CYlw, "讀取連擊數 →",
+        { BlockType.GetComboCount, new(CYlw, "讀取連擊數",
             () => B(BlockType.GetComboCount, ("resultVar", "combo"), ("global", false)),
             (r, b, _) => {
                 r.AddChild(TinyLbl("→"));
@@ -759,7 +759,7 @@ public partial class ScratchCanvas : Control
                 r.AddChild(CheckBox(b, "global", "全域"));
             }) },
 
-        { BlockType.DetectProjectile, new(CRed, "偵測投射物進入範圍",
+        { BlockType.DetectProjectile, new(CRed, "投射物進入範圍時",
             () => B(BlockType.DetectProjectile, ("radius", 5f)),
             (r, b, _) => {
                 r.AddChild(TinyLbl("半徑"));
@@ -767,19 +767,19 @@ public partial class ScratchCanvas : Control
                 r.AddChild(TinyLbl("格"));
             }) },
 
-        { BlockType.DetectAttack, new(CRed, "偵測敵方蓄力攻擊",
+        { BlockType.DetectAttack, new(CRed, "敵方蓄力攻擊時",
             () => B(BlockType.DetectAttack), null) },
 
-        { BlockType.DetectStatusChange, new(CRed, "偵測狀態變化",
+        { BlockType.DetectStatusChange, new(CRed, "狀態變化時",
             () => B(BlockType.DetectStatusChange, ("status", "")),
             (r, b, _) => {
                 r.AddChild(TinyLbl("狀態"));
                 r.AddChild(SmallEdit(b, "status", "狀態名", 70));
             }) },
 
-        { BlockType.SetActivationInstant,    new(COrng, "設為即時型",   () => B(BlockType.SetActivationInstant),    null) },
-        { BlockType.SetActivationDeclare,    new(COrng, "設為宣告型",   () => B(BlockType.SetActivationDeclare),    null) },
-        { BlockType.SetActivationSustained,  new(COrng, "設為持續型",   () => B(BlockType.SetActivationSustained),  null) },
+        { BlockType.SetActivationInstant,    new(COrng, "設為即時施放", () => B(BlockType.SetActivationInstant),    null) },
+        { BlockType.SetActivationDeclare,    new(COrng, "設為宣告施放", () => B(BlockType.SetActivationDeclare),    null) },
+        { BlockType.SetActivationSustained,  new(COrng, "設為持續施放", () => B(BlockType.SetActivationSustained),  null) },
 
         { BlockType.EffectLabel, new(new Color(0.40f, 0.65f, 0.45f), "效果標籤",
             () => B(BlockType.EffectLabel, ("label", "")),

@@ -2,6 +2,7 @@ namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.Elemental;
+using SkillCreator.AbilitySystem.VM;
 using SkillCreator.World;
 using SkillCreator.World.Materials;
 
@@ -67,15 +68,13 @@ public class SpellProjectile
         {
             if (e.IsAlive && (e.Position == next || e.Position == Position))
             {
-                e.TakeDamage(25f);
-                CombatState.OnPlayerDealtDamage(25f);
-
                 // W-3c：技能元素作用於命中的敵人（Apply Aura）
                 var hitElem = _spell.PrimaryElement;
                 if (hitElem != ElementType.None)
                     e.Aura.ApplyImmediate(hitElem, ElementalAuraComponent.DefaultAuraDuration, e);
 
-                HitAt(next, world, enemies);
+                // 傳遞命中實體資訊，讓 VM 的固定傷害積木可以對其扣血
+                HitAt(next, world, enemies, new EntityInfo(e.Id, e.Position, e.Hp, e.MaxHp));
                 return;
             }
         }
@@ -84,17 +83,17 @@ public class SpellProjectile
         if (--_remainingTiles <= 0) IsAlive = false;
     }
 
-    private void HitAt(GridPos pos, TileWorld world, EnemyManager enemies)
+    private void HitAt(GridPos pos, TileWorld world, EnemyManager enemies, EntityInfo? hitTarget = null)
     {
         if (_runner != null)
         {
-            _runner.Submit(_spell, _caster, world, _enemies, _loadout, fixedOrigin: pos);
+            _runner.Submit(_spell, _caster, world, _enemies, _loadout, fixedOrigin: pos, hitTarget: hitTarget);
         }
         else
         {
             var orig = _caster.Position;
             _caster.Position = pos;
-            SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout, atHitPoint: true);
+            SpellCaster.ExecuteEffects(_spell, _caster, world, _enemies, _loadout, atHitPoint: true, hitTarget: hitTarget);
             _caster.Position = orig;
         }
         IsAlive = false;

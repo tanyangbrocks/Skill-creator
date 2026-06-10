@@ -18,6 +18,10 @@ public static class CombatState
     // ── 本幀事件（Advance 前清除，WaitingCondition 判斷用）──────────
     public static bool TookDamageThisFrame { get; private set; } = false;
 
+    // ── 命中回呼（Main 訂閱以顯示傷害數字）─────────────────────────
+    /// <summary>(座標, 傷害量, 是否玩家受傷)。任何直接傷害生效後觸發。</summary>
+    public static Action<GridPos, float, bool>? OnHit;
+
     private static float _idleTimer   = 0f;
     private static int   _nextBattleId = 1;
 
@@ -69,6 +73,7 @@ public static class CombatState
         DamageDealt         = 0f;
         KillCount           = 0;
         TookDamageThisFrame = false;
+        OnHit               = null;
         _idleTimer          = 0f;
         // _nextBattleId 不重置，保持跨局唯一性
     }

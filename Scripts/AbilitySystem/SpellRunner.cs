@@ -60,7 +60,8 @@ public sealed class SpellRunner
 
     public void Submit(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null,
-        int comboDepth = 0, bool atHitPoint = false, GridPos? fixedOrigin = null)
+        int comboDepth = 0, bool atHitPoint = false, GridPos? fixedOrigin = null,
+        EntityInfo? hitTarget = null)
     {
         var blocks = spell.Blocks.Count > 0
             ? spell.Blocks
@@ -68,6 +69,7 @@ public sealed class SpellRunner
         if (blocks.Count == 0) return;
 
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        if (hitTarget.HasValue) ctx.CurrentIterEntity = hitTarget;
         if (enemies != null)
             ctx.EntityQuery = r => SpellCaster.QueryEnemies(enemies, player, r);
         ctx.RaycastQuery     = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);

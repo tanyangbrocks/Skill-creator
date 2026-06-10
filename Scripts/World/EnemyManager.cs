@@ -55,7 +55,10 @@ public class EnemyManager
             int dx = e.Position.X - center.X;
             int dy = e.Position.Y - center.Y;
             if (dx * dx + dy * dy <= r2)
+            {
                 e.TakeDamage(damage);
+                CombatState.OnHit?.Invoke(e.Position, damage, false);
+            }
         }
     }
 }

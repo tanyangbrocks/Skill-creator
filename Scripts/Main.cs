@@ -100,6 +100,22 @@ public partial class Main : Node
     private sealed record SnapCompare(float PlayerHp, int[] EnemyIds, float[] EnemyHps, MaterialType TileUnderPlayer);
     private SnapCompare? _snapBefore = null;
 
+    // 傷害數字（浮動文字池）
+    private const int   DmgPoolSize     = 24;
+    private const float DmgNumDuration  = 1.2f;
+    private const float DmgNumRiseSpeed = 28f; // screen px/s
+    private struct ActiveDmgNum
+    {
+        public Label   Lbl;
+        public Vector2 WorldPx;
+        public float   Timer;
+        public float   RiseY;
+        public bool    Active;
+        public Color   BaseColor;
+    }
+    private ActiveDmgNum[] _dmgPool     = null!;
+    public  bool           ShowDamageNumbers { get; set; } = true;
+
     // U/I/O/P 組合鍵施放 — 上一幀按壓狀態（rising-edge 偵測）
     private bool _prevCastU, _prevCastI, _prevCastO, _prevCastP;
 
@@ -202,6 +218,8 @@ public partial class Main : Node
         _editor = new AbilityEditorUI();
         _editor.Visible = false;
         hud.AddChild(_editor);
+
+        CombatState.OnHit = (pos, amount, isPlayer) => SpawnDmgNum(pos, amount, isPlayer);
     }
 
     private void BuildHUD(CanvasLayer hud)
@@ -389,6 +407,18 @@ public partial class Main : Node
         _paintModeLabel.AddThemeFontSizeOverride("font_size", 13);
         _paintModeLabel.Visible = false;
         hud.AddChild(_paintModeLabel);
+
+        // 傷害數字物件池
+        _dmgPool = new ActiveDmgNum[DmgPoolSize];
+        for (int i = 0; i < DmgPoolSize; i++)
+        {
+            var lbl = new Label();
+            lbl.AddThemeFontSizeOverride("font_size", 13);
+            lbl.MouseFilter = Control.MouseFilterEnum.Ignore;
+            lbl.Visible     = false;
+            hud.AddChild(lbl);
+            _dmgPool[i] = new ActiveDmgNum { Lbl = lbl };
+        }
     }
 
     private void BuildHotbar(CanvasLayer hud)
@@ -692,6 +722,37 @@ public partial class Main : Node
 
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world.World, _player, dt);
+
+        // 傷害數字動畫更新
+        if (ShowDamageNumbers && _dmgPool != null)
+        {
+            var vpSize    = GetViewport().GetVisibleRect().Size;
+            var camCenter = new Vector2(
+                (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
+                (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
+
+            for (int i = 0; i < DmgPoolSize; i++)
+            {
+                if (!_dmgPool[i].Active) continue;
+                _dmgPool[i].Timer -= dt;
+                _dmgPool[i].RiseY += DmgNumRiseSpeed * dt;
+
+                if (_dmgPool[i].Timer <= 0f)
+                {
+                    _dmgPool[i].Active      = false;
+                    _dmgPool[i].Lbl.Visible = false;
+                    continue;
+                }
+
+                var screenPos = vpSize * 0.5f + (_dmgPool[i].WorldPx - camCenter) * _cameraZoom;
+                screenPos.Y  -= _dmgPool[i].RiseY;
+                _dmgPool[i].Lbl.Position = screenPos;
+
+                float alpha = Math.Clamp(_dmgPool[i].Timer / 0.4f, 0f, 1f);
+                var   col   = _dmgPool[i].BaseColor;
+                _dmgPool[i].Lbl.AddThemeColorOverride("font_color", new Color(col.R, col.G, col.B, alpha));
+            }
+        }
 
         // A/D 移動
         int dx = 0;
@@ -1708,5 +1769,30 @@ public partial class Main : Node
         _equipPanelOpen     = !_equipPanelOpen;
         _equipPanel.Visible = _equipPanelOpen;
         if (_equipPanelOpen) RefreshEquipPanel();
+    }
+
+    // ── 傷害數字 ──────────────────────────────────────────────────────
+    private void SpawnDmgNum(GridPos pos, float amount, bool isPlayer)
+    {
+        if (!ShowDamageNumbers) return;
+
+        int slot = -1;
+        for (int i = 0; i < DmgPoolSize; i++)
+        {
+            if (!_dmgPool[i].Active) { slot = i; break; }
+        }
+        if (slot < 0) return;
+
+        ref var d = ref _dmgPool[slot];
+        d.WorldPx   = new Vector2((pos.X + 0.5f) * TileWorldRenderer.TilePixels,
+                                  (pos.Y + 0.5f) * TileWorldRenderer.TilePixels);
+        d.Timer     = DmgNumDuration;
+        d.RiseY     = 0f;
+        d.Active    = true;
+        d.BaseColor = isPlayer ? new Color(1f, 0.30f, 0.30f) : new Color(1f, 0.85f, 0.15f);
+
+        d.Lbl.Text = $"{amount:F0}";
+        d.Lbl.AddThemeColorOverride("font_color", d.BaseColor);
+        d.Lbl.Visible = true;
     }
 }

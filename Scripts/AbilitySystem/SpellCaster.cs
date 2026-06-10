@@ -89,6 +89,7 @@ public static class SpellCaster
                     float meleeDmg = 20f * player.Equipment.TotalAtkMult;
                     target.TakeDamage(meleeDmg);
                     CombatState.OnPlayerDealtDamage(meleeDmg);
+                    CombatState.OnHit?.Invoke(checkPos, meleeDmg, false);
                     if (runner != null)
                     {
                         runner.Submit(spell, player, world, enemies, loadout, fixedOrigin: checkPos);
@@ -124,9 +125,10 @@ public static class SpellCaster
 
     // atHitPoint：效果中心即 player.Position（投射物命中 / 接觸命中時為 true）
     //             technique_slash 等會用此 flag 把爆炸 offset 改為 0，避免偏移到命中點之外
+    // hitTarget：投射物/接觸命中的敵人快照，預設 CurrentIterEntity 讓 固定傷害 積木可對其扣血
     public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0,
-        bool atHitPoint = false)
+        bool atHitPoint = false, EntityInfo? hitTarget = null)
     {
         var blocks = spell.Blocks.Count > 0
             ? spell.Blocks
@@ -136,6 +138,7 @@ public static class SpellCaster
 
         var slotByRef = BuildSlotLookup(spell);
         var ctx  = new ExecutionContext(SpellCompiler.Compile(blocks));
+        if (hitTarget.HasValue) ctx.CurrentIterEntity = hitTarget;
         if (enemies != null)
             ctx.EntityQuery = r => QueryEnemies(enemies, player, r);
         ctx.RaycastQuery     = (start, dx, dy, dist) => world.Raycast(start, dx, dy, dist);
@@ -275,6 +278,7 @@ public static class SpellCaster
         if (enemy == null) return;
         enemy.TakeDamage(dmg);
         CombatState.OnPlayerDealtDamage(dmg);
+        CombatState.OnHit?.Invoke(enemy.Position, dmg, false);
         // 同步更新 ForEach 迭代快照，避免同輪 GetEntityProp "hp" 讀到舊值
         if (ctx.CurrentIterEntity.HasValue && ctx.CurrentIterEntity.Value.Id == id)
         {

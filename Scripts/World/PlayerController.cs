@@ -154,7 +154,11 @@ public class PlayerController : IElementalTarget, ISnapshottable
         // ──────────────────────────────────────────────────────────────
 
         Hp = newHp;
-        if (finalDmg > 0f) CombatState.OnPlayerTookDamage();
+        if (finalDmg > 0f)
+        {
+            CombatState.OnHit?.Invoke(Position, finalDmg, true);
+            CombatState.OnPlayerTookDamage();
+        }
     }
 
     public PlayerController(GridPos startPos)
