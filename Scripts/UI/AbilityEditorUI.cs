@@ -10,6 +10,9 @@ public partial class AbilityEditorUI : Control
 {
     private enum Mode { Idle, TotemSelected, SlotSelected }
 
+    // 從圓球列表返回時發出
+    [Signal] public delegate void BackPressedEventHandler();
+
     // 技能欄位（共 MaxSlots 個槽位）
     public SpellLoadout Loadout { get; } = new();
 
@@ -27,13 +30,15 @@ public partial class AbilityEditorUI : Control
     public  int       PlayerLevel   { get; set; } = 1;
 
     // ── UI 節點引用 ───────────────────────────────────────────────
-    private LineEdit      _nameInput = null!;
-    private HBoxContainer _slotsRow  = null!;
-    private Label         _apValue   = null!;
-    private ProgressBar   _apBar     = null!;
-    private Label         _mpValue   = null!;
-    private Label         _status    = null!;
-    private ScratchCanvas _canvas = null!;
+    private LineEdit      _nameInput      = null!;
+    private HBoxContainer _slotsRow       = null!;
+    private Label         _apValue        = null!;
+    private ProgressBar   _apBar          = null!;
+    private Label         _mpValue        = null!;
+    private Label         _status         = null!;
+    private ScriptCanvas  _canvas         = null!;
+    // Header 槽位按鈕（1-10），供 OpenSlot 同步視覺選中狀態
+    private readonly Button[] _headerSlotBtns = new Button[SpellLoadout.MaxSlots];
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
@@ -43,7 +48,7 @@ public partial class AbilityEditorUI : Control
         // 讀取上次存檔
         var totemMap   = TotemLibrary.AllTotems.ToDictionary(t => t.Id);
         var engraveMap = TotemLibrary.AllEngravings.ToDictionary(e => e.Id);
-        var (saved, savedActive) = SaveSystem.Load(totemMap, engraveMap);
+        var (saved, savedActive, savedPassive) = SaveSystem.Load(totemMap, engraveMap);
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
         {
             if (saved[i] is { } s)
@@ -52,6 +57,8 @@ public partial class AbilityEditorUI : Control
                 Loadout.SetSlot(i, s);
             }
         }
+        foreach (var p in savedPassive)
+            Loadout.AddPassive(p);
         _activeEditorSlot = savedActive;
 
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -100,7 +107,14 @@ public partial class AbilityEditorUI : Control
         row.AddThemeConstantOverride("separation", 10);
         bar.AddChild(row);
 
-        HSpacer(row, 12);
+        // ← 返回按鈕
+        var backBtn = Btn("← 返回", new Color(0.20f, 0.20f, 0.28f));
+        backBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        backBtn.CustomMinimumSize = new Vector2(80, 30);
+        backBtn.Pressed += () => EmitSignal(SignalName.BackPressed);
+        row.AddChild(backBtn);
+
+        HSpacer(row, 4);
 
         row.AddChild(Lbl("法陣名稱：", vcenter: true));
 
@@ -163,9 +177,10 @@ public partial class AbilityEditorUI : Control
         {
             var btn = Btn((si + 1).ToString(), new Color(0.26f, 0.22f, 0.36f));
             btn.ToggleMode = true; btn.ButtonGroup = slotGrp;
-            btn.ButtonPressed = si == 0;
+            btn.ButtonPressed = si == _activeEditorSlot;
             btn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             btn.CustomMinimumSize = new Vector2(32, 30);
+            _headerSlotBtns[si] = btn;
             var captSi = si;
             btn.Toggled += on => { if (on) SelectEditorSlot(captSi); };
             row.AddChild(btn);
@@ -403,7 +418,7 @@ public partial class AbilityEditorUI : Control
         HSpacer(bhdr, 8);
         vbox.AddChild(bhdr);
 
-        _canvas = new ScratchCanvas();
+        _canvas = new ScriptCanvas();
         _canvas.CustomMinimumSize = new Vector2(0, 180);
         _canvas.SizeFlagsVertical = SizeFlags.ExpandFill;
         _canvas.Changed += () => RefreshCost();
@@ -848,7 +863,7 @@ public partial class AbilityEditorUI : Control
         var allSpells = Enumerable.Range(0, SpellLoadout.MaxSlots)
                                   .Select(i => Loadout.GetSlot(i))
                                   .ToArray();
-        SaveSystem.Save(allSpells, _activeEditorSlot);
+        SaveSystem.Save(allSpells, _activeEditorSlot, Loadout.PassiveSpells);
 
         GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 法陣「{_spell.Name}」  " +
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
@@ -862,6 +877,17 @@ public partial class AbilityEditorUI : Control
         _activeEditorSlot = i;
         _mode       = Mode.Idle;
         _activeSlot = -1;
+        RefreshAll();
+    }
+
+    // 供 SpellListUI 呼叫，從圓球列表導覽到指定槽位
+    public void OpenSlot(int index)
+    {
+        if (index < 0 || index >= _spells.Length) return;
+        _activeEditorSlot = index;
+        _mode       = Mode.Idle;
+        _activeSlot = -1;
+        if (_headerSlotBtns[index] is { } b) b.ButtonPressed = true;
         RefreshAll();
     }
 

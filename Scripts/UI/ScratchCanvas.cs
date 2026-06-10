@@ -291,16 +291,17 @@ public partial class ScratchCanvas : Control
         List<BlockNode> parent, int indent)
     {
         if (_descs.TryGetValue(block.Type, out var desc))
-            desc.BuildUI?.Invoke(row, block, this);
+            desc.BuildUI?.Invoke(row, block, _getSlotOpts);
     }
 
     // ══════════════════════════════════════════════════════════════
     //  小型參數控件工廠
     // ══════════════════════════════════════════════════════════════
 
-    private OptionButton SlotPicker(BlockNode block, string key)
+    internal static OptionButton SlotPicker(BlockNode block, string key,
+        Func<List<(string display, string key)>>? getOpts)
     {
-        var opts = _getSlotOpts?.Invoke() ?? new List<(string, string)>();
+        var opts = getOpts?.Invoke() ?? new List<(string, string)>();
         var dd = new OptionButton();
         dd.CustomMinimumSize = new Vector2(100, 24);
         dd.AddThemeFontSizeOverride("font_size", 10);
@@ -315,12 +316,11 @@ public partial class ScratchCanvas : Control
         {
             block.Params[key] = optIdx > 0 && optIdx - 1 < opts.Count
                 ? opts[(int)optIdx - 1].key : "";
-            Changed?.Invoke();
         };
         return dd;
     }
 
-    private static LineEdit SmallEdit(BlockNode block, string key,
+    internal static LineEdit SmallEdit(BlockNode block, string key,
         string placeholder, int width)
     {
         var le = new LineEdit { PlaceholderText = placeholder };
@@ -331,7 +331,7 @@ public partial class ScratchCanvas : Control
         return le;
     }
 
-    private static SpinBox SmallSpin(BlockNode block, string key,
+    internal static SpinBox SmallSpin(BlockNode block, string key,
         float min, float max, float step, int width)
     {
         var sb = new SpinBox { MinValue = min, MaxValue = max, Step = step };
@@ -343,7 +343,7 @@ public partial class ScratchCanvas : Control
         return sb;
     }
 
-    private static OptionButton SmallDrop(BlockNode block, string key,
+    internal static OptionButton SmallDrop(BlockNode block, string key,
         string[] values, string[] labels, int width)
     {
         var dd = new OptionButton();
@@ -359,7 +359,7 @@ public partial class ScratchCanvas : Control
         return dd;
     }
 
-    private static CheckButton CheckBox(BlockNode block, string key, string label)
+    internal static CheckButton CheckBox(BlockNode block, string key, string label)
     {
         var cb = new CheckButton { Text = label };
         cb.AddThemeFontSizeOverride("font_size", 10);
@@ -368,7 +368,7 @@ public partial class ScratchCanvas : Control
         return cb;
     }
 
-    private static Label TinyLbl(string text)
+    internal static Label TinyLbl(string text)
     {
         var l = new Label { Text = text };
         l.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.60f));
@@ -435,11 +435,11 @@ public partial class ScratchCanvas : Control
         Color  Color,
         string Name,
         Func<BlockNode> Make,
-        Action<HBoxContainer, BlockNode, ScratchCanvas>? BuildUI = null
+        Action<HBoxContainer, BlockNode, Func<List<(string, string)>>?>? BuildUI = null
     );
 
     // 條件型參數 UI（如果 / 條件成立重複 共用）
-    private static Action<HBoxContainer, BlockNode, ScratchCanvas> ConditionUI => (row, block, canvas) =>
+    private static Action<HBoxContainer, BlockNode, Func<List<(string, string)>>?> ConditionUI => (row, block, opts) =>
     {
         string[] types  = { "totemDone", "totemHit", "totemFizzle", "compare", "varBool" };
         string[] labels = { "技能完成",  "技能命中",  "技能失效",    "數值比較", "布林變數" };
@@ -455,7 +455,7 @@ public partial class ScratchCanvas : Control
         else if (cType == "varBool")
             row.AddChild(SmallEdit(block, "varName", "變數名", 72));
         else
-            row.AddChild(canvas.SlotPicker(block, "totemName"));
+            row.AddChild(SlotPicker(block, "totemName", opts));
     };
 
     // 集中管理所有積木型別的 descriptor
@@ -463,7 +463,7 @@ public partial class ScratchCanvas : Control
     {
         // ── 技能呼叫 ──────────────────────────────────────────────────
         { BlockType.InvokeTotem,  new(COrng, "使用技能", () => B(BlockType.InvokeTotem,  ("totemName", "")),
-            (r, b, c) => r.AddChild(c.SlotPicker(b, "totemName"))) },
+            (r, b, opts) => r.AddChild(SlotPicker(b, "totemName", opts))) },
         { BlockType.InvokeSpell,  new(COrng, "施放其他法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
             (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "法陣名", 90))) },
 
@@ -810,6 +810,8 @@ public partial class ScratchCanvas : Control
         _descs.TryGetValue(t, out var d) ? d.Name  : t.ToString();
     internal static BlockNode MakeDefaultBlock(BlockType t) =>
         _descs.TryGetValue(t, out var d) ? d.Make() : new BlockNode { Type = t };
+    internal static bool TryGetDescriptor(BlockType t, out BlockDescriptor? desc) =>
+        _descs.TryGetValue(t, out desc);
 
     private static BlockNode B(BlockType t, params (string k, object? v)[] ps)
     {
