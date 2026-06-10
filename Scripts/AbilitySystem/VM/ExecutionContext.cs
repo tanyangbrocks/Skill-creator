@@ -91,6 +91,9 @@ public class ExecutionContext
     public Action<int>? AnchorAction   { get; set; }  // (radius) → TakeSnapshot
     public Action?      RollbackAction { get; set; }  // () → ApplyLatest
 
+    // 偵錯追蹤：Main._Input F3 切換；true 時 ExecutionLoop.Step 每指令前印一行
+    public static bool TraceMode { get; set; } = false;
+
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
 

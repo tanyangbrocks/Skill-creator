@@ -1,4 +1,5 @@
 using Godot;
+using System.Linq;
 using SkillCreator.AbilitySystem;
 using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 using SkillCreator.AbilitySystem.Data;
@@ -47,6 +48,48 @@ public partial class Main : Node
     private float         _breakthroughTimer = 0f;
     private string        _lastTierName      = "學徒";
 
+    // 生存數值 HUD
+    private Panel[]        _survivalBarFills   = null!;
+    private StyleBoxFlat[] _survivalFillStyles = null!;
+    private Label[]        _survivalValLabels  = null!;
+    private Label          _bodyTempLabel      = null!;
+
+    // 角色數值面板
+    private PanelContainer _statsPanel         = null!;
+    private Label          _statsPanelContent  = null!;
+    private bool           _statsPanelOpen     = false;
+
+    // 物品欄面板（I 鍵）
+    private Panel            _inventoryPanel = null!;
+    private Panel[]          _invSlotPanels  = null!;
+    private StyleBoxFlat[]   _invSlotStyles  = null!;
+    private StyleBoxFlat[]   _invIconStyles  = null!;
+    private Label[]          _invSlotCounts  = null!;
+    private Label            _invInfoLabel   = null!;
+    private bool             _inventoryOpen  = false;
+
+    // 裝備欄面板（P 鍵）
+    private Panel            _equipPanel       = null!;
+    private StyleBoxFlat[]   _eqSlotStyles     = new StyleBoxFlat[3];
+    private StyleBoxFlat[]   _eqIconStyles     = new StyleBoxFlat[3];
+    private Label[]          _eqNameLabels     = new Label[3];
+    private Label            _eqInfoLabel      = null!;
+    private bool             _equipPanelOpen   = false;
+
+    // 偵錯 overlay（F2 座標驗證）
+    private Panel  _debugCoordPanel   = null!;
+    private Label  _debugCoordLabel   = null!;
+    private bool   _debugCoordEnabled = false;
+
+    // 偵錯 overlay（F4 生存速率）
+    private Panel  _debugSurvivalPanel   = null!;
+    private Label  _debugSurvivalLabel   = null!;
+    private bool   _debugSurvivalEnabled = false;
+
+    // 偵錯（F5 快照取樣 / F6 回滾並比對）
+    private sealed record SnapCompare(float PlayerHp, int[] EnemyIds, float[] EnemyHps, MaterialType TileUnderPlayer);
+    private SnapCompare? _snapBefore = null;
+
     // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
     private float _cameraZoom = 10f;
     private const float ZoomMin  = 1f;
@@ -58,10 +101,12 @@ public partial class Main : Node
     public override void _Ready()
     {
         // 場景重啟時清除跨局狀態
+        InputBindings.RegisterAll();
         VmContext.GlobalVars.Clear();
         VmContext.GlobalLists.Clear();
         VmContext.TaskCounters.Clear();
         VmContext.TaskCounterReached.Clear();
+        VmContext.TraceMode = false;
         EventBus.ClearAll();
         ActionBus.ClearAll();
         SnapshotManager.Clear();
@@ -121,6 +166,10 @@ public partial class Main : Node
         var editorBtn = MakeBtn("法陣編輯器 [E]", new Color(0.2f, 0.3f, 0.5f));
         editorBtn.Pressed += ToggleEditor;
         toolbar.AddChild(editorBtn);
+
+        var statsBtn = MakeBtn("角色數值 [C]", new Color(0.2f, 0.35f, 0.25f));
+        statsBtn.Pressed += ToggleStatsPanel;
+        toolbar.AddChild(statsBtn);
 
         toolbar.AddChild(new HSeparator());
         toolbar.AddChild(MakeLbl("材質選擇（左鍵繪製 / 右鍵清除）"));
@@ -206,7 +255,7 @@ public partial class Main : Node
         }
 
         var hint = new Label();
-        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
+        hint.Text = "A/D 移動  W 跳躍  空白 施放  E 編輯器  C 數值  1-5 技能  左鍵 採掘  右鍵 放置  滾輪 切換物品  Ctrl+滾輪 縮放  F1 畫筆  Q 裝備";
         hint.AnchorTop = hint.AnchorBottom = 1f;
         hint.Position  = new Vector2(10, -28);
         hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
@@ -215,6 +264,12 @@ public partial class Main : Node
 
         BuildHotbar(hud);
         BuildLevelHUD(hud);
+        BuildSurvivalHUD(hud);
+        BuildStatsPanel(hud);
+        BuildDebugOverlay(hud);
+        BuildSurvivalDebugOverlay(hud);
+        BuildInventoryPanel(hud);
+        BuildEquipPanel(hud);
 
         // 畫筆模式指示器（F1 切換時顯示）
         _paintModeLabel = new Label();
@@ -323,7 +378,7 @@ public partial class Main : Node
         // 裝備欄文字（熱鍵欄上方 y=-185）
         _equipLabel = new Label();
         _equipLabel.AnchorTop = _equipLabel.AnchorBottom = 1f;
-        _equipLabel.Position  = new Vector2(10, -185f);
+        _equipLabel.Position  = new Vector2(10, -290f);
         _equipLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.85f, 0.65f));
         _equipLabel.AddThemeFontSizeOverride("font_size", 11);
         hud.AddChild(_equipLabel);
@@ -331,7 +386,7 @@ public partial class Main : Node
         // 等級標籤（y=-170）
         _lvLabel = new Label();
         _lvLabel.AnchorTop = _lvLabel.AnchorBottom = 1f;
-        _lvLabel.Position  = new Vector2(10, -170f);
+        _lvLabel.Position  = new Vector2(10, -275f);
         _lvLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.85f, 0.25f));
         _lvLabel.AddThemeFontSizeOverride("font_size", 13);
         hud.AddChild(_lvLabel);
@@ -339,7 +394,7 @@ public partial class Main : Node
         // 境界標籤（等級右側，顏色隨境界動態更新）
         _tierLabel = new Label();
         _tierLabel.AnchorTop = _tierLabel.AnchorBottom = 1f;
-        _tierLabel.Position  = new Vector2(58f, -170f);
+        _tierLabel.Position  = new Vector2(58f, -275f);
         _tierLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.65f));
         _tierLabel.AddThemeFontSizeOverride("font_size", 13);
         hud.AddChild(_tierLabel);
@@ -347,7 +402,7 @@ public partial class Main : Node
         // XP 數字標籤（境界標籤右側）
         _xpLabel = new Label();
         _xpLabel.AnchorTop = _xpLabel.AnchorBottom = 1f;
-        _xpLabel.Position  = new Vector2(120f, -169f);
+        _xpLabel.Position  = new Vector2(120f, -274f);
         _xpLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
         _xpLabel.AddThemeFontSizeOverride("font_size", 11);
         hud.AddChild(_xpLabel);
@@ -356,7 +411,7 @@ public partial class Main : Node
         var xpBgStyle = new StyleBoxFlat { BgColor = new Color(0.12f, 0.12f, 0.18f) };
         var xpBg = new Panel();
         xpBg.AnchorTop  = xpBg.AnchorBottom = 1f;
-        xpBg.Position   = new Vector2(10f, -157f);
+        xpBg.Position   = new Vector2(10f, -262f);
         xpBg.Size       = new Vector2(200f, 7f);
         xpBg.AddThemeStyleboxOverride("panel", xpBgStyle);
         hud.AddChild(xpBg);
@@ -393,6 +448,10 @@ public partial class Main : Node
         RefreshSlotLabels();
         RefreshHotbar();
         RefreshLevelHUD();
+        RefreshSurvivalHUD();
+        if (_statsPanelOpen)    RefreshStatsPanel();
+        if (_inventoryOpen)    RefreshInventoryPanel();
+        if (_equipPanelOpen)   RefreshEquipPanel();
         _paintModeLabel.Visible = _world.PaintingEnabled;
 
         // 境界門檻同步至刻印庫（讓鎖定狀態即時反映）
@@ -419,11 +478,36 @@ public partial class Main : Node
             if (_breakthroughTimer <= 0f) _breakthroughLabel.Visible = false;
         }
 
-        // 滑鼠世界格座標（FocalPoint 積木用）
-        var mp = _world.GetLocalMousePosition();
-        _player.MouseGridPos = new GridPos(
-            Math.Clamp((int)(mp.X / TileWorldRenderer.TilePixels), 0, _world.World.Width  - 1),
-            Math.Clamp((int)(mp.Y / TileWorldRenderer.TilePixels), 0, _world.World.Height - 1));
+        // 滑鼠世界格座標：明確用 Camera.GetScreenCenterPosition 換算，
+        // 避免 GetLocalMousePosition 未正確套用 Camera2D zoom 的問題
+        {
+            var screenMouse  = GetViewport().GetMousePosition();
+            var viewportSize = GetViewport().GetVisibleRect().Size;
+            var camCenter    = _world.Camera.GetScreenCenterPosition(); // canvas 座標，含 Limit 修正
+            var canvasMouse  = camCenter + (screenMouse - viewportSize * 0.5f) / _cameraZoom;
+            _player.MouseGridPos = new GridPos(
+                Math.Clamp((int)(canvasMouse.X / TileWorldRenderer.TilePixels), 0, _world.World.Width  - 1),
+                Math.Clamp((int)(canvasMouse.Y / TileWorldRenderer.TilePixels), 0, _world.World.Height - 1));
+
+            if (_debugCoordEnabled)
+            {
+                var mgp = _player.MouseGridPos;
+                var pp  = _player.Position;
+                int ddx = Math.Sign(mgp.X - pp.X);
+                int ddy = Math.Sign(mgp.Y - pp.Y);
+                if (ddx == 0 && ddy == 0) ddx = _player.Facing.X;
+                _debugCoordLabel.Text =
+                    $"[偵錯]  F2=座標  F3=VM追蹤\n" +
+                    $"螢幕:  ({screenMouse.X:F0}, {screenMouse.Y:F0}) px\n" +
+                    $"畫布:  ({canvasMouse.X:F0}, {canvasMouse.Y:F0}) px\n" +
+                    $"格:    ({mgp.X}, {mgp.Y})\n" +
+                    $"玩家:  ({pp.X}, {pp.Y})\n" +
+                    $"方向:  ({ddx}, {ddy})\n" +
+                    $"縮放:  {_cameraZoom:F1}×";
+            }
+
+            if (_debugSurvivalEnabled) RefreshSurvivalDebug();
+        }
 
         if (_editorOpen)
         {
@@ -454,12 +538,12 @@ public partial class Main : Node
 
         // A/D 移動
         int dx = 0;
-        if (Input.IsKeyPressed(Key.A) || Input.IsKeyPressed(Key.Left))  dx = -1;
-        if (Input.IsKeyPressed(Key.D) || Input.IsKeyPressed(Key.Right)) dx =  1;
+        if (Input.IsActionPressed(InputBindings.MoveLeft))  dx = -1;
+        if (Input.IsActionPressed(InputBindings.MoveRight)) dx =  1;
         if (dx != 0) _player.TryMove(_world.World, dx, 0);
 
-        // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD 上時不觸發）
-        if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar)
+        // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD/面板上時不觸發）
+        if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
             var target = _player.MouseGridPos;
             if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
@@ -475,7 +559,7 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar)
+        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
             var target = _player.MouseGridPos;
             var active = _player.Inventory.ActiveItem;
@@ -520,41 +604,79 @@ public partial class Main : Node
 
         if (e is not InputEventKey k || !k.Pressed || k.Echo) return;
 
-        // 數字鍵 1-5：切換技能槽
-        if (k.Keycode >= Key.Key1 && k.Keycode <= Key.Key5)
+        // 技能槽 1–5：切換 Loadout（由 InputBindings 決定鍵位）
+        for (int si = 0; si < 5; si++)
         {
-            _editor.Loadout.ActiveIndex = (int)k.Keycode - (int)Key.Key1;
-            return;
+            if (k.IsAction($"spell_slot_{si + 1}"))
+            {
+                _editor.Loadout.ActiveIndex = si;
+                return;
+            }
         }
 
-        switch (k.Keycode)
+        // 其餘按鍵：全部透過 InputBindings 對應 action
+        if (k.IsAction(InputBindings.EquipItem) && !_editorOpen)
         {
-            case Key.Q:
-                if (!_editorOpen)
-                {
-                    int hi = _player.Inventory.ActiveHotbarIndex;
-                    var activeStack = _player.Inventory.Slots[hi];
-                    if (!activeStack.IsEmpty && ItemRegistry.Get(activeStack.ItemId).EquipSlot != EquipmentSlotType.None)
-                        _player.Equipment.TryEquip(_player.Inventory, hi);
-                }
-                break;
-
-            case Key.F1:
-                _world.PaintingEnabled = !_world.PaintingEnabled;
-                break;
-
-            case Key.E:
-                ToggleEditor();
-                break;
-
-            case Key.W:
-            case Key.Up:
-                if (!_editorOpen && _player.IsOnGround(_world.World))
-                    _player.StartJump();
-                break;
-
-            case Key.Space:
-                if (_editorOpen) break;
+            int hi = _player.Inventory.ActiveHotbarIndex;
+            var activeStack = _player.Inventory.Slots[hi];
+            if (!activeStack.IsEmpty && ItemRegistry.Get(activeStack.ItemId).EquipSlot != EquipmentSlotType.None)
+                _player.Equipment.TryEquip(_player.Inventory, hi);
+        }
+        else if (k.IsAction(InputBindings.TogglePaint))
+        {
+            _world.PaintingEnabled = !_world.PaintingEnabled;
+        }
+        else if (k.IsAction(InputBindings.DebugCoord))
+        {
+            _debugCoordEnabled = !_debugCoordEnabled;
+            _debugCoordPanel.Visible = _debugCoordEnabled;
+        }
+        else if (k.IsAction(InputBindings.DebugVmTrace))
+        {
+            VmContext.TraceMode = !VmContext.TraceMode;
+            GD.Print($"[偵錯] VM 追蹤：{(VmContext.TraceMode ? "開啟" : "關閉")}");
+        }
+        else if (k.IsAction(InputBindings.DebugSurvival))
+        {
+            _debugSurvivalEnabled = !_debugSurvivalEnabled;
+            _debugSurvivalPanel.Visible = _debugSurvivalEnabled;
+        }
+        else if (k.IsAction(InputBindings.DebugSnapTake))
+        {
+            DebugSnapTake();
+        }
+        else if (k.IsAction(InputBindings.DebugSnapRoll))
+        {
+            DebugSnapRollback();
+        }
+        else if (k.IsAction(InputBindings.OpenStats) && !_editorOpen)
+        {
+            ToggleStatsPanel();
+        }
+        else if (k.IsAction(InputBindings.OpenInventory) && !_editorOpen)
+        {
+            ToggleInventoryPanel();
+        }
+        else if (k.IsAction(InputBindings.OpenEquipment) && !_editorOpen)
+        {
+            ToggleEquipPanel();
+        }
+        else if (k.IsAction(InputBindings.OpenEditor))
+        {
+            ToggleEditor();
+        }
+        else if (k.IsAction(InputBindings.Jump) && !_editorOpen && _player.IsOnGround(_world.World))
+        {
+            _player.StartJump();
+        }
+        else if (k.Keycode == Key.Up && !_editorOpen && _player.IsOnGround(_world.World))
+        {
+            _player.StartJump(); // 方向鍵上仍可跳（不加入鍵位系統，固定輔助鍵）
+        }
+        else if (k.IsAction(InputBindings.CastSpell))
+        {
+            if (_editorOpen) { /* 略 */ }
+            else {
                 var spell = _editor.Loadout.ActiveSpell;
                 if (spell != null)
                 {
@@ -568,7 +690,7 @@ public partial class Main : Node
                 {
                     GD.Print("[施放] 槽位空白，請先在編輯器（E）設計並儲存法陣");
                 }
-                break;
+            }
         }
     }
 
@@ -607,7 +729,7 @@ public partial class Main : Node
             else
             {
                 _iconStyles[i].BgColor  = GetItemIconColor(stack.ItemId);
-                _hotbarCounts[i].Text   = stack.Count > 1 ? $"×{stack.Count}" : "";
+                _hotbarCounts[i].Text   = $"×{stack.Count}";
             }
         }
     }
@@ -627,7 +749,11 @@ public partial class Main : Node
         const float startY = -132f;
 
         float slotLeft = startX + slotIndex * (slotW + gap);
-        _tooltip.Position = new Vector2(slotLeft, startY - 30f); // 槽位上方
+        _tooltip.Position = new Vector2(slotLeft, startY - 32f); // 槽位上方
+
+        // ResetSize()：讓 PanelContainer 在本幀立即重算最小尺寸（含 ContentMargin），
+        // 避免 GetMinimumSize() 在文字剛更新時回傳舊值導致寬度過窄。
+        _tooltip.ResetSize();
         _tooltip.Visible  = true;
     }
 
@@ -703,5 +829,645 @@ public partial class Main : Node
         l.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.65f));
         l.AddThemeFontSizeOverride("font_size", 11);
         return l;
+    }
+
+    // ── 偵錯 Overlay（F2 座標驗證）────────────────────────────────────
+    private void BuildDebugOverlay(CanvasLayer hud)
+    {
+        var bgStyle = new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0.70f) };
+        bgStyle.CornerRadiusTopLeft = bgStyle.CornerRadiusTopRight =
+        bgStyle.CornerRadiusBottomLeft = bgStyle.CornerRadiusBottomRight = 3;
+
+        _debugCoordPanel = new Panel();
+        _debugCoordPanel.Position = new Vector2(8f, 8f);
+        _debugCoordPanel.Size     = new Vector2(220f, 110f);
+        _debugCoordPanel.AddThemeStyleboxOverride("panel", bgStyle);
+        _debugCoordPanel.Visible  = false;
+        hud.AddChild(_debugCoordPanel);
+
+        _debugCoordLabel = new Label();
+        _debugCoordLabel.Position = new Vector2(7f, 5f);
+        _debugCoordLabel.Size     = new Vector2(206f, 100f);
+        _debugCoordLabel.AddThemeFontSizeOverride("font_size", 10);
+        _debugCoordLabel.AddThemeColorOverride("font_color", new Color(0.55f, 1.0f, 0.45f));
+        _debugCoordPanel.AddChild(_debugCoordLabel);
+    }
+
+    // ── 生存速率偵錯 overlay（F4）────────────────────────────────────────
+    private void BuildSurvivalDebugOverlay(CanvasLayer hud)
+    {
+        var bgStyle = new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0.70f) };
+        bgStyle.CornerRadiusTopLeft = bgStyle.CornerRadiusTopRight =
+        bgStyle.CornerRadiusBottomLeft = bgStyle.CornerRadiusBottomRight = 3;
+
+        _debugSurvivalPanel = new Panel();
+        _debugSurvivalPanel.Position = new Vector2(240f, 8f);  // coord overlay 右側
+        _debugSurvivalPanel.Size     = new Vector2(250f, 155f);
+        _debugSurvivalPanel.AddThemeStyleboxOverride("panel", bgStyle);
+        _debugSurvivalPanel.Visible  = false;
+        hud.AddChild(_debugSurvivalPanel);
+
+        _debugSurvivalLabel = new Label();
+        _debugSurvivalLabel.Position = new Vector2(7f, 5f);
+        _debugSurvivalLabel.Size     = new Vector2(236f, 145f);
+        _debugSurvivalLabel.AddThemeFontSizeOverride("font_size", 10);
+        _debugSurvivalLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.85f, 0.45f));
+        _debugSurvivalPanel.AddChild(_debugSurvivalLabel);
+    }
+
+    private void RefreshSurvivalDebug()
+    {
+        var s   = _player.State;
+        bool ic = CombatState.InCombat;
+
+        static string Bar(float v, float max) =>
+            $"{v,6:F1}/{max:F0}";
+
+        static string TimeUntil(float v, float drain) =>
+            drain > 0f && v > 0f ? $" ~{v / drain:F0}s" : "";
+
+        float thirstDrain = CharacterState.ThirstDrainPerSec * (s.IsHeatstroke ? CharacterState.ThirstHeatMultiplier : 1f);
+        float staminaRate = ic ? -CharacterState.StaminaDrainCombat : CharacterState.StaminaRegenPerSec;
+        float mentalRate  = ic ? -CharacterState.MentalEnergyDrainCombat : CharacterState.MentalEnergyRegenPerSec;
+        float tempDir     = MathF.Sign(s.AmbientTemperature - s.BodyTemperature) * CharacterState.BodyTempAdaptRate;
+        float tempToHypo  = s.BodyTemperature > CharacterState.HypothermiaThreshold
+                            ? (s.BodyTemperature - CharacterState.HypothermiaThreshold) / CharacterState.BodyTempAdaptRate : 0f;
+        float tempToHeat  = s.BodyTemperature < CharacterState.HeatstrokeThreshold
+                            ? (CharacterState.HeatstrokeThreshold - s.BodyTemperature) / CharacterState.BodyTempAdaptRate : 0f;
+
+        string flags = "";
+        if (s.IsDehydrated)    flags += " 🔴脫水";
+        if (s.IsStarving)      flags += " 🔴飢餓";
+        if (s.IsSuffocating)   flags += " 🔴窒息";
+        if (s.IsHypothermic)   flags += " 🔴低溫";
+        if (s.IsHeatstroke)    flags += " 🔴中暑";
+        if (s.IsStaminaDepleted) flags += " ⚠體力";
+        if (flags == "") flags = " OK";
+
+        _debugSurvivalLabel.Text =
+            $"[偵錯 F4] 生存速率  [{(ic ? "戰鬥" : "休息")}]{flags}\n" +
+            $"體力:  {Bar(s.Stamina, CharacterState.MaxStamina)} {staminaRate:+0.0;-0.0}/s{TimeUntil(staminaRate < 0 ? s.Stamina : CharacterState.MaxStamina - s.Stamina, MathF.Abs(staminaRate))}\n" +
+            $"精力:  {Bar(s.MentalEnergy, CharacterState.MaxMentalEnergy)} {mentalRate:+0.0;-0.0}/s\n" +
+            $"心情:  {Bar(s.Mood, CharacterState.MaxMood)}  (→{CharacterState.MoodDefaultValue:F0})\n" +
+            $"體溫:  {s.BodyTemperature:F1}°C  env={s.AmbientTemperature:F0}°C  {tempDir:+0.0;-0.0}/s\n" +
+            $"       低溫<{CharacterState.HypothermiaThreshold}°C{TimeUntil(tempToHypo, 1f)}  中暑>{CharacterState.HeatstrokeThreshold}°C{TimeUntil(tempToHeat, 1f)}\n" +
+            $"口渴:  {Bar(s.Thirst, CharacterState.MaxThirst)} -{thirstDrain:F3}/s{TimeUntil(s.Thirst, thirstDrain)}  危:{CharacterState.ThirstCriticalThreshold}\n" +
+            $"飢餓:  {Bar(s.Hunger, CharacterState.MaxHunger)} -{CharacterState.HungerDrainPerSec:F3}/s{TimeUntil(s.Hunger, CharacterState.HungerDrainPerSec)}\n" +
+            $"氧氣:  {Bar(s.Oxygen, CharacterState.MaxOxygen)} {(s.IsOxygenDeprived ? $"-{CharacterState.OxygenDrainPerSec:F0}/s窒息{CharacterState.OxygenCriticalDamage:F0}dmg/s" : $"+{CharacterState.OxygenRegenPerSec:F0}/s回充")}\n" +
+            $"氧殘:  {TimeUntil(s.Oxygen, s.IsOxygenDeprived ? CharacterState.OxygenDrainPerSec : 0f)}";
+    }
+
+    // ── 快照完整性偵錯（F5 取樣 / F6 回滾比對）──────────────────────────
+    private void DebugSnapTake()
+    {
+        const int Radius = 5;
+        var pp = _player.Position;
+
+        SnapshotManager.TakeSnapshot(pp, Radius, _player, _enemies, _world.World);
+
+        _snapBefore = new SnapCompare(
+            _player.Hp,
+            _enemies.Enemies.Where(e => e.IsAlive).Select(e => e.Id).ToArray(),
+            _enemies.Enemies.Where(e => e.IsAlive).Select(e => e.Hp).ToArray(),
+            _world.World.TypeAt(pp.X, pp.Y + 1)  // 腳下那格
+        );
+
+        GD.Print($"[Snap F5] Anchor @ ({pp.X},{pp.Y}) r={Radius}  HP={_player.Hp:F1}" +
+                 $"  enemies={_snapBefore.EnemyIds.Length}" +
+                 $"  tileUnder={_snapBefore.TileUnderPlayer}" +
+                 $"  stackDepth={SnapshotManager.StackDepth}");
+    }
+
+    private void DebugSnapRollback()
+    {
+        if (_snapBefore == null)
+        {
+            GD.Print("[Snap F6] 尚未 F5 取樣，請先按 F5");
+            return;
+        }
+
+        SnapshotManager.ApplyLatest(_player, _enemies, _world.World, _runner);
+
+        float newHp   = _player.Hp;
+        var pp        = _player.Position;
+        var tileAfter = _world.World.TypeAt(pp.X, pp.Y + 1);
+        bool hpOk     = MathF.Abs(newHp - _snapBefore.PlayerHp) < 0.5f;
+        bool tileOk   = tileAfter == _snapBefore.TileUnderPlayer;
+
+        GD.Print($"[Snap F6] Rollback 完成  HP: {_snapBefore.PlayerHp:F1}→{newHp:F1} {(hpOk ? "✓" : "✗MISMATCH")}");
+        GD.Print($"          腳下材質: {_snapBefore.TileUnderPlayer}→{tileAfter} {(tileOk ? "✓" : "✗MISMATCH")}");
+
+        int matched = 0, missing = 0;
+        for (int i = 0; i < _snapBefore.EnemyIds.Length; i++)
+        {
+            int id  = _snapBefore.EnemyIds[i];
+            float expectedHp = _snapBefore.EnemyHps[i];
+            var enemy = _enemies.Enemies.FirstOrDefault(e => e.Id == id);
+            if (enemy == null) { missing++; continue; }
+            bool ok = MathF.Abs(enemy.Hp - expectedHp) < 0.5f;
+            if (!ok)
+                GD.Print($"          敵人 Id={id}: 預期 HP={expectedHp:F1} 實際 HP={enemy.Hp:F1} ✗");
+            else
+                matched++;
+        }
+        GD.Print($"          敵人: {matched}/{_snapBefore.EnemyIds.Length} 吻合, {missing} 消失");
+
+        _snapBefore = null;
+    }
+
+    // ── 生存數值 HUD ──────────────────────────────────────────────────
+    private void BuildSurvivalHUD(CanvasLayer hud)
+    {
+        const float startX = 10f;
+        const float startY = -248f;
+        const float rowH   = 13f;
+        const float lblW   = 38f;
+        const float barW   = 74f;
+        const float barH   = 6f;
+        const float valW   = 36f;
+
+        var barDefs = new (string Name, Color Fill)[]
+        {
+            ("體力", new Color(1.00f, 0.60f, 0.22f)),
+            ("精力", new Color(0.65f, 0.35f, 1.00f)),
+            ("心情", new Color(1.00f, 0.55f, 0.65f)),
+            ("口渴", new Color(0.28f, 0.78f, 1.00f)),
+            ("飢餓", new Color(0.60f, 0.88f, 0.22f)),
+            ("氧氣", new Color(0.45f, 0.65f, 1.00f)),
+        };
+
+        _survivalBarFills   = new Panel[barDefs.Length];
+        _survivalFillStyles = new StyleBoxFlat[barDefs.Length];
+        _survivalValLabels  = new Label[barDefs.Length];
+
+        for (int i = 0; i < barDefs.Length; i++)
+        {
+            float y = startY + i * rowH;
+
+            var nameLbl = new Label();
+            nameLbl.AnchorTop = nameLbl.AnchorBottom = 1f;
+            nameLbl.Position  = new Vector2(startX, y);
+            nameLbl.Size      = new Vector2(lblW, rowH);
+            nameLbl.Text      = barDefs[i].Name;
+            nameLbl.AddThemeFontSizeOverride("font_size", 10);
+            nameLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.60f));
+            hud.AddChild(nameLbl);
+
+            var bgStyle = new StyleBoxFlat { BgColor = new Color(0.10f, 0.10f, 0.16f) };
+            var barBg   = new Panel();
+            barBg.AnchorTop = barBg.AnchorBottom = 1f;
+            barBg.Position  = new Vector2(startX + lblW + 2f, y + (rowH - barH) * 0.5f);
+            barBg.Size      = new Vector2(barW, barH);
+            barBg.AddThemeStyleboxOverride("panel", bgStyle);
+            hud.AddChild(barBg);
+
+            var fillStyle = new StyleBoxFlat { BgColor = barDefs[i].Fill };
+            _survivalFillStyles[i] = fillStyle;
+            var fill = new Panel();
+            fill.Position = Vector2.Zero;
+            fill.Size     = new Vector2(barW, barH);
+            fill.AddThemeStyleboxOverride("panel", fillStyle);
+            barBg.AddChild(fill);
+            _survivalBarFills[i] = fill;
+
+            var valLbl = new Label();
+            valLbl.AnchorTop = valLbl.AnchorBottom = 1f;
+            valLbl.Position  = new Vector2(startX + lblW + 2f + barW + 3f, y);
+            valLbl.Size      = new Vector2(valW, rowH);
+            valLbl.HorizontalAlignment = HorizontalAlignment.Right;
+            valLbl.AddThemeFontSizeOverride("font_size", 10);
+            valLbl.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.70f));
+            hud.AddChild(valLbl);
+            _survivalValLabels[i] = valLbl;
+        }
+
+        float tempY = startY + barDefs.Length * rowH;
+        var tempName = new Label();
+        tempName.AnchorTop = tempName.AnchorBottom = 1f;
+        tempName.Position  = new Vector2(startX, tempY);
+        tempName.Size      = new Vector2(lblW, rowH);
+        tempName.Text      = "體溫";
+        tempName.AddThemeFontSizeOverride("font_size", 10);
+        tempName.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.60f));
+        hud.AddChild(tempName);
+
+        _bodyTempLabel = new Label();
+        _bodyTempLabel.AnchorTop = _bodyTempLabel.AnchorBottom = 1f;
+        _bodyTempLabel.Position  = new Vector2(startX + lblW + 2f, tempY);
+        _bodyTempLabel.Size      = new Vector2(84f, rowH);
+        _bodyTempLabel.AddThemeFontSizeOverride("font_size", 10);
+        _bodyTempLabel.AddThemeColorOverride("font_color", new Color(0.80f, 0.80f, 0.75f));
+        hud.AddChild(_bodyTempLabel);
+    }
+
+    private void RefreshSurvivalHUD()
+    {
+        var s = _player.State;
+        const float barW = 74f;
+
+        var data = new (float V, float Max, bool Danger)[]
+        {
+            (s.Stamina,      CharacterState.MaxStamina,      s.IsStaminaDepleted),
+            (s.MentalEnergy, CharacterState.MaxMentalEnergy, s.IsMentalEnergyDepleted),
+            (s.Mood,         CharacterState.MaxMood,         s.IsInsane),
+            (s.Thirst,       CharacterState.MaxThirst,       s.IsDehydrated),
+            (s.Hunger,       CharacterState.MaxHunger,       s.IsStarving),
+            (s.Oxygen,       CharacterState.MaxOxygen,       s.IsSuffocating),
+        };
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            float ratio = Math.Clamp(data[i].V / data[i].Max, 0f, 1f);
+            _survivalBarFills[i].Size = _survivalBarFills[i].Size with { X = barW * ratio };
+            _survivalValLabels[i].Text = $"{data[i].V:F0}";
+            _survivalValLabels[i].AddThemeColorOverride("font_color",
+                data[i].Danger ? new Color(1.0f, 0.35f, 0.35f) : new Color(0.65f, 0.65f, 0.70f));
+        }
+
+        float t = s.BodyTemperature;
+        Color tempCol = s.IsHypothermic ? new Color(0.40f, 0.65f, 1.00f)
+                      : s.IsHeatstroke  ? new Color(1.00f, 0.40f, 0.20f)
+                      :                   new Color(0.80f, 0.80f, 0.75f);
+        _bodyTempLabel.Text = $"{t:F1}°C";
+        _bodyTempLabel.AddThemeColorOverride("font_color", tempCol);
+    }
+
+    // ── 角色數值面板 ──────────────────────────────────────────────────
+    private void BuildStatsPanel(CanvasLayer hud)
+    {
+        var bgStyle = new StyleBoxFlat
+        {
+            BgColor           = new Color(0.06f, 0.06f, 0.10f, 0.96f),
+            BorderWidthTop    = 1, BorderWidthBottom = 1,
+            BorderWidthLeft   = 1, BorderWidthRight  = 1,
+            BorderColor       = new Color(0.35f, 0.40f, 0.55f),
+            ContentMarginLeft  = 10f, ContentMarginRight  = 10f,
+            ContentMarginTop   = 8f,  ContentMarginBottom = 8f,
+        };
+        _statsPanel = new PanelContainer();
+        _statsPanel.AnchorLeft = _statsPanel.AnchorRight  = 0f;
+        _statsPanel.AnchorTop  = _statsPanel.AnchorBottom = 0f;
+        _statsPanel.Position   = new Vector2(8f, 8f);
+        _statsPanel.AddThemeStyleboxOverride("panel", bgStyle);
+        _statsPanel.Visible    = false;
+        hud.AddChild(_statsPanel);
+
+        _statsPanelContent = new Label();
+        _statsPanelContent.AddThemeFontSizeOverride("font_size", 11);
+        _statsPanelContent.AddThemeColorOverride("font_color", new Color(0.85f, 0.85f, 0.90f));
+        _statsPanel.AddChild(_statsPanelContent);
+    }
+
+    private void RefreshStatsPanel()
+    {
+        var st = _player.Stats;
+        var eq = _player.Equipment;
+        string wn  = eq.WeaponId    != ItemId.None ? ItemRegistry.Get(eq.WeaponId).DisplayName    : "─";
+        string an  = eq.ArmorId     != ItemId.None ? ItemRegistry.Get(eq.ArmorId).DisplayName     : "─";
+        string acn = eq.AccessoryId != ItemId.None ? ItemRegistry.Get(eq.AccessoryId).DisplayName : "─";
+
+        _statsPanelContent.Text =
+            "═══ 角色數值 [C 關閉] ═══\n" +
+            "[生命/法力]\n" +
+            $"  HP {st.MaxHpBase:F0}  MP {st.MaxMpBase + eq.TotalMpBonus:F0}（裝備+{eq.TotalMpBonus:F0}）\n" +
+            $"  HP回復 {st.HpRegenRate:F1}/s  MP回復 {st.MpRegenRate:F1}/s\n" +
+            "[戰鬥]\n" +
+            $"  力量 {st.Power:F0}  物傷加成 {st.PhysicalDmgPct*100:F0}%\n" +
+            $"  爆率 {st.CritRate*100:F0}%  爆傷倍率 ×{st.CritDmgMult:F1}\n" +
+            $"  吸血 {st.Lifesteal*100:F0}%  反傷 {st.Thorns:F0}\n" +
+            "[防禦]\n" +
+            $"  基礎防禦 {st.BaseDefense:F0}  裝備防禦 +{eq.TotalDefFlat:F0}\n" +
+            $"  減傷 {st.DamageReduction*100:F0}%  抗暴 {st.AntiCrit*100:F0}%\n" +
+            "[機動]\n" +
+            $"  移速 ×{st.MoveSpeedMult:F2}  攻速 ×{st.AtkSpeedMult:F2}\n" +
+            $"  命中 {st.HitRate*100:F0}%  閃避 {st.DodgeRate*100:F0}%\n" +
+            "[裝備]\n" +
+            $"  武器：{wn}  防具：{an}  飾品：{acn}\n" +
+            "[天賦]\n" +
+            $"  體魄 {st.TalentConstitution}  肌力 {st.TalentStrength}  耐力 {st.TalentEndurance}\n" +
+            $"  敏捷 {st.TalentAgility}  智慧 {st.TalentWisdom}  魅力 {st.TalentCharisma}  幸運 {st.TalentLuck}";
+    }
+
+    private void ToggleStatsPanel()
+    {
+        _statsPanelOpen = !_statsPanelOpen;
+        _statsPanel.Visible = _statsPanelOpen;
+        if (_statsPanelOpen) RefreshStatsPanel();
+    }
+
+    // ── 物品欄面板 ────────────────────────────────────────────────────
+
+    private void BuildInventoryPanel(CanvasLayer hud)
+    {
+        const float slotW = 38f, slotH = 38f, gapX = 3f, gapY = 3f;
+        const float padX  = 8f,  padY  = 8f;
+        const int   cols  = 5,   rows  = 6;
+
+        float innerW  = cols * slotW + (cols - 1) * gapX;
+        float panelW  = innerW + 2 * padX;
+
+        float row0Y   = padY + 20f + 14f;          // title + hotbar-label
+        float bagLblY = row0Y + slotH + gapY;
+        float row1Y   = bagLblY + 14f;
+
+        float[] rowY  = new float[rows];
+        rowY[0] = row0Y;
+        for (int r = 1; r < rows; r++)
+            rowY[r] = row1Y + (r - 1) * (slotH + gapY);
+
+        float infoY  = rowY[rows - 1] + slotH + gapY;
+        float panelH = infoY + 16f + padY;
+
+        var bg = new StyleBoxFlat
+        {
+            BgColor                = new Color(0.05f, 0.05f, 0.10f, 0.92f),
+            CornerRadiusTopLeft    = 4, CornerRadiusTopRight    = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor            = new Color(0.35f, 0.35f, 0.55f),
+        };
+
+        _inventoryPanel = new Panel();
+        _inventoryPanel.AnchorLeft = _inventoryPanel.AnchorRight  = 0.5f;
+        _inventoryPanel.AnchorTop  = _inventoryPanel.AnchorBottom = 0f;
+        _inventoryPanel.Position   = new Vector2(-panelW - 5f, 20f);
+        _inventoryPanel.Size       = new Vector2(panelW, panelH);
+        _inventoryPanel.AddThemeStyleboxOverride("panel", bg);
+        _inventoryPanel.Visible    = false;
+        hud.AddChild(_inventoryPanel);
+
+        var titleLbl = new Label();
+        titleLbl.Position = new Vector2(padX, padY);
+        titleLbl.Text     = "物品欄  [I 關閉]";
+        titleLbl.AddThemeFontSizeOverride("font_size", 12);
+        titleLbl.AddThemeColorOverride("font_color", new Color(0.80f, 0.80f, 0.95f));
+        _inventoryPanel.AddChild(titleLbl);
+
+        var hotLbl = new Label();
+        hotLbl.Position = new Vector2(padX, padY + 20f);
+        hotLbl.Text     = "— 熱鍵欄 —";
+        hotLbl.AddThemeFontSizeOverride("font_size", 10);
+        hotLbl.AddThemeColorOverride("font_color", new Color(0.60f, 0.75f, 0.60f));
+        _inventoryPanel.AddChild(hotLbl);
+
+        var bagLbl = new Label();
+        bagLbl.Position = new Vector2(padX, bagLblY);
+        bagLbl.Text     = "— 背包 —";
+        bagLbl.AddThemeFontSizeOverride("font_size", 10);
+        bagLbl.AddThemeColorOverride("font_color", new Color(0.60f, 0.60f, 0.75f));
+        _inventoryPanel.AddChild(bagLbl);
+
+        int totalSlots = Inventory.TotalSize;
+        _invSlotPanels = new Panel[totalSlots];
+        _invSlotStyles = new StyleBoxFlat[totalSlots];
+        _invIconStyles = new StyleBoxFlat[totalSlots];
+        _invSlotCounts = new Label[totalSlots];
+
+        for (int i = 0; i < totalSlots; i++)
+        {
+            int row = i / cols;
+            int col = i % cols;
+
+            var slotStyle = new StyleBoxFlat
+            {
+                BgColor      = new Color(0.10f, 0.10f, 0.15f),
+                BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+                BorderColor  = new Color(0.30f, 0.30f, 0.40f),
+            };
+            _invSlotStyles[i] = slotStyle;
+
+            var slot = new Panel();
+            slot.Position = new Vector2(padX + col * (slotW + gapX), rowY[row]);
+            slot.Size     = new Vector2(slotW, slotH);
+            slot.AddThemeStyleboxOverride("panel", slotStyle);
+            _inventoryPanel.AddChild(slot);
+            _invSlotPanels[i] = slot;
+
+            var iconStyle = new StyleBoxFlat { BgColor = new Color(0.10f, 0.10f, 0.12f) };
+            _invIconStyles[i] = iconStyle;
+            var icon = new Panel();
+            icon.Position    = new Vector2(5f, 5f);
+            icon.Size        = new Vector2(28f, 28f);
+            icon.MouseFilter = Control.MouseFilterEnum.Ignore;
+            icon.AddThemeStyleboxOverride("panel", iconStyle);
+            slot.AddChild(icon);
+
+            var cntLbl = new Label();
+            cntLbl.Position = new Vector2(18f, 26f);
+            cntLbl.Size     = new Vector2(18f, 12f);
+            cntLbl.HorizontalAlignment = HorizontalAlignment.Right;
+            cntLbl.AddThemeFontSizeOverride("font_size", 9);
+            cntLbl.AddThemeColorOverride("font_color", new Color(1f, 1f, 0.85f));
+            cntLbl.MouseFilter = Control.MouseFilterEnum.Ignore;
+            slot.AddChild(cntLbl);
+            _invSlotCounts[i] = cntLbl;
+
+            int idx = i;
+            slot.MouseEntered += () =>
+            {
+                var s = _player.Inventory.Slots[idx];
+                _invInfoLabel.Text = s.IsEmpty ? "" : ItemRegistry.Get(s.ItemId).DisplayName;
+            };
+            slot.MouseExited  += () => _invInfoLabel.Text = "";
+            slot.GuiInput     += (InputEvent ev) =>
+            {
+                if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                {
+                    var s = _player.Inventory.Slots[idx];
+                    if (!s.IsEmpty && ItemRegistry.Get(s.ItemId).EquipSlot != EquipmentSlotType.None)
+                    {
+                        _player.Equipment.TryEquip(_player.Inventory, idx);
+                        RefreshInventoryPanel();
+                        RefreshEquipPanel();
+                    }
+                }
+            };
+        }
+
+        _invInfoLabel = new Label();
+        _invInfoLabel.Position = new Vector2(padX, infoY);
+        _invInfoLabel.Size     = new Vector2(innerW, 16f);
+        _invInfoLabel.AddThemeFontSizeOverride("font_size", 11);
+        _invInfoLabel.AddThemeColorOverride("font_color", new Color(0.90f, 0.85f, 0.70f));
+        _inventoryPanel.AddChild(_invInfoLabel);
+    }
+
+    private void RefreshInventoryPanel()
+    {
+        for (int i = 0; i < Inventory.TotalSize; i++)
+        {
+            var stack  = _player.Inventory.Slots[i];
+            bool active = i < Inventory.HotbarSize && i == _player.Inventory.ActiveHotbarIndex;
+
+            _invSlotStyles[i].BorderColor =
+                active ? new Color(0.95f, 0.80f, 0.20f) : new Color(0.30f, 0.30f, 0.40f);
+
+            if (stack.IsEmpty)
+            {
+                _invIconStyles[i].BgColor  = new Color(0.10f, 0.10f, 0.12f);
+                _invSlotCounts[i].Text     = "";
+            }
+            else
+            {
+                _invIconStyles[i].BgColor  = GetItemIconColor(stack.ItemId);
+                _invSlotCounts[i].Text     = stack.Count > 1 ? $"×{stack.Count}" : "";
+            }
+        }
+    }
+
+    private void ToggleInventoryPanel()
+    {
+        _inventoryOpen          = !_inventoryOpen;
+        _inventoryPanel.Visible = _inventoryOpen;
+        if (_inventoryOpen) RefreshInventoryPanel();
+    }
+
+    // ── 裝備欄面板 ────────────────────────────────────────────────────
+
+    private void BuildEquipPanel(CanvasLayer hud)
+    {
+        const float padX   = 8f,  padY   = 8f;
+        const float iconS  = 38f;
+        const float gapY   = 6f;
+        const float typeW  = 36f, nameW  = 90f, midGap = 4f;
+        const float titleH = 20f;
+        float rowH   = iconS + gapY;
+        float panelW = padX + typeW + midGap + iconS + midGap + nameW + padX;
+        float infoY  = padY + titleH + 3 * rowH;
+        float panelH = infoY + 16f + padY;
+
+        var bg = new StyleBoxFlat
+        {
+            BgColor                = new Color(0.05f, 0.08f, 0.10f, 0.92f),
+            CornerRadiusTopLeft    = 4, CornerRadiusTopRight    = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor            = new Color(0.30f, 0.50f, 0.30f),
+        };
+
+        _equipPanel = new Panel();
+        _equipPanel.AnchorLeft = _equipPanel.AnchorRight  = 0.5f;
+        _equipPanel.AnchorTop  = _equipPanel.AnchorBottom = 0f;
+        _equipPanel.Position   = new Vector2(5f, 20f);
+        _equipPanel.Size       = new Vector2(panelW, panelH);
+        _equipPanel.AddThemeStyleboxOverride("panel", bg);
+        _equipPanel.Visible    = false;
+        hud.AddChild(_equipPanel);
+
+        var titleLbl = new Label();
+        titleLbl.Position = new Vector2(padX, padY);
+        titleLbl.Text     = "裝備欄  [P 關閉]";
+        titleLbl.AddThemeFontSizeOverride("font_size", 12);
+        titleLbl.AddThemeColorOverride("font_color", new Color(0.75f, 0.90f, 0.75f));
+        _equipPanel.AddChild(titleLbl);
+
+        var slotLabels = new[] { "武器", "防具", "飾品" };
+        for (int i = 0; i < 3; i++)
+        {
+            float rowY = padY + titleH + i * rowH;
+
+            var typeLabel = new Label();
+            typeLabel.Position = new Vector2(padX, rowY + 11f);
+            typeLabel.Size     = new Vector2(typeW, 16f);
+            typeLabel.Text     = slotLabels[i];
+            typeLabel.AddThemeFontSizeOverride("font_size", 11);
+            typeLabel.AddThemeColorOverride("font_color", new Color(0.60f, 0.70f, 0.65f));
+            _equipPanel.AddChild(typeLabel);
+
+            var slotStyle = new StyleBoxFlat
+            {
+                BgColor      = new Color(0.08f, 0.08f, 0.12f),
+                BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+                BorderColor  = new Color(0.30f, 0.45f, 0.30f),
+            };
+            _eqSlotStyles[i] = slotStyle;
+
+            var slotPanel = new Panel();
+            slotPanel.Position = new Vector2(padX + typeW + midGap, rowY);
+            slotPanel.Size     = new Vector2(iconS, iconS);
+            slotPanel.AddThemeStyleboxOverride("panel", slotStyle);
+            _equipPanel.AddChild(slotPanel);
+
+            var iconStyle = new StyleBoxFlat { BgColor = new Color(0.08f, 0.08f, 0.10f) };
+            _eqIconStyles[i] = iconStyle;
+            var icon = new Panel();
+            icon.Position    = new Vector2(4f, 4f);
+            icon.Size        = new Vector2(30f, 30f);
+            icon.MouseFilter = Control.MouseFilterEnum.Ignore;
+            icon.AddThemeStyleboxOverride("panel", iconStyle);
+            slotPanel.AddChild(icon);
+
+            var nameLabel = new Label();
+            nameLabel.Position    = new Vector2(padX + typeW + midGap + iconS + midGap, rowY + 10f);
+            nameLabel.Size        = new Vector2(nameW, 20f);
+            nameLabel.Text        = "─";
+            nameLabel.AddThemeFontSizeOverride("font_size", 11);
+            nameLabel.AddThemeColorOverride("font_color", new Color(0.78f, 0.78f, 0.82f));
+            nameLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+            _equipPanel.AddChild(nameLabel);
+            _eqNameLabels[i] = nameLabel;
+
+            int capturedI = i;
+            slotPanel.MouseEntered += () =>
+            {
+                var eid = capturedI switch
+                {
+                    0 => _player.Equipment.WeaponId,
+                    1 => _player.Equipment.ArmorId,
+                    _ => _player.Equipment.AccessoryId,
+                };
+                _eqInfoLabel.Text = eid != ItemId.None
+                    ? $"點擊卸下：{ItemRegistry.Get(eid).DisplayName}" : "";
+            };
+            slotPanel.MouseExited  += () => _eqInfoLabel.Text = "";
+            slotPanel.GuiInput     += (InputEvent ev) =>
+            {
+                if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                {
+                    var stype = capturedI switch
+                    {
+                        0 => EquipmentSlotType.Weapon,
+                        1 => EquipmentSlotType.Armor,
+                        _ => EquipmentSlotType.Accessory,
+                    };
+                    _player.Equipment.TryUnequip(_player.Inventory, stype);
+                    RefreshEquipPanel();
+                    RefreshInventoryPanel();
+                }
+            };
+        }
+
+        _eqInfoLabel = new Label();
+        _eqInfoLabel.Position = new Vector2(padX, infoY);
+        _eqInfoLabel.Size     = new Vector2(panelW - 2 * padX, 16f);
+        _eqInfoLabel.AddThemeFontSizeOverride("font_size", 10);
+        _eqInfoLabel.AddThemeColorOverride("font_color", new Color(0.70f, 0.88f, 0.70f));
+        _equipPanel.AddChild(_eqInfoLabel);
+    }
+
+    private void RefreshEquipPanel()
+    {
+        var eq       = _player.Equipment;
+        var equipped = new[] { eq.WeaponId, eq.ArmorId, eq.AccessoryId };
+        for (int i = 0; i < 3; i++)
+        {
+            if (equipped[i] == ItemId.None)
+            {
+                _eqIconStyles[i].BgColor = new Color(0.08f, 0.08f, 0.10f);
+                _eqNameLabels[i].Text    = "─";
+            }
+            else
+            {
+                _eqIconStyles[i].BgColor = GetItemIconColor(equipped[i]);
+                _eqNameLabels[i].Text    = ItemRegistry.Get(equipped[i]).DisplayName;
+            }
+        }
+    }
+
+    private void ToggleEquipPanel()
+    {
+        _equipPanelOpen     = !_equipPanelOpen;
+        _equipPanel.Visible = _equipPanelOpen;
+        if (_equipPanelOpen) RefreshEquipPanel();
     }
 }

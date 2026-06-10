@@ -96,7 +96,15 @@ public class ExecutionLoop
             if (_executionsThisTick >= SafetyGuard.MaxExecutionsPerTick)
                 return false;
 
+            if (ExecutionContext.TraceMode)
+            {
+                var instr = ctx.Code[ctx.PC];
+                Godot.GD.Print($"[VM PC={ctx.PC:D3}] {instr.Op,-20}{FormatTraceParams(instr)}");
+            }
+            var prevState = ctx.State;
             Execute(ctx.Code[ctx.PC], ctx);
+            if (ExecutionContext.TraceMode && ctx.State != prevState)
+                Godot.GD.Print($"          → {ctx.State}");
             _executionsThisTick++;
 
             if (ctx.IsFinished)                           break;
@@ -1064,5 +1072,13 @@ public class ExecutionLoop
     {
         if (instr.Params.TryGetValue(key, out object? v) && v is T t) return t;
         return def;
+    }
+
+    private static string FormatTraceParams(Instruction instr)
+    {
+        if (instr.Params.Count == 0) return "";
+        var parts = instr.Params.Select(kv =>
+            kv.Key.StartsWith("__") ? $"→{kv.Value}" : $"{kv.Key}={kv.Value}");
+        return string.Join("  ", parts);
     }
 }

@@ -727,6 +727,74 @@ public partial class ScratchCanvas : Control
         { BlockType.Rollback, new(new Color(0.72f, 0.28f, 0.95f), "回朔刻印（群星 LV50+）",
             () => B(BlockType.Rollback),
             null) },
+
+        // ── 規劃中積木（UI 已接入，VM 實作待補；執行時顯示警告）─────
+        { BlockType.Discard, new(CGray, "捨棄輸出",
+            () => B(BlockType.Discard), null) },
+
+        { BlockType.SequentialGate, new(CFlow, "序列條件閘門",
+            () => B(BlockType.SequentialGate, ("stages", 3f)),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("階段"));
+                r.AddChild(SmallSpin(b, "stages", 2f, 10f, 1f, 40));
+            }) },
+
+        { BlockType.AlternateTrigger, new(CFlow, "奇/偶次輪流執行",
+            () => B(BlockType.AlternateTrigger), null) },
+
+        { BlockType.EndOfChain, new(CGrn, "結算鏈末端時機",
+            () => B(BlockType.EndOfChain), null) },
+
+        { BlockType.GetComboCount, new(CYlw, "讀取連擊數 →",
+            () => B(BlockType.GetComboCount, ("resultVar", "combo"), ("global", false)),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("→"));
+                r.AddChild(SmallEdit(b, "resultVar", "變數", 60));
+                r.AddChild(CheckBox(b, "global", "全域"));
+            }) },
+
+        { BlockType.DetectProjectile, new(CRed, "偵測投射物進入範圍",
+            () => B(BlockType.DetectProjectile, ("radius", 5f)),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("半徑"));
+                r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40));
+                r.AddChild(TinyLbl("格"));
+            }) },
+
+        { BlockType.DetectAttack, new(CRed, "偵測敵方蓄力攻擊",
+            () => B(BlockType.DetectAttack), null) },
+
+        { BlockType.DetectStatusChange, new(CRed, "偵測狀態變化",
+            () => B(BlockType.DetectStatusChange, ("status", "")),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("狀態"));
+                r.AddChild(SmallEdit(b, "status", "狀態名", 70));
+            }) },
+
+        { BlockType.SetActivationInstant,    new(COrng, "設為即時型",   () => B(BlockType.SetActivationInstant),    null) },
+        { BlockType.SetActivationDeclare,    new(COrng, "設為宣告型",   () => B(BlockType.SetActivationDeclare),    null) },
+        { BlockType.SetActivationSustained,  new(COrng, "設為持續型",   () => B(BlockType.SetActivationSustained),  null) },
+
+        { BlockType.EffectLabel, new(new Color(0.40f, 0.65f, 0.45f), "效果標籤",
+            () => B(BlockType.EffectLabel, ("label", "")),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("標籤"));
+                r.AddChild(SmallEdit(b, "label", "標籤名", 80));
+            }) },
+
+        { BlockType.OnEffectStart, new(new Color(0.40f, 0.65f, 0.45f), "效果開始時",
+            () => B(BlockType.OnEffectStart, ("label", "")),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("標籤"));
+                r.AddChild(SmallEdit(b, "label", "標籤名", 80));
+            }) },
+
+        { BlockType.OnEffectEnd, new(new Color(0.40f, 0.65f, 0.45f), "效果結束時",
+            () => B(BlockType.OnEffectEnd, ("label", "")),
+            (r, b, _) => {
+                r.AddChild(TinyLbl("標籤"));
+                r.AddChild(SmallEdit(b, "label", "標籤名", 80));
+            }) },
     };
 
     // ── 統一查表的三個舊介面（保持對外 API 不變）─────────────────

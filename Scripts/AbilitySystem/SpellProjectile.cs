@@ -28,7 +28,8 @@ public class SpellProjectile
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
         Position       = start;
-        _dir           = new GridPos(dir.X == 0 ? 1 : Math.Sign(dir.X), 0);
+        int ndx = Math.Sign(dir.X), ndy = Math.Sign(dir.Y);
+        _dir    = (ndx == 0 && ndy == 0) ? new GridPos(1, 0) : new GridPos(ndx, ndy);
         _spell         = spell;
         _caster        = caster;
         _enemies       = enemies;

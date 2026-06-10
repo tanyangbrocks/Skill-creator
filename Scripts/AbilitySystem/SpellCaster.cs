@@ -44,11 +44,17 @@ public static class SpellCaster
         {
             case ContainerType.Projectile:
             {
-                var start = new GridPos(player.Position.X + player.Facing.X * 2, player.Position.Y);
+                // 投射物方向：以滑鼠游標位置為準（8 方向），游標與玩家重疊時 fallback 至 Facing
+                var mouseDelta = player.MouseGridPos - player.Position;
+                int dx = Math.Sign(mouseDelta.X);
+                int dy = Math.Sign(mouseDelta.Y);
+                if (dx == 0 && dy == 0) dx = player.Facing.X;
+                var dir   = new GridPos(dx, dy);
+                var start = new GridPos(player.Position.X + dx * 2, player.Position.Y + dy);
                 return new SpellCastResult
                 {
                     Ok         = true,
-                    Projectile = new SpellProjectile(start, player.Facing, spell, player, enemies, loadout, runner),
+                    Projectile = new SpellProjectile(start, dir, spell, player, enemies, loadout, runner),
                 };
             }
             case ContainerType.Contact:
