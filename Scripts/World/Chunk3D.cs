@@ -15,11 +15,11 @@ public sealed class Chunk3D
 
     // Dirty AABB — 只重建有變動的子區域
     public bool IsDirty          { get; set; }
-    public bool MeshNeedsRebuild { get; set; }
+    public bool MeshNeedsRebuild { get; set; }  // 由 TileWorldRenderer3D 在 rebuild 後清除
     public int  DirtyMinX, DirtyMinY, DirtyMinZ;
     public int  DirtyMaxX, DirtyMaxY, DirtyMaxZ;
 
-    // Phase 2+ 補：public MeshInstance3D? MeshNode { get; set; }
+    public MeshInstance3D? MeshNode { get; set; }
 
     public Chunk3D(Vector3I chunkCoord)
     {
@@ -32,7 +32,8 @@ public sealed class Chunk3D
 
     public void MarkDirty(int x, int y, int z)
     {
-        IsDirty      = true;
+        IsDirty          = true;
+        MeshNeedsRebuild = true;
         DirtyMinX    = Math.Min(DirtyMinX, x); DirtyMaxX = Math.Max(DirtyMaxX, x);
         DirtyMinY    = Math.Min(DirtyMinY, y); DirtyMaxY = Math.Max(DirtyMaxY, y);
         DirtyMinZ    = Math.Min(DirtyMinZ, z); DirtyMaxZ = Math.Max(DirtyMaxZ, z);
@@ -41,7 +42,7 @@ public sealed class Chunk3D
     public void ClearDirty()
     {
         IsDirty = false;
-        MeshNeedsRebuild = false;
+        // MeshNeedsRebuild 不在此清除，由 TileWorldRenderer3D.RebuildDirtyMeshes() 負責
         ResetDirtyBounds();
     }
 
