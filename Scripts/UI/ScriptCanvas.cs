@@ -209,9 +209,11 @@ public partial class ScriptCanvas : Control
                 HidePalettePreview();
                 if (GetGlobalRect().HasPoint(mb.GlobalPosition))
                 {
-                    var localPos = mb.GlobalPosition - GlobalPosition;
                     var newBlocks = new List<BlockNode> { BlockDrag.Block };
-                    SpawnScript(newBlocks, localPos, isMain: false);
+                    if (MainScript != null)
+                        MainScript.AppendBlocks(newBlocks);  // 直接加入主腳本，觸發 Changed → AutoInsert
+                    else
+                        SpawnScript(newBlocks, mb.GlobalPosition - GlobalPosition, isMain: false);
                 }
                 BlockDrag.Clear();
                 GetViewport().SetInputAsHandled();

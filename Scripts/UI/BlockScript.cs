@@ -217,8 +217,8 @@ public partial class BlockScript : Control
         row.AddChild(del);
         row.AddChild(Spacer(4));
 
-        // Totem 積木：雙擊進入容器效果
-        if (block.Type == BlockType.Totem && _onDoubleClick != null)
+        // Totem / Engraving 積木：雙擊事件，由 AbilityEditorUI 過濾是否進入容器效果
+        if ((block.Type == BlockType.Totem || block.Type == BlockType.Engraving) && _onDoubleClick != null)
         {
             card.MouseFilter = MouseFilterEnum.Stop;
             var captBlock = block;
