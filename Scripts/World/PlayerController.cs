@@ -175,7 +175,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     /// </summary>
     public void UpdateEnvironment(TileWorld3D world)
     {
-        var tile = world.TypeAt(Position.X, Position.Y);
+        var tile = world.GetTile(Position.X, Position.Y, Position.Z);
         State.IsOxygenDeprived  = tile == MaterialType.Water;
         State.AmbientTemperature = CharacterState.DefaultAmbientTemp + Aura.AuraTemperatureShift;
     }
@@ -197,11 +197,24 @@ public class PlayerController : IElementalTarget, ISnapshottable
     {
         if (!CanMove || Aura.IsImmobilized) return false;
         var next = new GridPos(Position.X + dx, Position.Y + dy);
-        if (world.TypeAt(next.X, next.Y) != MaterialType.Air) return false;
+        if (world.GetTile(next.X, next.Y, Position.Z) != MaterialType.Air) return false;
 
-        Position = next;
+        Position = new GridPos(next.X, next.Y, Position.Z);
         if (dx != 0) Facing = new GridPos(Math.Sign(dx), 0); // 只有水平移動才更新 Facing
         // W-5a 移速倍率（Stats）+ W-3 元素減速（Aura）
+        _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
+        return true;
+    }
+
+    // 深度移動（W/S，TPS/FPS 模式），在世界 Z 軸方向前進後退
+    public bool TryMoveDepth(TileWorld3D world, int dz)
+    {
+        if (!CanMove || Aura.IsImmobilized) return false;
+        int nz = Position.Z + dz;
+        if ((uint)nz >= (uint)world.Depth) return false;
+        if (world.GetTile(Position.X, Position.Y, nz) != MaterialType.Air) return false;
+
+        Position = new GridPos(Position.X, Position.Y, nz);
         _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
         return true;
     }
@@ -209,6 +222,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     // 重力 + 跳躍物理（每幀由 Main._Process 呼叫）
     public void ApplyPhysics(TileWorld3D world, float delta)
     {
+        int pz = Position.Z;
         _vy     = Math.Clamp(_vy + Gravity * delta, -MaxFallSpeed, MaxFallSpeed);
         _fractY += _vy * delta;
 
@@ -216,29 +230,29 @@ public class PlayerController : IElementalTarget, ISnapshottable
         while (_fractY >= 1f)
         {
             var below = new GridPos(Position.X, Position.Y + 1);
-            if (world.TypeAt(below.X, below.Y) != MaterialType.Air)
+            if (world.GetTile(below.X, below.Y, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = below;
+            Position = new GridPos(below.X, below.Y, pz);
             _fractY -= 1f;
         }
         // 向上移動（跳躍弧線）
         while (_fractY <= -1f)
         {
             var above = new GridPos(Position.X, Position.Y - 1);
-            if (world.TypeAt(above.X, above.Y) != MaterialType.Air)
+            if (world.GetTile(above.X, above.Y, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = above;
+            Position = new GridPos(above.X, above.Y, pz);
             _fractY += 1f;
         }
         // 已落地時歸零，防止 _vy 持續累積
-        if (_vy > 0f && world.TypeAt(Position.X, Position.Y + 1) != MaterialType.Air)
+        if (_vy > 0f && world.GetTile(Position.X, Position.Y + 1, pz) != MaterialType.Air)
         { _vy = 0f; _fractY = 0f; }
     }
 
     public bool IsOnGround(TileWorld3D world)
     {
         var below = new GridPos(Position.X, Position.Y + 1);
-        return world.TypeAt(below.X, below.Y) != MaterialType.Air;
+        return world.GetTile(below.X, below.Y, Position.Z) != MaterialType.Air;
     }
 
     public void StartJump()
@@ -288,7 +302,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     // 回傳 true 代表本幀破壞了方塊
     public bool TickMining(TileWorld3D world, GridPos target, float delta)
     {
-        var mat  = world.TypeAt(target.X, target.Y);
+        var mat  = world.GetTile(target.X, target.Y, target.Z);
         var data = MaterialRegistry.Get(mat);
 
         if (!data.IsMineable || data.RequiredToolTier > Inventory.ActiveToolTier)

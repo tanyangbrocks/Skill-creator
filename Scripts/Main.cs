@@ -799,11 +799,18 @@ public partial class Main : Node
             }
         }
 
-        // A/D 移動
+        // A/D 移動（X 軸）
         int dx = 0;
         if (Input.IsActionPressed(InputBindings.MoveLeft))  dx = -1;
         if (Input.IsActionPressed(InputBindings.MoveRight)) dx =  1;
         if (dx != 0) _player.TryMove(_world3d, dx, 0);
+
+        // W/S 前進後退（Z 軸，只在 3D 視角有意義；SideScroll2D 下 W/S 不移動 Z）
+        if (_camera3d.Mode != CameraController.CameraMode.SideScroll2D)
+        {
+            if (Input.IsActionPressed(InputBindings.MoveForward))  _player.TryMoveDepth(_world3d, 1);
+            if (Input.IsActionPressed(InputBindings.MoveBackward)) _player.TryMoveDepth(_world3d, -1);
+        }
 
         // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD/面板上時不觸發）
         if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)

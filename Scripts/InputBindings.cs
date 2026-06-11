@@ -17,6 +17,8 @@ public static class InputBindings
     // 移動
     public const string MoveLeft       = "move_left";
     public const string MoveRight      = "move_right";
+    public const string MoveForward    = "move_forward";
+    public const string MoveBackward   = "move_backward";
     public const string Jump           = "jump";
 
     // 物品 / 裝備
@@ -48,7 +50,9 @@ public static class InputBindings
     {
         [MoveLeft]       = new[] { Key.A },
         [MoveRight]      = new[] { Key.D },
-        [Jump]           = new[] { Key.W },
+        [MoveForward]    = new[] { Key.W },
+        [MoveBackward]   = new[] { Key.S },
+        [Jump]           = new[] { Key.Space },
         [EquipItem]      = new[] { Key.Q },
         [OpenInventory]  = new[] { Key.Z },
         [OpenEquipment]  = new[] { Key.X },
