@@ -155,7 +155,8 @@ public partial class TileWorldRenderer3D : Node3D
                 ch.MeshNode = miO;
         }
 
-        var pos = new Vector3(r.Coord.X * S, r.Coord.Y * S, r.Coord.Z * S);
+        const float T = TileWorldConstants.TileSize;
+        var pos = new Vector3(r.Coord.X * S * T, r.Coord.Y * S * T, r.Coord.Z * S * T);
         pair.O.Position = pos;
         pair.T.Position = pos;
 
@@ -322,5 +323,8 @@ public partial class TileWorldRenderer3D : Node3D
          na == 1 ? d : ua == 1 ? i : j,
          na == 2 ? d : ua == 2 ? i : j);
 
-    private static Vector3 V3((int x, int y, int z) p) => new(p.x, p.y, p.z);
+    private static Vector3 V3((int x, int y, int z) p) =>
+        new(p.x * TileWorldConstants.TileSize,
+            p.y * TileWorldConstants.TileSize,
+            p.z * TileWorldConstants.TileSize);
 }

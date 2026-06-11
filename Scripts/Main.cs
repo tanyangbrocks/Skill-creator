@@ -154,9 +154,9 @@ public partial class Main : Node
         { "U", "I", "O", "P", "U+I", "I+O", "O+P", "U+I+O", "I+O+P", "U+I+O+P" };
 
     // 鏡頭縮放（3D 模式：調整正交尺寸）
-    private float _orthoZoom = 30f;
-    private const float ZoomMin  = 8f;
-    private const float ZoomMax  = 80f;
+    private float _orthoZoom = 30f * TileWorldConstants.TileSize;
+    private const float ZoomMin  = 8f  * TileWorldConstants.TileSize;
+    private const float ZoomMax  = 80f * TileWorldConstants.TileSize;
     private const float ZoomStep = 1.2f;
 
     // 世界尺寸（3D）：Z 軸與 X 軸等寬；懶加載生成，不會拖慢啟動。
@@ -204,14 +204,23 @@ public partial class Main : Node
         // 遊戲預設使用 2D 側捲視角（Phase 2-B），Tab 可切換
         _camera3d.SetMode(CameraController.CameraMode.SideScroll2D);
         _camera3d.SetOrthoSize(_orthoZoom);
+        // S-6：相機臂長 / 距離以 TileSize 為基準（tile 數 × TileSize = Godot unit）
+        {
+            float cT = TileWorldConstants.TileSize;
+            _camera3d.TpsArmLength = 12f  * cT;
+            _camera3d.IsoArmLength = 25f  * cT;
+            _camera3d.SideDist     = 40f  * cT;
+            _camera3d.OrthoSize    = 30f  * cT;
+        }
 
         // ── 實體 3D 視覺（Phase 2-C）────────────────────────────────
         _entitiesRoot = new Node3D();
         AddChild(_entitiesRoot);
 
+        const float T = TileWorldConstants.TileSize;
         _playerMesh = new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(0.65f, 0.9f, 0.65f) },
+            Mesh = new BoxMesh { Size = new Vector3(0.65f * T, 0.9f * T, 0.65f * T) },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.25f, 0.55f, 1.0f),
@@ -739,9 +748,10 @@ public partial class Main : Node
         {
             var screenMouse = GetViewport().GetMousePosition();
             var worldPos3   = _camera3d.ProjectScreenToWorld(screenMouse);
+            float mT = TileWorldConstants.TileSize;
             _player.MouseGridPos = new GridPos(
-                Math.Clamp((int)worldPos3.X, 0, _world3d.Width  - 1),
-                Math.Clamp((int)worldPos3.Y, 0, _world3d.Height - 1));
+                Math.Clamp((int)(worldPos3.X / mT), 0, _world3d.Width  - 1),
+                Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1));
 
             if (_debugCoordEnabled)
             {
@@ -834,20 +844,23 @@ public partial class Main : Node
         _player.ApplyPhysics(_world3d, dt);
 
         // Phase 2-C：更新玩家與敵人的 3D 視覺位置（Z 跟隨 player.Z）
-        _playerMesh.Position = new Vector3(
-            _player.Position.X + 0.5f,
-            _player.Position.Y + 0.45f,
-            _player.Position.Z + 0.5f);
-        // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
-        _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
-        SyncEnemyMeshes();
+        {
+            float pT = TileWorldConstants.TileSize;
+            _playerMesh.Position = new Vector3(
+                _player.Position.X * pT + pT * 0.5f,
+                _player.Position.Y * pT + pT * 0.45f,
+                _player.Position.Z * pT + pT * 0.5f);
+            // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
+            _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
+            SyncEnemyMeshes();
 
-        // 鏡頭跟隨玩家；SideScroll2D 鎖 Z=0（只渲染 Z=0 層），其餘跟隨 player Z
-        bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
-        _camera3d.TargetPosition = new Vector3(
-            _player.Position.X + 0.5f,
-            _player.Position.Y + 0.5f,
-            _cam2D ? 0f : _player.Position.Z + 0.5f);
+            // 鏡頭跟隨玩家；SideScroll2D 鎖 Z=0（只渲染 Z=0 層），其餘跟隨 player Z
+            bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
+            _camera3d.TargetPosition = new Vector3(
+                _player.Position.X * pT + pT * 0.5f,
+                _player.Position.Y * pT + pT * 0.5f,
+                _cam2D ? 0f : _player.Position.Z * pT + pT * 0.5f);
+        }
 
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world3d, _player, dt);
@@ -1304,15 +1317,20 @@ public partial class Main : Node
             mesh.Visible  = e.IsAlive;
             if (!e.IsAlive) continue;
 
-            float mh = e.Type is EnemyType.Heavy ? 1.8f : 0.9f;
-            mesh.Position = new Vector3(e.Position.X + 0.5f, e.Position.Y + mh * 0.5f, e.Position.Z + 0.5f);
+            float eT = TileWorldConstants.TileSize;
+            float mh = (e.Type is EnemyType.Heavy ? 1.8f : 0.9f) * eT;
+            mesh.Position = new Vector3(
+                e.Position.X * eT + eT * 0.5f,
+                e.Position.Y * eT + mh * 0.5f,
+                e.Position.Z * eT + eT * 0.5f);
         }
     }
 
     private static MeshInstance3D CreateEnemyMesh(EnemyType type)
     {
-        float w = type is EnemyType.Heavy ? 1.55f : 0.70f;
-        float h = type is EnemyType.Heavy ? 1.80f : 0.90f;
+        float eT2 = TileWorldConstants.TileSize;
+        float w = (type is EnemyType.Heavy ? 1.55f : 0.70f) * eT2;
+        float h = (type is EnemyType.Heavy ? 1.80f : 0.90f) * eT2;
         var col = type switch
         {
             EnemyType.Melee  => new Color(0.90f, 0.15f, 0.15f), // 紅
@@ -2059,7 +2077,8 @@ public partial class Main : Node
         if (slot < 0) return;
 
         ref var d = ref _dmgPool[slot];
-        d.WorldPx   = new Vector2(pos.X + 0.5f, pos.Y + 0.5f); // 世界單位（tile 中心）
+        float dT = TileWorldConstants.TileSize;
+        d.WorldPx   = new Vector2(pos.X * dT + dT * 0.5f, pos.Y * dT + dT * 0.5f);
         d.Timer     = DmgNumDuration;
         d.RiseY     = 0f;
         d.Active    = true;
