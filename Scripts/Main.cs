@@ -179,6 +179,9 @@ public partial class Main : Node
 
         _camera3d = new CameraController();
         AddChild(_camera3d);
+        // 遊戲預設使用 2D 側捲視角（Phase 2-B），Tab 可切換
+        _camera3d.SetMode(CameraController.CameraMode.SideScroll2D);
+        _camera3d.SetOrthoSize(_orthoZoom);
 
         // ── 玩家 ───────────────────────────────────────────────
         _player = new PlayerController(spawnData.PlayerSpawn);
