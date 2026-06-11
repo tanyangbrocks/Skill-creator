@@ -714,7 +714,7 @@ public partial class Main : Node
                 if (e.IsAlive) _world3d.SetOccupied(e.Position.X, e.Position.Y, 0);
             for (int _s = 0; _s < _simStepsPerFrame; _s++)
                 _world3d.Tick();
-            _renderer3d.RebuildDirtyMeshes();
+            _renderer3d.RebuildDirtyMeshes(maxPerFrame: 30, sideScroll2D: true);
         }
 
         _enemies.Update(_world3d, _player, dt);

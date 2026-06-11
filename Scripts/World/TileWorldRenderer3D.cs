@@ -49,15 +49,27 @@ public partial class TileWorldRenderer3D : Node3D
         };
     }
 
-    /// <summary>每幀 Tick 後呼叫；重建所有 MeshNeedsRebuild 的 Chunk。</summary>
-    public void RebuildDirtyMeshes()
+    /// <summary>
+    /// 每幀 Tick 後呼叫；重建 MeshNeedsRebuild=true 的 Chunk。
+    /// maxPerFrame：每幀最多重建幾個，避免首幀 hang（預設 30）。
+    /// sideScroll2D：只重建 chunk Z=0 的前排，其餘直接標為 clean 跳過。
+    /// </summary>
+    public void RebuildDirtyMeshes(int maxPerFrame = 30, bool sideScroll2D = false)
     {
         if (_world == null) return;
+        int rebuilt = 0;
         foreach (var (coord, chunk) in _world.ActiveChunks)
         {
             if (!chunk.MeshNeedsRebuild) continue;
+            // SideScroll2D：只有 Z=0 那排 Chunk 是可見的，其餘直接跳過
+            if (sideScroll2D && coord.Z != 0)
+            {
+                chunk.MeshNeedsRebuild = false;
+                continue;
+            }
             RebuildChunk(coord, chunk);
             chunk.MeshNeedsRebuild = false;
+            if (++rebuilt >= maxPerFrame) break;
         }
     }
 
