@@ -706,6 +706,29 @@ public partial class AbilityEditorUI : Control
             RefreshDescription();
             if (inserted) SyncCanvas();
         };
+        // 調色盤拖放落點 → 路由至對應 Add 方法，行為與點擊按鈕完全一致
+        _canvas.PaletteBlockDropped = node =>
+        {
+            if (node.Type == BlockType.Totem)
+            {
+                string tid = node.Params.TryGetValue("totemId", out var tv) ? tv?.ToString() ?? "" : "";
+                if (tid == "custom")
+                    AddCustomTotemBlock();
+                else
+                {
+                    var t = TotemLibrary.AllTotems.FirstOrDefault(x => x.Id == tid);
+                    if (t != null) AddTotemBlock(t);
+                }
+            }
+            else
+            {
+                _spell.Blocks.Add(node);
+                SyncSlotsFromBlocks();
+                SyncCanvas();
+                RefreshCost();
+                RefreshDescription();
+            }
+        };
         // 雙擊動作刻印積木 → 若為容器型 Action 刻印則進入容器效果編輯
         _canvas.BlockDoubleClicked += node =>
         {

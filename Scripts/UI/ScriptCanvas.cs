@@ -18,7 +18,8 @@ using SkillCreator.AbilitySystem.VM;
 public partial class ScriptCanvas : Control
 {
     public event Action? Changed;
-    public Action<BlockNode>? BlockDoubleClicked { get; set; }
+    public Action<BlockNode>? BlockDoubleClicked  { get; set; }
+    public Action<BlockNode>? PaletteBlockDropped { get; set; }
 
     private List<BlockNode>                       _blocks     = new();
     private Func<List<(string, string)>>?         _getSlotOpts;
@@ -203,17 +204,17 @@ public partial class ScriptCanvas : Control
                 }
             }
 
-            // Palette drop on canvas
+            // Palette drop on canvas — 路由給上層處理，保持業務邏輯在 AbilityEditorUI
             if (BlockDrag.Active && BlockDrag.SourceList == null && BlockDrag.Block != null)
             {
                 HidePalettePreview();
                 if (GetGlobalRect().HasPoint(mb.GlobalPosition))
                 {
-                    var newBlocks = new List<BlockNode> { BlockDrag.Block };
-                    if (MainScript != null)
-                        MainScript.AppendBlocks(newBlocks);  // 直接加入主腳本，觸發 Changed → AutoInsert
+                    if (PaletteBlockDropped != null)
+                        PaletteBlockDropped(BlockDrag.Block);
                     else
-                        SpawnScript(newBlocks, mb.GlobalPosition - GlobalPosition, isMain: false);
+                        SpawnScript(new List<BlockNode> { BlockDrag.Block },
+                                    mb.GlobalPosition - GlobalPosition, isMain: false);
                 }
                 BlockDrag.Clear();
                 GetViewport().SetInputAsHandled();
