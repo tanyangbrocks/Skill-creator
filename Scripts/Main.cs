@@ -148,9 +148,11 @@ public partial class Main : Node
     private const float ZoomStep = 1.2f;
 
     // 世界尺寸（3D）
+    // WorldD：SideScroll2D 只需薄層（Z=0 可見），保持 4 讓 CA 有鄰居，
+    // 未來切換真 3D 視角時再調高。
     private const int WorldW = 600;
     private const int WorldH = 200;
-    private const int WorldD = 32;
+    private const int WorldD = 4;
 
     private bool _editorOpen = false;
 
