@@ -706,32 +706,33 @@ public partial class AbilityEditorUI : Control
             RefreshDescription();
             if (inserted) SyncCanvas();
         };
-        // 雙擊技能因子積木 → 若該技能因子後面有容器型 Action 刻印則進入容器效果編輯
+        // 雙擊動作刻印積木 → 若為容器型 Action 刻印則進入容器效果編輯
         _canvas.BlockDoubleClicked += node =>
         {
-            if (node.Type != BlockType.Totem) return;
+            if (node.Type != BlockType.Engraving) return;
             if (_navStack.Count >= SafetyGuard.MaxContainerDepth) return;
 
-            string totemId = node.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
-            string customName = node.Params.TryGetValue("customName", out var cn) ? cn?.ToString() ?? "" : "";
-            string displayName = totemId == "custom"
-                ? (string.IsNullOrEmpty(customName) ? "自定義技能因子" : customName)
-                : (TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == totemId)?.DisplayName ?? totemId);
+            string eid = node.Params.TryGetValue("engraveId", out var ev) ? ev?.ToString() ?? "" : "";
+            if (!TotemLibrary.ContainerActionIds.Contains(eid)) return;
 
+            // 往前找所屬技能因子積木，取顯示名稱
             int idx = _spell.Blocks.IndexOf(node);
-            if (idx < 0) return;
-            for (int i = idx + 1; i < _spell.Blocks.Count; i++)
+            string displayName = "容器效果";
+            for (int i = idx - 1; i >= 0; i--)
             {
                 var b = _spell.Blocks[i];
-                if (b.Type == BlockType.Totem) break;
-                if (b.Type != BlockType.Engraving) continue;
-                string eid = b.Params.TryGetValue("engraveId", out var ev) ? ev?.ToString() ?? "" : "";
-                if (TotemLibrary.ContainerActionIds.Contains(eid))
+                if (b.Type == BlockType.Totem)
                 {
-                    EnterContainerEffect(displayName);
-                    return;
+                    string totemId = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
+                    string customName = b.Params.TryGetValue("customName", out var cn) ? cn?.ToString() ?? "" : "";
+                    displayName = totemId == "custom"
+                        ? (string.IsNullOrEmpty(customName) ? "自定義技能因子" : customName)
+                        : (TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == totemId)?.DisplayName ?? totemId);
+                    break;
                 }
             }
+
+            EnterContainerEffect(displayName);
         };
         vbox.AddChild(_canvas);
     }
