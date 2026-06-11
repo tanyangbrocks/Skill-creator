@@ -31,11 +31,11 @@ public partial class CameraController : Node3D
 
     /// <summary>
     /// 是否在旋轉時隱藏游標（Captured 模式）。
-    /// 預設 false；未來由「設定」面板控制。
+    /// 預設 true（Minecraft 風格：TPS/FPS 自動捕捉游標）；未來由「設定」面板控制。
     /// true  → Captured 模式：游標隱藏，不需按住按鈕，無邊界限制。
     /// false → Visible 模式：右鍵按住拖曳旋轉，游標始終可見。
     /// </summary>
-    public bool HideCursorOnLook { get; set; } = false;
+    public bool HideCursorOnLook { get; set; } = true;
 
     // ── 狀態 ─────────────────────────────────────────────────────────────────
     public CameraMode Mode { get; private set; } = CameraMode.ThirdPerson;
@@ -47,8 +47,8 @@ public partial class CameraController : Node3D
     public Vector3 TargetPosition { get; set; }
 
     private Camera3D _cam = null!;
-    private float    _yaw;         // 水平旋轉角（度），TPS / FPS 共用
-    private float    _pitch = 25f; // TPS 仰角（5~85°）/ FPS 俯仰（-80~80°）
+    private float    _yaw   = 180f; // 180° = 相機在玩家正後方（-Z 側），攝影機右 = 世界 +X
+    private float    _pitch =  25f; // 仰角，Minecraft 式 -89°~89°，TPS/FPS 共用
 
     // ── 生命週期 ─────────────────────────────────────────────────────────────
 
@@ -100,11 +100,8 @@ public partial class CameraController : Node3D
             if (!canRotate) return;
 
             _yaw -= mm.Relative.X * MouseSens;
-
-            // 滑鼠向上（Relative.Y < 0）→ 仰角增加（TPS 更高）／FPS 向上看
-            float pMin = Mode is CameraMode.ThirdPerson ?  5f : -80f;
-            float pMax = Mode is CameraMode.ThirdPerson ? 85f :  80f;
-            _pitch = Math.Clamp(_pitch - mm.Relative.Y * MouseSens, pMin, pMax);
+            // 滑鼠向上（Relative.Y < 0）→ 仰角增加（TPS 更高 / FPS 向上看）
+            _pitch = Math.Clamp(_pitch - mm.Relative.Y * MouseSens, -89f, 89f);
         }
     }
 
