@@ -186,8 +186,10 @@ public static class MapGenerator3D
         var visited  = FloodFill3D(world, start, W, H, D);
         int caveDeep = MaxHeight(heights, W, D) + 8;
 
+        int zFrom = Math.Max(0, midZ - D / 4);
+        int zTo   = Math.Min(D, midZ + D / 4);
         for (int x = midX - W / 4; x < midX + W / 4; x++)
-        for (int z = midZ - D / 4; z < midZ + D / 4; z++)
+        for (int z = zFrom; z < zTo; z++)
         {
             for (int y = caveDeep; y < H - 10; y++)
             {
