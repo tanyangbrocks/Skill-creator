@@ -10,7 +10,8 @@ public sealed class Chunk3D
     private const int SizeCubed   = Size * Size * Size;
 
     public Vector3I ChunkCoord { get; }
-    public TileCell[] Cells { get; } = new TileCell[SizeCubed];
+    public TileCell[] Cells   { get; } = new TileCell[SizeCubed];
+    public bool[]     Updated { get; } = new bool[SizeCubed];   // 同幀防重複更新
 
     // Dirty AABB — 只重建有變動的子區域
     public bool IsDirty          { get; set; }
@@ -43,6 +44,8 @@ public sealed class Chunk3D
         MeshNeedsRebuild = false;
         ResetDirtyBounds();
     }
+
+    public void ClearUpdated() => Array.Clear(Updated, 0, SizeCubed);
 
     private void ResetDirtyBounds()
     {
