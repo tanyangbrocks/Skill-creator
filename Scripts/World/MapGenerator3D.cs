@@ -1,51 +1,121 @@
 namespace SkillCreator.World;
 
+using Godot;
 using SkillCreator.World.Materials;
 
 /// <summary>
-/// Phase 1：3D 地圖生成器，對應 <see cref="TileWorld3D"/>。
-/// 策略：XZ 高度圖定義地表，Y 軸 CA 洞穴向下延伸，6-鄰接 FloodFill 保證連通性。
-/// 完全不動原有 <see cref="MapGenerator"/>（2D 遊戲仍照常運作）。
+/// 3D 地圖生成器，對應 <see cref="TileWorld3D"/>。
+/// Phase 2-C：改為 instance class，支援懶加載 chunk 生成。
+/// 啟動只生成 Z=0 初始 strip；玩家移動時 EnsureChunksGenerated 按需補生成。
 /// </summary>
-public static class MapGenerator3D
+public class MapGenerator3D
 {
-    // ── 生成點（複用 MapGenerator.SpawnData，GridPos 已有 Z 欄位）──
+    // ── 生成點 ─────────────────────────────────────────────────────────────
     public struct SpawnData
     {
         public GridPos PlayerSpawn;
         public List<(GridPos Pos, EnemyType Type)> EnemySpawns;
     }
 
-    // 6-鄰接方向（與 TileWorld3D._neighbors6 一致）
     private static readonly (int dx, int dy, int dz)[] _dirs6 =
     {
         ( 0, +1,  0), (-1,  0,  0), ( 1,  0,  0),
         ( 0, -1,  0), ( 0,  0, -1), ( 0,  0, +1),
     };
 
-    // ── 主入口 ────────────────────────────────────────────────────────────
+    // ── 懶加載狀態（Generate 後有效）──────────────────────────────────────
+    private int[,]? _heights;                              // 完整高度圖 [W, D]
+    private readonly HashSet<Vector3I> _generatedChunks = new();
 
-    public static SpawnData Generate(TileWorld3D world, int seed = 12345)
+    // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
+
+    public SpawnData Generate(TileWorld3D world, int seed = 12345)
     {
-        var rng = new Random(seed);
+        var rng  = new Random(seed);
+        int W = world.Width, H = world.Height, D = world.Depth;
+        // 初始只生成 Z=0 的一個 chunk 深度，其餘由 EnsureChunksGenerated 懶加載
+        int initD = Math.Min(D, Chunk3D.Size);
+
+        // 完整高度圖（W×D），供懶加載計算任意 (x,z) 地表高度
+        _heights = GenerateHeightmap(W, D, H, rng);
+
+        FillAll(world, W, H, initD, MaterialType.Stone);
+        ApplyHeightmap(world, _heights, W, H, initD);
+
+        var caves = GenerateCaCaves(W, H, initD, _heights, rng);
+        ApplyCaves(world, caves, _heights, W, H, initD);
+
+        var surfaceEntry = EnsureConnectivity(world, _heights, W, H, initD, rng);
+        SealBedrock(world, W, H, initD);
+        PlaceOreVeins(world, _heights, W, H, initD, rng);
+        AddDecor(world, _heights, W, H, initD, rng);
+
+        // 標記初始已生成的 chunks
+        for (int cz = 0; cz < CeilDiv(initD, Chunk3D.Size); cz++)
+        for (int cy = 0; cy < CeilDiv(H,     Chunk3D.Size); cy++)
+        for (int cx = 0; cx < CeilDiv(W,     Chunk3D.Size); cx++)
+            _generatedChunks.Add(new Vector3I(cx, cy, cz));
+
+        return BuildSpawns(world, _heights, surfaceEntry, W, H, initD, rng);
+    }
+
+    // ── 懶加載：每幀由 Main._Process 呼叫 ──────────────────────────────────
+
+    /// <summary>
+    /// 確保玩家 chunk 座標附近的所有 chunk 都已生成。
+    /// 每幀最多生成 maxPerCall 個，避免卡幀。
+    /// </summary>
+    public void EnsureChunksGenerated(
+        TileWorld3D world, int cx, int cy, int cz, int radius, int maxPerCall = 4)
+    {
+        if (_heights == null) return;
+        int W = world.Width, H = world.Height, D = world.Depth;
+        int maxCX = CeilDiv(W, Chunk3D.Size) - 1;
+        int maxCY = CeilDiv(H, Chunk3D.Size) - 1;
+        int maxCZ = CeilDiv(D, Chunk3D.Size) - 1;
+        int generated = 0;
+
+        for (int dz = 0; dz <= radius && generated < maxPerCall; dz++)
+        for (int dy = -radius; dy <= radius && generated < maxPerCall; dy++)
+        for (int dx = -radius; dx <= radius && generated < maxPerCall; dx++)
+        {
+            // 優先生成 Z+ 方向（玩家按 W 前進），再生成 Z-
+            foreach (int sz in dz == 0 ? new[] { 0 } : new[] { 1, -1 })
+            {
+                var coord = new Vector3I(cx + dx, cy + dy, cz + dz * sz);
+                if (coord.X < 0 || coord.Y < 0 || coord.Z < 0) continue;
+                if (coord.X > maxCX || coord.Y > maxCY || coord.Z > maxCZ) continue;
+                if (!_generatedChunks.Add(coord)) continue; // 已生成
+                GenerateChunkLazy(world, coord);
+                if (++generated >= maxPerCall) return;
+            }
+        }
+    }
+
+    private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)
+    {
+        const int S = Chunk3D.Size;
+        int wx0 = coord.X * S, wy0 = coord.Y * S, wz0 = coord.Z * S;
         int W = world.Width, H = world.Height, D = world.Depth;
 
-        FillAll(world, W, H, D, MaterialType.Stone);
+        for (int lx = 0; lx < S; lx++)
+        for (int lz = 0; lz < S; lz++)
+        {
+            int wx = wx0 + lx, wz = wz0 + lz;
+            if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
+            int h = _heights![wx, wz];
 
-        int[,] heights = GenerateHeightmap(W, D, H, rng);
-        ApplyHeightmap(world, heights, W, H, D);
-
-        bool[,,] caves = GenerateCaCaves(W, H, D, heights, rng);
-        ApplyCaves(world, caves, heights, W, H, D);
-
-        GridPos surfaceEntry = EnsureConnectivity(world, heights, W, H, D, rng);
-
-        SealBedrock(world, W, H, D);
-        PlaceOreVeins(world, heights, W, H, D, rng);
-        AddDecor(world, heights, W, H, D, rng);
-
-        return BuildSpawns(world, heights, surfaceEntry, W, H, D, rng);
+            for (int ly = 0; ly < S; ly++)
+            {
+                int wy = wy0 + ly;
+                if ((uint)wy >= (uint)H || wy < h) continue; // 地表以上 = Air，不需 SetTile
+                var mat = wy <= h + 2 ? MaterialType.Dirt : MaterialType.Stone;
+                world.SetTile(wx, wy, wz, mat);
+            }
+        }
     }
+
+    private static int CeilDiv(int a, int b) => (a + b - 1) / b;
 
     // ════════════════════════════════════════════════════════════
     //  Step 1 — 全填石
@@ -172,18 +242,16 @@ public static class MapGenerator3D
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 4 — 連通性保證（6-鄰接 FloodFill）
+    //  Step 4 — 連通性保證（6-鄰接 FloodFill，以 initD 為 Z 邊界）
     // ════════════════════════════════════════════════════════════
 
     private static GridPos EnsureConnectivity(
         TileWorld3D world, int[,] heights, int W, int H, int D, Random rng)
     {
-        // Z=0 = SideScroll2D 的 2D 物理平面；TypeAt(x,y) shim 固定查 Z=0，
-        // 出生點必須在同一平面，否則 TryMove/ApplyPhysics 碰撞永遠與玩家位置不符。
         int midX = W / 2, midZ = 0;
         int spawnY   = Math.Max(0, heights[midX, midZ] - 1);
         var start    = new GridPos(midX, spawnY, midZ);
-        var visited  = FloodFill3D(world, start, W, H, D);
+        var visited  = FloodFill3D(world, start, W, H, D); // D = initD，邊界安全
         int caveDeep = MaxHeight(heights, W, D) + 8;
 
         int zFrom = Math.Max(0, midZ - D / 4);
@@ -196,7 +264,6 @@ public static class MapGenerator3D
                 if (world.GetTile(x, y, z) == MaterialType.Air &&
                     !visited.Contains(new GridPos(x, y, z)))
                 {
-                    // 往上打豎井
                     for (int sy = heights[x, z]; sy <= y; sy++)
                     for (int dx = -1; dx <= 1; dx++)
                         world.SetTile(x + dx, sy, z, MaterialType.Air);
@@ -204,7 +271,6 @@ public static class MapGenerator3D
                 }
             }
         }
-
         return start;
     }
 
@@ -223,7 +289,8 @@ public static class MapGenerator3D
             foreach (var (dx, dy, dz) in _dirs6)
             {
                 var n = new GridPos(pos.X + dx, pos.Y + dy, pos.Z + dz);
-                if (!world.InBounds(n.X, n.Y, n.Z)) continue;
+                // 使用傳入的 W/H/D 做邊界（initD 時 D < world.Depth，防止洪水漫入未生成區）
+                if ((uint)n.X >= (uint)W || (uint)n.Y >= (uint)H || (uint)n.Z >= (uint)D) continue;
                 if (world.GetTile(n.X, n.Y, n.Z) != MaterialType.Air) continue;
                 if (!visited.Add(n)) continue;
                 queue.Enqueue(n);
@@ -308,7 +375,6 @@ public static class MapGenerator3D
     {
         int caveTop = MaxHeight(heights, W, D) + 3;
 
-        // 石鐘乳：天花板（上方為石）向下滴
         for (int y = caveTop + 1; y < H - 8; y++)
         for (int z = 0; z < D; z++)
         for (int x = 0; x < W; x++)
@@ -326,7 +392,6 @@ public static class MapGenerator3D
             }
         }
 
-        // 水坑：洞穴地板（本身 Air，下方 Stone）
         for (int y = caveTop; y < H - 9; y++)
         for (int z = 0; z < D; z++)
         for (int x = 0; x < W; x++)
@@ -335,7 +400,6 @@ public static class MapGenerator3D
             if (world.GetTile(x, y + 1, z) != MaterialType.Stone)  continue;
             if (rng.NextSingle() >= 0.06f) continue;
 
-            // 在 XZ 平面小範圍填水
             int poolR = rng.Next(1, 3);
             for (int pz = z - poolR; pz <= z + poolR; pz++)
             for (int px = x - poolR; px <= x + poolR; px++)

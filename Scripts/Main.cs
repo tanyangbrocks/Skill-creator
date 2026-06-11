@@ -16,6 +16,7 @@ public partial class Main : Node
     private TileWorldRenderer3D      _renderer3d  = null!;
     private TileWorld3D              _world3d     = null!;
     private CameraController         _camera3d    = null!;
+    private MapGenerator3D           _mapGen      = null!;
     private int                      _simStepsPerFrame = 1;
     private bool                     _simPaused        = false;
     private AbilityEditorUI          _editor     = null!;
@@ -152,12 +153,10 @@ public partial class Main : Node
     private const float ZoomMax  = 80f;
     private const float ZoomStep = 1.2f;
 
-    // 世界尺寸（3D）
-    // WorldD：SideScroll2D 只需薄層（Z=0 可見），保持 4 讓 CA 有鄰居，
-    // 未來切換真 3D 視角時再調高。
+    // 世界尺寸（3D）：Z 軸與 X 軸等寬；懶加載生成，不會拖慢啟動。
     private const int WorldW = 600;
     private const int WorldH = 200;
-    private const int WorldD = 4;
+    private const int WorldD = WorldW; // 600×200×600 真 3D 世界
 
     private bool _editorOpen = false;
 
@@ -178,7 +177,8 @@ public partial class Main : Node
 
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
         _world3d = new TileWorld3D(WorldW, WorldH, WorldD);
-        var spawnData = MapGenerator3D.Generate(_world3d);
+        _mapGen   = new MapGenerator3D();
+        var spawnData = _mapGen.Generate(_world3d);
 
         _renderer3d = new TileWorldRenderer3D();
         _renderer3d.Initialize(_world3d);
@@ -739,14 +739,20 @@ public partial class Main : Node
             // 以玩家為中心的 Chunk 座標（裁剪用）
             int pCX = _player.Position.X / Chunk3D.Size;
             int pCY = _player.Position.Y / Chunk3D.Size;
+            int pCZ = _player.Position.Z / Chunk3D.Size;
+
+            // 懶加載：生成玩家附近尚未生成的 chunk
+            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 4);
 
             for (int _s = 0; _s < _simStepsPerFrame; _s++)
-                _world3d.Tick(centerCX: pCX, centerCY: pCY, simRadius: 6); // 半徑 6 chunk = 96 格
+                _world3d.Tick(centerCX: pCX, centerCY: pCY, centerCZ: pCZ, simRadius: 6);
 
+            // SideScroll2D 模式只渲染 Z=0 那排；其他視角渲染玩家所在 Z 範圍
+            bool in2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
             _renderer3d.RebuildDirtyMeshes(
                 maxPerFrame:  30,
-                sideScroll2D: true,
-                viewCX: pCX, viewCY: pCY, viewRadius: 5); // 半徑 5 chunk = 80 格（≈畫面 1.5 倍）
+                sideScroll2D: in2D,
+                viewCX: pCX, viewCY: pCY, viewCZ: in2D ? -1 : pCZ, viewRadius: 5);
         }
 
         _enemies.Update(_world3d, _player, dt);

@@ -63,8 +63,9 @@ public sealed class TileWorld3D : IWorldInterface
 
     /// <param name="centerCX">以玩家為中心的 Chunk X（超出半徑的 dirty chunk 暫不處理）</param>
     /// <param name="centerCY">以玩家為中心的 Chunk Y</param>
+    /// <param name="centerCZ">以玩家為中心的 Chunk Z（-1 = 不限制 Z）</param>
     /// <param name="simRadius">模擬半徑（chunk 單位，Chebyshev 距離；-1 = 全世界）</param>
-    public void Tick(int centerCX = -1, int centerCY = -1, int simRadius = -1)
+    public void Tick(int centerCX = -1, int centerCY = -1, int centerCZ = -1, int simRadius = -1)
     {
         _frame++;
         bool xFirst = (_frame % 2 == 0);
@@ -80,7 +81,8 @@ public sealed class TileWorld3D : IWorldInterface
             {
                 int dx = Math.Abs(coord.X - centerCX);
                 int dy = Math.Abs(coord.Y - centerCY);
-                if (dx > simRadius || dy > simRadius) continue;
+                int dz = centerCZ >= 0 ? Math.Abs(coord.Z - centerCZ) : 0;
+                if (dx > simRadius || dy > simRadius || dz > simRadius) continue;
             }
             chunk.ClearDirty();
             chunk.ClearUpdated();

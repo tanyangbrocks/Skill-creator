@@ -57,9 +57,9 @@ public partial class TileWorldRenderer3D : Node3D
     /// viewRadius   ：視距半徑（chunk 單位，Chebyshev 距離；-1 = 全世界）。
     /// </summary>
     public void RebuildDirtyMeshes(
-        int maxPerFrame  = 30,
+        int maxPerFrame   = 30,
         bool sideScroll2D = false,
-        int viewCX = -1, int viewCY = -1, int viewRadius = -1)
+        int viewCX = -1, int viewCY = -1, int viewCZ = -1, int viewRadius = -1)
     {
         if (_world == null) return;
         int rebuilt = 0;
@@ -77,7 +77,8 @@ public partial class TileWorldRenderer3D : Node3D
             {
                 int dx = Math.Abs(coord.X - viewCX);
                 int dy = Math.Abs(coord.Y - viewCY);
-                if (dx > viewRadius || dy > viewRadius) continue;
+                int dz = viewCZ >= 0 ? Math.Abs(coord.Z - viewCZ) : 0;
+                if (dx > viewRadius || dy > viewRadius || dz > viewRadius) continue;
             }
             RebuildChunk(coord, chunk);
             chunk.MeshNeedsRebuild = false;
