@@ -48,6 +48,7 @@ public partial class ScriptCanvas : Control
     private Vector2 _canvasPan  = Vector2.Zero;
     private float   _canvasZoom = 1.0f;
     private bool    _panning;
+    private bool    _panWithLeft;  // true = Ctrl+Left 平移，false = 中鍵平移
     private Vector2 _panStart;
     private Vector2 _panOrigin;
     private const float ZoomMin  = 0.20f;
@@ -214,6 +215,12 @@ public partial class ScriptCanvas : Control
 
             if (_panning)
             {
+                // Ctrl+Left 模式：Ctrl 放開時結束平移
+                if (_panWithLeft && !Input.IsKeyPressed(Key.Ctrl))
+                {
+                    _panning = _panWithLeft = false;
+                    return;
+                }
                 _canvasPan = _panOrigin + (mm.GlobalPosition - _panStart);
                 ApplyCanvasTransform();
                 GetViewport().SetInputAsHandled();
@@ -250,9 +257,19 @@ public partial class ScriptCanvas : Control
             }
             if (mbe.ButtonIndex == MouseButton.Middle && GetGlobalRect().HasPoint(mbe.GlobalPosition))
             {
-                _panning   = true;
-                _panStart  = mbe.GlobalPosition;
-                _panOrigin = _canvasPan;
+                _panning     = true;
+                _panWithLeft = false;
+                _panStart    = mbe.GlobalPosition;
+                _panOrigin   = _canvasPan;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if (mbe.ButtonIndex == MouseButton.Left && mbe.CtrlPressed && GetGlobalRect().HasPoint(mbe.GlobalPosition))
+            {
+                _panning     = true;
+                _panWithLeft = true;
+                _panStart    = mbe.GlobalPosition;
+                _panOrigin   = _canvasPan;
                 GetViewport().SetInputAsHandled();
                 return;
             }
@@ -269,6 +286,14 @@ public partial class ScriptCanvas : Control
 
         if (@event is InputEventMouseButton mb && !mb.Pressed && mb.ButtonIndex == MouseButton.Left)
         {
+            // Ctrl+Left 平移中：左鍵放開即結束
+            if (_panning && _panWithLeft)
+            {
+                _panning = _panWithLeft = false;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
             // 圖騰 script 拖到 InvokeTotem 插槽 → 綁定（保留圖騰積木不移除）
             if (_dragging != null && _dragging.Blocks.Count > 0 &&
                 _dragging.Blocks[0].Type == BlockType.Totem)
