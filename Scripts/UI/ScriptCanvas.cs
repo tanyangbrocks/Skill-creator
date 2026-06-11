@@ -39,6 +39,11 @@ public partial class ScriptCanvas : Control
     // Palette drop preview (shown when hovering canvas during palette drag)
     private Label _palPreview = null!;
 
+    // Trash zone — drop target for deleting blocks
+    private Panel        _trashZone  = null!;
+    private StyleBoxFlat _trashStyle = null!;
+    private Vector2      _lastMouseGlobal;
+
     private BlockScript? MainScript => _scripts.Count > 0 ? _scripts[0] : null;
 
     public override void _Ready()
@@ -82,6 +87,39 @@ public partial class ScriptCanvas : Control
         _palPreview.Visible = false;
         _palPreview.ZIndex  = 30;
         AddChild(_palPreview);
+
+        // Trash zone — bottom-right corner, deletes dragged block chains on drop
+        _trashZone = new Panel();
+        _trashZone.MouseFilter = MouseFilterEnum.Ignore;
+        _trashZone.ZIndex = 25;
+        _trashStyle = new StyleBoxFlat
+        {
+            BgColor     = new Color(0.22f, 0.06f, 0.06f, 0.65f),
+            BorderColor = new Color(0.60f, 0.15f, 0.15f, 0.55f),
+            BorderWidthBottom = 1, BorderWidthTop = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+        };
+        _trashStyle.CornerRadiusTopLeft = _trashStyle.CornerRadiusTopRight =
+        _trashStyle.CornerRadiusBottomLeft = _trashStyle.CornerRadiusBottomRight = 8;
+        _trashZone.AddThemeStyleboxOverride("panel", _trashStyle);
+        var trashIcon = new Label
+        {
+            Text                = "🗑",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment   = VerticalAlignment.Center,
+        };
+        trashIcon.AddThemeFontSizeOverride("font_size", 20);
+        trashIcon.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        trashIcon.MouseFilter = MouseFilterEnum.Ignore;
+        _trashZone.AddChild(trashIcon);
+        _trashZone.AnchorLeft   = 1f;
+        _trashZone.AnchorTop    = 1f;
+        _trashZone.AnchorRight  = 1f;
+        _trashZone.AnchorBottom = 1f;
+        _trashZone.OffsetLeft   = -56f;
+        _trashZone.OffsetTop    = -56f;
+        _trashZone.OffsetRight  = -8f;
+        _trashZone.OffsetBottom = -8f;
+        AddChild(_trashZone);
     }
 
     // ── 公開 API ─────────────────────────────────────────────────────
@@ -153,6 +191,9 @@ public partial class ScriptCanvas : Control
     {
         if (@event is InputEventMouseMotion mm)
         {
+            _lastMouseGlobal = mm.GlobalPosition;
+            UpdateTrashHighlight(mm.GlobalPosition);
+
             if (_dragging != null)
             {
                 _dragging.GlobalPosition = mm.GlobalPosition + _dragOffset;
@@ -211,7 +252,8 @@ public partial class ScriptCanvas : Control
             if (BlockDrag.Active && BlockDrag.SourceList == null && BlockDrag.Block != null)
             {
                 HidePalettePreview();
-                if (GetGlobalRect().HasPoint(mb.GlobalPosition))
+                if (GetGlobalRect().HasPoint(mb.GlobalPosition)
+                    && !_trashZone.GetGlobalRect().HasPoint(mb.GlobalPosition))
                 {
                     var localPos = mb.GlobalPosition - GlobalPosition;
                     if (PaletteBlockDropped != null)
@@ -220,6 +262,7 @@ public partial class ScriptCanvas : Control
                         SpawnScript(new List<BlockNode> { BlockDrag.Block }, localPos, isMain: false);
                 }
                 BlockDrag.Clear();
+                UpdateTrashHighlight(Vector2.Zero);
                 GetViewport().SetInputAsHandled();
                 return;
             }
@@ -304,12 +347,37 @@ public partial class ScriptCanvas : Control
         _palPreview.Visible = false;
     }
 
+    private void UpdateTrashHighlight(Vector2 mouseGlobal)
+    {
+        bool isDragging = _dragging != null || BlockDrag.Active;
+        bool overTrash  = isDragging && _trashZone.GetGlobalRect().HasPoint(mouseGlobal);
+        _trashStyle.BgColor = overTrash
+            ? new Color(0.80f, 0.12f, 0.12f, 0.95f)
+            : isDragging
+                ? new Color(0.38f, 0.09f, 0.09f, 0.80f)
+                : new Color(0.22f, 0.06f, 0.06f, 0.65f);
+        _trashZone.AddThemeStyleboxOverride("panel", _trashStyle);
+    }
+
     private void FinishDrag()
     {
         var dropped = _dragging;
         _dragging = null;
         if (dropped == null) return;
         dropped.ZIndex = 0;
+
+        UpdateTrashHighlight(Vector2.Zero);
+
+        // 拖到垃圾桶 → 刪除整串積木
+        if (_trashZone.GetGlobalRect().HasPoint(_lastMouseGlobal))
+        {
+            if (dropped == MainScript) _blocks.Clear();
+            _scripts.Remove(dropped);
+            _freeCanvas.RemoveChild(dropped);
+            dropped.QueueFree();
+            Changed?.Invoke();
+            return;
+        }
 
         const float Threshold = 40f;
         BlockScript? target = null;
