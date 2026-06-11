@@ -3,6 +3,7 @@ using System.Linq;
 using SkillCreator.AbilitySystem;
 using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 using SkillCreator.AbilitySystem.Data;
+using SkillCreator.GameFlow;
 using SkillCreator.Snapshot;
 using SkillCreator.UI;
 using SkillCreator.World;
@@ -109,6 +110,11 @@ public partial class Main : Node
     private sealed record SnapCompare(float PlayerHp, int[] EnemyIds, float[] EnemyHps, MaterialType TileUnderPlayer);
     private SnapCompare? _snapBefore = null;
 
+    // 死亡畫面 + 重生點
+    private Panel   _deathScreen  = null!;
+    /// <summary>玩家重生點。預設為世界初始出生點；可由遊戲物件（床、重生石等）修改。</summary>
+    public  GridPos RespawnPoint  { get; set; }
+
     // 傷害數字（浮動文字池）
     private const int   DmgPoolSize     = 24;
     private const float DmgNumDuration  = 1.2f;
@@ -175,6 +181,14 @@ public partial class Main : Node
         GameClock.Reset();
         CombatState.Reset();
 
+        // 顯示遊戲流程 UI（標題 → 角色列表 → 世界列表），世界初始化等選完後才執行
+        var flowUI = new GameFlowUI();
+        AddChild(flowUI);
+        flowUI.GameStarted += StartGameplay;
+    }
+
+    private void StartGameplay(CharacterSaveData _charData, WorldSaveData _worldData)
+    {
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
         _world3d = new TileWorld3D(WorldW, WorldH, WorldD);
         _mapGen   = new MapGenerator3D();
@@ -206,7 +220,8 @@ public partial class Main : Node
         _entitiesRoot.AddChild(_playerMesh);
 
         // ── 玩家 ───────────────────────────────────────────────
-        _player = new PlayerController(spawnData.PlayerSpawn);
+        _player      = new PlayerController(spawnData.PlayerSpawn);
+        RespawnPoint = spawnData.PlayerSpawn; // 預設重生點 = 世界初始出生點
         // 初始道具（prototype 用；合成系統完成後可移除）
         _player.Inventory.TryAdd(ItemId.ToolBasicPick,      1);
         _player.Inventory.TryAdd(ItemId.ToolBasicAxe,       1);
@@ -260,6 +275,44 @@ public partial class Main : Node
         _spellList.AddSpellRequested  += OnListAddSpellRequested;
 
         CombatState.OnHit = (pos, amount, isPlayer) => SpawnDmgNum(pos, amount, isPlayer);
+
+        BuildDeathScreen(hud);
+    }
+
+    private void BuildDeathScreen(CanvasLayer hud)
+    {
+        // 全螢幕半透明遮罩
+        _deathScreen = new Panel();
+        _deathScreen.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _deathScreen.AddThemeStyleboxOverride("panel",
+            new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0.72f) });
+        _deathScreen.MouseFilter = Control.MouseFilterEnum.Stop; // 擋住底層點擊
+        _deathScreen.Visible = false;
+        hud.AddChild(_deathScreen);
+
+        // 中央 VBox
+        var vbox = new VBoxContainer();
+        vbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
+        vbox.CustomMinimumSize = new Vector2(260f, 0f);
+        vbox.Position          = new Vector2(-130f, -72f);
+        vbox.Alignment         = BoxContainer.AlignmentMode.Center;
+        vbox.AddThemeConstantOverride("separation", 28);
+        _deathScreen.AddChild(vbox);
+
+        // 「你已死亡」標題
+        var title = new Label();
+        title.Text                = "你已死亡";
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.AddThemeFontSizeOverride("font_size", 38);
+        title.AddThemeColorOverride("font_color", new Color(1f, 0.18f, 0.18f));
+        vbox.AddChild(title);
+
+        // 重生按鈕
+        var btn = MakeBtn("重生", new Color(0.15f, 0.38f, 0.15f));
+        btn.CustomMinimumSize = new Vector2(160f, 44f);
+        btn.AddThemeFontSizeOverride("font_size", 18);
+        btn.Pressed += OnRespawn;
+        vbox.AddChild(btn);
     }
 
     private void BuildHUD(CanvasLayer hud)
@@ -669,6 +722,18 @@ public partial class Main : Node
             if (_breakthroughTimer <= 0f) _breakthroughLabel.Visible = false;
         }
 
+        // 死亡判定：顯示遮罩並跳過所有遊戲邏輯，等待玩家按重生
+        if (!_player.IsAlive)
+        {
+            if (!_deathScreen.Visible)
+            {
+                _deathScreen.Visible = true;
+                Input.MouseMode = Input.MouseModeEnum.Visible; // 釋放滑鼠讓玩家能點按鈕
+            }
+            return;
+        }
+        if (_deathScreen.Visible) _deathScreen.Visible = false;
+
         // 滑鼠世界格座標：透過 CameraController 將螢幕座標投影到 Z=0 平面取得世界座標
         {
             var screenMouse = GetViewport().GetMousePosition();
@@ -686,10 +751,11 @@ public partial class Main : Node
                 if (ddx == 0 && ddy == 0) ddx = _player.Facing.X;
                 _debugCoordLabel.Text =
                     $"[偵錯]  F2=座標  F3=VM追蹤\n" +
+                    $"視角:  {_camera3d.Mode}\n" +
                     $"螢幕:  ({screenMouse.X:F0}, {screenMouse.Y:F0}) px\n" +
                     $"世界:  ({worldPos3.X:F2}, {worldPos3.Y:F2}, {worldPos3.Z:F2})\n" +
                     $"格:    ({mgp.X}, {mgp.Y})\n" +
-                    $"玩家:  ({pp.X}, {pp.Y})\n" +
+                    $"玩家:  ({pp.X}, {pp.Y}, {pp.Z})\n" +
                     $"方向:  ({ddx}, {ddy})\n" +
                     $"OrthoZoom: {_orthoZoom:F1}";
             }
@@ -766,13 +832,21 @@ public partial class Main : Node
         // 物理
         _player.ApplyPhysics(_world3d, dt);
 
-        // Phase 2-C：更新玩家與敵人的 3D 視覺位置
-        _playerMesh.Position = new Vector3(_player.Position.X + 0.5f, _player.Position.Y + 0.45f, 0.5f);
+        // Phase 2-C：更新玩家與敵人的 3D 視覺位置（Z 跟隨 player.Z）
+        _playerMesh.Position = new Vector3(
+            _player.Position.X + 0.5f,
+            _player.Position.Y + 0.45f,
+            _player.Position.Z + 0.5f);
+        // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
+        _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
         SyncEnemyMeshes();
 
-        // 鏡頭跟隨玩家（CameraController 接管，只需更新目標位置）
+        // 鏡頭跟隨玩家；SideScroll2D 鎖 Z=0（只渲染 Z=0 層），其餘跟隨 player Z
+        bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
         _camera3d.TargetPosition = new Vector3(
-            _player.Position.X + 0.5f, _player.Position.Y + 0.5f, 0f);
+            _player.Position.X + 0.5f,
+            _player.Position.Y + 0.5f,
+            _cam2D ? 0f : _player.Position.Z + 0.5f);
 
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world3d, _player, dt);
@@ -805,17 +879,28 @@ public partial class Main : Node
             }
         }
 
-        // A/D 移動（X 軸）
-        int dx = 0;
-        if (Input.IsActionPressed(InputBindings.MoveLeft))  dx = -1;
-        if (Input.IsActionPressed(InputBindings.MoveRight)) dx =  1;
-        if (dx != 0) _player.TryMove(_world3d, dx, 0);
-
-        // W/S 前進後退（Z 軸，只在 3D 視角有意義；SideScroll2D 下 W/S 不移動 Z）
-        if (_camera3d.Mode != CameraController.CameraMode.SideScroll2D)
+        // WASD：相機相對方向移動（支援斜向；SideScroll2D 只開放 A/D）
         {
-            if (Input.IsActionPressed(InputBindings.MoveForward))  _player.TryMoveDepth(_world3d, 1);
-            if (Input.IsActionPressed(InputBindings.MoveBackward)) _player.TryMoveDepth(_world3d, -1);
+            bool in2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
+            float yr   = Mathf.DegToRad(_camera3d.Yaw);
+            // 相機前方向量（XZ 平面）：yr=180° → fwd=(0,0,+1)=世界+Z
+            float fwdX = -Mathf.Sin(yr), fwdZ = -Mathf.Cos(yr);
+            // 相機右方向量（前方順時針旋轉 90°）：yr=180° → rgt=(+1,0,0)=世界+X
+            float rgtX = -Mathf.Cos(yr), rgtZ =  Mathf.Sin(yr);
+
+            float mx = 0f, mz = 0f;
+            if (Input.IsActionPressed(InputBindings.MoveLeft))  { mx -= rgtX; mz -= rgtZ; }
+            if (Input.IsActionPressed(InputBindings.MoveRight)) { mx += rgtX; mz += rgtZ; }
+            if (!in2D)
+            {
+                if (Input.IsActionPressed(InputBindings.MoveForward))  { mx += fwdX; mz += fwdZ; }
+                if (Input.IsActionPressed(InputBindings.MoveBackward)) { mx -= fwdX; mz -= fwdZ; }
+            }
+
+            // 轉換為格步（-1/0/1），閾值 0.4 保証單鍵斜向（0.707）也能觸發雙軸
+            int ddx = mx > 0.4f ? 1 : mx < -0.4f ? -1 : 0;
+            int ddz = mz > 0.4f ? 1 : mz < -0.4f ? -1 : 0;
+            if (ddx != 0 || ddz != 0) _player.TryMoveDir(_world3d, ddx, ddz);
         }
 
         // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD/面板上時不觸發）
@@ -1220,7 +1305,7 @@ public partial class Main : Node
             if (!e.IsAlive) continue;
 
             float mh = e.Type is EnemyType.Heavy ? 1.8f : 0.9f;
-            mesh.Position = new Vector3(e.Position.X + 0.5f, e.Position.Y + mh * 0.5f, 0.5f);
+            mesh.Position = new Vector3(e.Position.X + 0.5f, e.Position.Y + mh * 0.5f, e.Position.Z + 0.5f);
         }
     }
 
@@ -1302,6 +1387,13 @@ public partial class Main : Node
     }
 
     // 技能整構編輯器：點擊「← 返回」→ 回到圓球列表
+    private void OnRespawn()
+    {
+        _player.Respawn(RespawnPoint);
+        _deathScreen.Visible = false;
+        _camera3d.ApplyMouseCapture(); // 恢復視角對應的滑鼠捕捉狀態
+    }
+
     private void OnEditorBack()
     {
         _editor.Visible = false;
@@ -1340,14 +1432,14 @@ public partial class Main : Node
 
         _debugCoordPanel = new Panel();
         _debugCoordPanel.Position = new Vector2(8f, 8f);
-        _debugCoordPanel.Size     = new Vector2(220f, 110f);
+        _debugCoordPanel.Size     = new Vector2(240f, 125f);
         _debugCoordPanel.AddThemeStyleboxOverride("panel", bgStyle);
         _debugCoordPanel.Visible  = false;
         hud.AddChild(_debugCoordPanel);
 
         _debugCoordLabel = new Label();
         _debugCoordLabel.Position = new Vector2(7f, 5f);
-        _debugCoordLabel.Size     = new Vector2(206f, 100f);
+        _debugCoordLabel.Size     = new Vector2(226f, 115f);
         _debugCoordLabel.AddThemeFontSizeOverride("font_size", 10);
         _debugCoordLabel.AddThemeColorOverride("font_color", new Color(0.55f, 1.0f, 0.45f));
         _debugCoordPanel.AddChild(_debugCoordLabel);
