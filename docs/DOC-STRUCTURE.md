@@ -24,6 +24,7 @@
 | `plan-3d-conversion.md` | Phase 0–4：3D 化實作計畫，五個關鍵決策、各元件修改評估、自動化腳本 | 3D 化技術決策與進度 |
 | `plan-w6-mp-multitype.md` | W-6：MP 多類型框架，設計決策 A–E、分階段實作 W-6A~F | W-6 MP 系統設計決策與實作計畫 |
 | `plan-tile-scale.md` | Tile 尺度縮放（TileSize 常數）：影響地圖、實作順序、尺度比率分析 | 縮放視覺細粒度時讀這裡 |
+| `plan-scale-world.md` | 玩家碰撞體擴大（BodyH）、世界擴張、效能優化、3D 採掘 Raycast — P/E/W/R 四系列 | 玩家尺度、世界大小、Raycast 採掘計畫 |
 
 ### 歷史存檔（唯讀，已完成功能的技術細節）
 
