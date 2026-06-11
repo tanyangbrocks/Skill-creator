@@ -752,23 +752,7 @@ public partial class AbilityEditorUI : Control
             string eid = node.Params.TryGetValue("engraveId", out var ev) ? ev?.ToString() ?? "" : "";
             if (!TotemLibrary.ContainerActionIds.Contains(eid)) return;
 
-            // 往前找所屬技能因子積木，取顯示名稱
-            int idx = _spell.Blocks.IndexOf(node);
-            string displayName = "容器效果";
-            for (int i = idx - 1; i >= 0; i--)
-            {
-                var b = _spell.Blocks[i];
-                if (b.Type == BlockType.Totem)
-                {
-                    string totemId = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
-                    string customName = b.Params.TryGetValue("customName", out var cn) ? cn?.ToString() ?? "" : "";
-                    displayName = totemId == "custom"
-                        ? (string.IsNullOrEmpty(customName) ? "自定義技能因子" : customName)
-                        : (TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == totemId)?.DisplayName ?? totemId);
-                    break;
-                }
-            }
-
+            string displayName = TotemLibrary.AllEngravings.FirstOrDefault(e => e.Id == eid)?.DisplayName ?? eid;
             EnterContainerEffect(displayName);
         };
         vbox.AddChild(_canvas);
