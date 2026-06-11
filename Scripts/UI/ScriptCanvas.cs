@@ -130,6 +130,23 @@ public partial class ScriptCanvas : Control
         _trashZone.OffsetRight  = -8f;
         _trashZone.OffsetBottom = -8f;
         AddChild(_trashZone);
+
+        // 重置視角按鈕 — 左下角
+        var resetBtn = new Button { Text = "⌖ 重置視角", Flat = true };
+        resetBtn.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.70f));
+        resetBtn.AddThemeFontSizeOverride("font_size", 10);
+        resetBtn.MouseDefaultCursorShape = CursorShape.PointingHand;
+        resetBtn.ZIndex = 25;
+        resetBtn.AnchorLeft   = 0f;
+        resetBtn.AnchorTop    = 1f;
+        resetBtn.AnchorRight  = 0f;
+        resetBtn.AnchorBottom = 1f;
+        resetBtn.OffsetLeft   = 8f;
+        resetBtn.OffsetTop    = -30f;
+        resetBtn.OffsetRight  = 90f;
+        resetBtn.OffsetBottom = -6f;
+        resetBtn.Pressed += ResetView;
+        AddChild(resetBtn);
     }
 
     // ── 公開 API ─────────────────────────────────────────────────────
