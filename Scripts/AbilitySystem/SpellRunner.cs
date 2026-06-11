@@ -10,11 +10,11 @@ using SkillCreator.World;
 //
 //  用法：
 //    1. Main.cs 建立一個 SpellRunner 實例，每幀呼叫 Update(delta)
-//    2. DirectCast 法陣透過 SpellRunner.Submit 提交，而非同步執行
+//    2. DirectCast 技能整構透過 SpellRunner.Submit 提交，而非同步執行
 //    3. Projectile / Contact 命中仍用 SpellCaster.ExecuteEffects（同步，不過 Runner）
 //
 //  架構：
-//    • 一個 ActiveSpell 代表一次正在執行中的法陣（有自己的 Context + Loop）
+//    • 一個 ActiveSpell 代表一次正在執行中的技能整構（有自己的 Context + Loop）
 //    • 每幀 Update 對每個 ActiveSpell 呼叫一次 Advance(delta)
 //    • Advance 把真實 delta 傳給 ExecutionLoop.Step → Wait 倒數真實時間
 //    • InvokeSpell 連段在 Runner 內產生新的 ActiveSpell（parallel 執行）
@@ -53,10 +53,10 @@ public sealed class SpellRunner
 
     private readonly List<ActiveSpell> _active = new();
 
-    // 目前執行中的法陣數量（可供 HUD 顯示）
+    // 目前執行中的技能整構數量（可供 HUD 顯示）
     public int ActiveCount => _active.Count;
 
-    // ── 提交一個新法陣（DirectCast 施放時呼叫）────────────────────
+    // ── 提交一個新技能整構（DirectCast 施放時呼叫）────────────────────
 
     public void Submit(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null,
@@ -105,9 +105,9 @@ public sealed class SpellRunner
         _active.Add(entry);
     }
 
-    // ── S-9：清除錨點後提交的法陣並退還 MP ──────────────────────
+    // ── S-9：清除錨點後提交的技能整構並退還 MP ──────────────────────
 
-    /// <summary>移除所有在 anchorTimestamp 之後提交的法陣並退還其已扣除的 MP。</summary>
+    /// <summary>移除所有在 anchorTimestamp 之後提交的技能整構並退還其已扣除的 MP。</summary>
     public void PruneAfter(float anchorTimestamp)
     {
         for (int i = _active.Count - 1; i >= 0; i--)
@@ -136,7 +136,7 @@ public sealed class SpellRunner
         }
     }
 
-    // ── 單一法陣推進 ──────────────────────────────────────────────
+    // ── 單一技能整構推進 ──────────────────────────────────────────────
 
     private void Advance(ActiveSpell s, float delta)
     {
@@ -162,7 +162,7 @@ public sealed class SpellRunner
                 continue;
             }
 
-            // InvokeSpell 連段：提交為新的 ActiveSpell（與目前法陣並行執行）
+            // InvokeSpell 連段：提交為新的 ActiveSpell（與目前技能整構並行執行）
             if (s.Ctx.PendingInvokeSpell != null)
             {
                 string nextName = s.Ctx.PendingInvokeSpell;

@@ -1,6 +1,6 @@
 namespace SkillCreator.AbilitySystem.Data;
 
-// 法陣中的單一插槽，容納一個圖騰及其附掛的刻印
+// 技能整構中的單一插槽，容納一個技能因子及其附掛的刻印
 public class SpellSlot
 {
     // 積木序列中引用此插槽的名稱（空 = 自動命名為 "slot_N"）

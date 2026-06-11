@@ -10,7 +10,7 @@ namespace SkillCreator.AbilitySystem;
 //
 //  設計準則（類似 EventBus，但有回傳值）：
 //    • 過濾器預設 oneShot = true（觸發一次後自動移除），適合「下一次防護」語意
-//    • 使用 tag 可以批次移除同一法陣登記的所有過濾器
+//    • 使用 tag 可以批次移除同一技能整構登記的所有過濾器
 //    • Main._Ready 呼叫 ClearAll() 確保跨局不殘留
 // ─────────────────────────────────────────────────────────────────────────────
 public static class ActionBus
@@ -51,7 +51,7 @@ public static class ActionBus
         _filters.Sort((a, b) => b.Priority.CompareTo(a.Priority));
     }
 
-    /// <summary>移除所有符合 tag 的過濾器（用於主動清除某個法陣的所有防護）</summary>
+    /// <summary>移除所有符合 tag 的過濾器（用於主動清除某個技能整構的所有防護）</summary>
     public static void UnregisterByTag(string tag)
         => _filters.RemoveAll(e => e.Tag == tag);
 

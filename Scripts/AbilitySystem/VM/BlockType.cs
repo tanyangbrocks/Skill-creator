@@ -9,8 +9,8 @@ public enum BlockType
     RepeatWhile,  // 重複直到條件不符
     ForEachNearby,// 對範圍內每個實體執行一次
     Wait,         // 等待 N 秒（僅頂層支援）
-    Sleep,        // 等待 N 幀後繼續（幀計時；法陣保持啟動）
-    Die,          // 立刻終止整個法陣（後續積木全部跳過）
+    Sleep,        // 等待 N 幀後繼續（幀計時；技能整構保持啟動）
+    Die,          // 立刻終止整個技能整構（後續積木全部跳過）
     RandomChoice, // 隨機選擇（均等/加權/不重複輪轉）
     SequentialGate,// 序列條件閘門（多階段解鎖）
 
@@ -29,10 +29,10 @@ public enum BlockType
     OnEffectEnd,
 
     // ── 呼叫 ────────────────────────────────────────────────────
-    InvokeSpell,  // 連段：發動另一個法陣
-    InvokeTotem,  // 觸發法陣內具名圖騰
+    InvokeSpell,  // 連段：發動另一個技能整構
+    InvokeTotem,  // 觸發技能整構內具名技能因子
 
-    // ── 圖騰狀態查詢（If 條件用）───────────────────────────────
+    // ── 技能因子狀態查詢（If 條件用）───────────────────────────────
     TotemDone,
     TotemHit,
     TotemFizzle,
@@ -82,8 +82,8 @@ public enum BlockType
     OnReceive,          // 接收指定廣播後執行
 
     // ── 執行追蹤 ──────────────────────────────────────────────────
-    LoopcastIndex, // 本法陣從啟動以來執行次數 → Number
-    SuccessCount,  // 本次已成功執行的圖騰數（HitTotems.Count）→ Number
+    LoopcastIndex, // 本技能整構從啟動以來執行次數 → Number
+    SuccessCount,  // 本次已成功執行的技能因子數（HitTotems.Count）→ Number
 
     // ── 全局戰鬥統計查詢 ─────────────────────────────────────────
     GetBattleStat, // 查詢施放次數/傷害量/擊殺數等
@@ -124,7 +124,7 @@ public enum BlockType
     Anchor,    // 錨點刻印：擷取圓形區域快照，壓入 Anchor 棧（群星 LV50+）
     Rollback,  // 回朔刻印：彈出棧頂快照，還原實體 + Tile + 退還 MP（群星 LV50+）
 
-    // ── 圖騰／刻印（Direction A）────────────────────────────────────
-    Totem,     // 圖騰積木；Params["totemId"] 指定圖騰 ID
+    // ── 技能因子／刻印（Direction A）────────────────────────────────────
+    Totem,     // 技能因子積木；Params["totemId"] 指定技能因子 ID
     Engraving, // 刻印積木；Params["engraveId"] 指定刻印 ID，Params["pts"] 投入點數
 }

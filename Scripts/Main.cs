@@ -213,7 +213,7 @@ public partial class Main : Node
         AddChild(hud);
         BuildHUD(hud);
 
-        // ── 法陣編輯器 ─────────────────────────────────────────
+        // ── 技能整構編輯器 ─────────────────────────────────────────
         _editor = new AbilityEditorUI();
         _editor.Visible = false;
         hud.AddChild(_editor);
@@ -240,7 +240,7 @@ public partial class Main : Node
         toolbar.AddThemeConstantOverride("separation", 4);
         hud.AddChild(toolbar);
 
-        var editorBtn = MakeBtn("法陣編輯器 [E]", new Color(0.2f, 0.3f, 0.5f));
+        var editorBtn = MakeBtn("技能整構編輯器 [E]", new Color(0.2f, 0.3f, 0.5f));
         editorBtn.Pressed += ToggleEditor;
         toolbar.AddChild(editorBtn);
 
@@ -1168,7 +1168,7 @@ public partial class Main : Node
         }
     }
 
-    // 法陣編輯器：點擊「← 返回」→ 回到圓球列表
+    // 技能整構編輯器：點擊「← 返回」→ 回到圓球列表
     private void OnEditorBack()
     {
         _editor.Visible = false;

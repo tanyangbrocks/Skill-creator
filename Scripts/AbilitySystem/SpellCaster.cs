@@ -2,11 +2,12 @@ namespace SkillCreator.AbilitySystem;
 
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.VM;
+using SkillCreator.UI;
 using SkillCreator.World;
 using SkillCreator.World.Materials;
 using VmContext = SkillCreator.AbilitySystem.VM.ExecutionContext;
 
-// 施放法陣：透過 VM 執行積木序列，每個 InvokeTotem 導向對應圖騰效果
+// 施放技能整構：透過 VM 執行積木序列，每個 InvokeTotem 導向對應技能因子效果
 public static class SpellCaster
 {
     // MaxComboDepth 統一定義於 SafetyGuard.MaxComboDepth
@@ -20,7 +21,7 @@ public static class SpellCaster
         public static SpellCastResult Failed => default;
     }
 
-    // runner != null 時，DirectCast 法陣提交給 Runner 做跨幀執行（Wait 真實計時）
+    // runner != null 時，DirectCast 技能整構提交給 Runner 做跨幀執行（Wait 真實計時）
     // runner == null 時維持同步執行（Projectile/Contact 命中時使用）
     public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
@@ -39,6 +40,7 @@ public static class SpellCaster
         player.Mp -= mpCost;
         player.SetCastCooldown(spell.CastDelay);
         CombatState.OnSpellCast();
+        ApplyGlobalEngravings(spell);
 
         switch (spell.Container)
         {
@@ -235,7 +237,7 @@ public static class SpellCaster
     {
         if (loadout is null || depth >= SafetyGuard.MaxComboDepth) return;
 
-        // 在 loadout 中找名稱匹配的法陣
+        // 在 loadout 中找名稱匹配的技能整構
         SpellArray? next = null;
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
         {
@@ -250,6 +252,37 @@ public static class SpellCaster
         player.Mp -= cost;
         player.SetCastCooldown(next.CastDelay);
         ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
+    }
+
+    // ── 全域刻印：施放時立即生效的 ActionBus 過濾器 ──────────────────
+
+    private static void ApplyGlobalEngravings(SpellArray spell)
+    {
+        foreach (var eng in spell.GlobalEngravings)
+        {
+            switch (eng.Id)
+            {
+                case "green_death_replace":
+                    // 攔截下一次死亡 → 取消死亡，玩家存活於 1 HP（one-shot）
+                    ActionBus.Register(
+                        act => act is PlayerDeathAction ? null : act,
+                        priority: 0, oneShot: true);
+                    break;
+
+                case "green_invincible":
+                {
+                    // 施放後 duration 秒內取消所有玩家受傷動作
+                    float duration = eng.CalculateEffect(); // Linear BaseEffect=1f → 預設 1 秒
+                    if (duration <= 0f) break;
+                    ulong expiryMs = Godot.Time.GetTicksMsec() + (ulong)(duration * 1000);
+                    ActionBus.Register(
+                        act => act is PlayerDamageAction && Godot.Time.GetTicksMsec() < expiryMs
+                            ? null : act,
+                        priority: 0, oneShot: false, tag: $"invincible_{spell.Name}");
+                    break;
+                }
+            }
+        }
     }
 
     // ── 共用 pending 消費 helper（SpellCaster + SpellRunner 均呼叫）─
@@ -346,31 +379,98 @@ public static class SpellCaster
         return dict;
     }
 
-    // ── 圖騰解析：觸發條件 or 執行效果 ──────────────────────────────
+    // ── 技能因子解析：觸發條件 or 執行效果 ──────────────────────────────
 
     internal static void ResolveTotem(string name, SpellSlot slot,
         ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
     {
-        // 所有圖騰類型均為執行型（無條件評估），直接執行並記錄命中
+        // 所有技能因子類型均為執行型（無條件評估），直接執行並記錄命中
         ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
         ctx.HitTotems.Add(name);
         ctx.DoneTotems.Add(name);
     }
 
-    // ── 分派到各類型圖騰執行器 ─────────────────────────────────────
+    // ── 分派到各類型技能因子執行器 ─────────────────────────────────────
 
+    // Design B：以 Action 刻印 Id 驅動技能因子行為
     private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world,
         bool atHitPoint = false, GridPos? originOverride = null)
     {
-        switch (slot.Totem!.Type)
+        // 1. 先從插槽刻印找 OnCast Action 刻印
+        string? actionId = null;
+        foreach (var e in slot.LocalEngravings)
         {
-            case TotemType.Area:         ExecuteArea(slot, player, world, originOverride);            break; // TODO-STUB
+            if (e.Category == EngraveCategory.Action && e.Trigger == EngraveTrigger.OnCast)
+            { actionId = e.Id; break; }
+        }
+        // 2. Fallback：從 DefaultActionEngraveId 對照表取技能因子預設行為
+        if (actionId == null && slot.Totem != null)
+            TotemLibrary.DefaultActionEngraveId.TryGetValue(slot.Totem.Id, out actionId);
+
+        if (actionId != null) { DispatchAction(actionId, slot, player, world, atHitPoint, originOverride); return; }
+
+        // 3. 向後相容：舊存檔無 Action 刻印時以技能因子類型執行
+        if (slot.Totem == null) return;
+        switch (slot.Totem.Type)
+        {
+            case TotemType.Area:         ExecuteArea(slot, player, world, originOverride);                  break;
             case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride); break;
-            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride); break; // TODO-STUB
-            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);           break;
-            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                    break;
-            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);          break;
-            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);          break;
+            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride);       break;
+            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                 break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                          break;
+            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);                break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);                break;
+        }
+    }
+
+    // 以 act_* 刻印 Id 分派到對應執行器
+    private static void DispatchAction(string actionId, SpellSlot slot, PlayerController player,
+        TileWorld world, bool atHitPoint, GridPos? originOverride)
+    {
+        switch (actionId)
+        {
+            case "act_area_fan":
+            case "act_area_around":
+            case "act_area_distant":
+            case "act_area_beam":
+                ExecuteArea(slot, player, world, originOverride);
+                break;
+
+            case "act_technique_sword":
+            case "act_technique_punch":
+            case "act_technique_shield":
+                ExecuteTechnique(slot, player, world, atHitPoint, originOverride);
+                break;
+
+            case "act_fire_projectile":
+                ExecuteProjectileTotem(slot, player, world, originOverride);
+                break;
+
+            case "act_morph_apply":
+                ExecuteMorph(slot, player, world, originOverride);
+                break;
+
+            case "act_dash":
+            case "act_teleport":
+            case "act_dodge":
+            case "act_portal":
+                ExecuteDisplacement(slot, player, world);
+                break;
+
+            case "act_summon_entity":
+                ExecuteSummon(slot, player, world, originOverride);
+                break;
+
+            case "act_domain_activate":
+                ExecuteDomain(slot, player, world, originOverride);
+                break;
+
+            case "act_passive_tick":
+                break; // OnTick 路徑，OnCast 時不執行
+
+            default:
+                Godot.GD.PushWarning($"[SpellCaster] 未處理的 Action 刻印: {actionId}");
+                break;
         }
     }
 
@@ -383,13 +483,13 @@ public static class SpellCaster
 
     private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
     {
-        // TODO-STUB: 投射物圖騰（能量/實物投射），目前以爆炸佔位
+        // TODO-STUB: 投射物技能因子（能量/實物投射），目前以爆炸佔位
         var origin = originOverride ?? player.Position;
         world.Explode(origin.X, origin.Y, 1);
     }
 
     // ════════════════════════════════════════════════════════════
-    //  圖騰效果實作
+    //  技能因子效果實作
     // ════════════════════════════════════════════════════════════
 
     private struct Mods
@@ -433,6 +533,30 @@ public static class SpellCaster
         {
             switch (slot.Totem!.Id)
             {
+                // ── 新武技技能因子（Design B）────────────────────────────
+                case "technique_sword":
+                {
+                    var sHit = new GridPos(p.X + fx * (slashOfs + rep * 3),
+                                           p.Y + fy * (slashOfs + rep * 3));
+                    world.Explode(sHit.X, sHit.Y, r);
+                    ApplyElement(world, sHit, r, m);
+                    break;
+                }
+                case "technique_punch":
+                {
+                    int pOfs = atHitPoint ? 0 : 2;
+                    var pHit = new GridPos(p.X + fx * (pOfs + rep * 2), p.Y);
+                    world.Explode(pHit.X, pHit.Y, Math.Max(1, r - 1));
+                    ApplyElement(world, pHit, Math.Max(1, r - 1), m);
+                    break;
+                }
+                case "technique_shield": // TODO-STUB: 防禦/反擊，暫以前方衝擊波佔位
+                {
+                    var shHit = new GridPos(p.X + fx * (slashOfs + rep * 2), p.Y);
+                    world.Explode(shHit.X, shHit.Y, r + 1);
+                    break;
+                }
+                // ── 舊武技技能因子（向後相容）────────────────────────────
                 case "technique_slash":
                     var hit = new GridPos(p.X + fx * (slashOfs + rep * 3),
                                          p.Y + fy * (slashOfs + rep * 3));

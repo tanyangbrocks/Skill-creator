@@ -2,55 +2,55 @@ namespace SkillCreator.UI;
 
 using SkillCreator.AbilitySystem.Data;
 
-// 完整圖騰與刻印資料庫（全部設計，數值待調整 ⚠️）
+// 完整技能因子與刻印資料庫（全部設計，數值待調整 ⚠️）
 // 搜尋標記說明：
 //   TODO-STUB  = 尚未實作，SpellCaster 完全未讀取此 Id
 //   TODO-IMPL  = 有佔位邏輯，但不是真實效果（Phase 1 假設 / 粒子代替等）
 public static class TotemLibrary
 {
     // ════════════════════════════════════════════════════════════
-    //  圖騰（27 種）
+    //  技能因子（27 種）
     // ════════════════════════════════════════════════════════════
 
     public static readonly List<TotemData> AllTotems = new()
     {
-        // ── 範圍圖騰（無門檻）────────────────────────────────────
+        // ── 範圍技能因子（無門檻）────────────────────────────────────
         // 定義技能的施放形狀/作用範圍
         new TotemData { Id = "area_fan",     DisplayName = "扇形衝擊",     Type = TotemType.Area, BaseAbilityPointCost = 6  }, // TODO-STUB: 前方扇形範圍，未實作真實扇形碰撞
         new TotemData { Id = "area_around",  DisplayName = "周身衝擊",     Type = TotemType.Area, BaseAbilityPointCost = 8  }, // TODO-STUB: 以自身為圓心全向，未實作圓形 AoE
         new TotemData { Id = "area_distant", DisplayName = "遠距圓形衝擊", Type = TotemType.Area, BaseAbilityPointCost = 10 }, // TODO-STUB: 游標位置圓形 AoE，未實作遠距定點 AoE
         new TotemData { Id = "area_beam",    DisplayName = "射線衝擊",     Type = TotemType.Area, BaseAbilityPointCost = 8  }, // TODO-STUB: 直線穿透射線，未接真實射線碰撞
 
-        // ── 武技圖騰（無門檻）────────────────────────────────────
+        // ── 武技技能因子（無門檻）────────────────────────────────────
         // 玩家手中的武器種類決定可用招式；招式效果與武器屬性掛鉤
         new TotemData { Id = "technique_sword",  DisplayName = "劍技",  Type = TotemType.Technique, BaseAbilityPointCost = 8  }, // TODO-STUB: 需裝備劍類武器，招式軌跡/傷害未接武器屬性
         new TotemData { Id = "technique_punch",  DisplayName = "拳擊",  Type = TotemType.Technique, BaseAbilityPointCost = 6  }, // TODO-STUB: 近距離拳打，未接格鬥招式系統
         new TotemData { Id = "technique_shield", DisplayName = "盾防",  Type = TotemType.Technique, BaseAbilityPointCost = 7  }, // TODO-STUB: 需裝備盾類，防禦/反擊機制未實作
 
-        // ── 投射物圖騰（無門檻）──────────────────────────────────
+        // ── 投射物技能因子（無門檻）──────────────────────────────────
         // 發射可飛行的投射物（與 ContainerType.Projectile 容器配合）
         new TotemData { Id = "projectile_energy",   DisplayName = "能量投射", Type = TotemType.Projectile, BaseAbilityPointCost = 10 }, // TODO-STUB: 無形能量彈，可附加元素/法則，未接完整能量彈系統
         new TotemData { Id = "projectile_physical",  DisplayName = "實物投射", Type = TotemType.Projectile, BaseAbilityPointCost = 12 }, // TODO-STUB: 具現物體投出（石塊/武器等），物理碰撞未實作
 
-        // ── 被動圖騰（無門檻）────────────────────────────────────
-        // 讓法陣以被動模式運行；兩種變體決定觸發機制
+        // ── 被動技能因子（無門檻）────────────────────────────────────
+        // 讓技能整構以被動模式運行；兩種變體決定觸發機制
         new TotemData { Id = "passive_continuous", DisplayName = "持續偵測", Type = TotemType.Passive, BaseAbilityPointCost = 3 }, // TODO-STUB: 每幀/每 Tick 持續執行條件判斷，未接 SpellRunner 持續輪詢
         new TotemData { Id = "passive_switch",     DisplayName = "開關式",   Type = TotemType.Passive, BaseAbilityPointCost = 4 }, // TODO-STUB: 首次觸發啟動、再次觸發關閉，開關狀態機未實作
 
-        // ── 變幻圖騰（LV 20+）────────────────────────────────────
+        // ── 變幻技能因子（LV 20+）────────────────────────────────────
         new TotemData { Id = "morph_speed",      DisplayName = "加速形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 10, RequiredPlayerLevel = 20 }, // TODO-STUB: 速度加成未接 PlayerController 移速屬性
         new TotemData { Id = "morph_flight",     DisplayName = "飛行形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 15, RequiredPlayerLevel = 20 }, // TODO-STUB: 飛行物理未實作，暫以爆炸佔位
         new TotemData { Id = "morph_invisible",  DisplayName = "隱身形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 15, RequiredPlayerLevel = 20 }, // TODO-STUB: 隱身遮罩系統未實作
         new TotemData { Id = "morph_strengthen", DisplayName = "強化形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 12, RequiredPlayerLevel = 20 }, // TODO-STUB: 強化數值未接屬性系統
         new TotemData { Id = "morph_possession", DisplayName = "附體形態",  Type = TotemType.Morph,  BaseAbilityPointCost = 20, RequiredPlayerLevel = 20 }, // TODO-STUB: 靈體附體/操控目標實體，未實作
 
-        // ── 位移圖騰（LV 20+）────────────────────────────────────
+        // ── 位移技能因子（LV 20+）────────────────────────────────────
         new TotemData { Id = "displace_dash",     DisplayName = "衝刺",      Type = TotemType.Displacement, BaseAbilityPointCost = 8,  RequiredPlayerLevel = 20 },
         new TotemData { Id = "displace_teleport", DisplayName = "瞬移",      Type = TotemType.Displacement, BaseAbilityPointCost = 15, RequiredPlayerLevel = 20 },
         new TotemData { Id = "displace_dodge",    DisplayName = "閃避翻滾",  Type = TotemType.Displacement, BaseAbilityPointCost = 10, RequiredPlayerLevel = 20 },
         new TotemData { Id = "displace_portal",   DisplayName = "傳送門",    Type = TotemType.Displacement, BaseAbilityPointCost = 18, RequiredPlayerLevel = 20 }, // TODO-STUB: 雙向傳送入口，與瞬移不同（門持續存在），未實作
 
-        // ── 召喚圖騰（LV 30+）────────────────────────────────────
+        // ── 召喚技能因子（LV 30+）────────────────────────────────────
         new TotemData { Id = "summon_minion",    DisplayName = "召喚精靈",  Type = TotemType.Summon, BaseAbilityPointCost = 15, RequiredPlayerLevel = 30 }, // TODO-STUB: 無 AI 實體，暫以粒子特效代替
         new TotemData { Id = "summon_turret",    DisplayName = "召喚砲台",  Type = TotemType.Summon, BaseAbilityPointCost = 18, RequiredPlayerLevel = 30 }, // TODO-STUB: 無 AI 砲台，暫以石塊佔位
         new TotemData { Id = "summon_guardian",  DisplayName = "召喚護衛",  Type = TotemType.Summon, BaseAbilityPointCost = 14, RequiredPlayerLevel = 30 }, // TODO-STUB: 無 AI 護衛，暫以粒子特效代替
@@ -58,7 +58,7 @@ public static class TotemLibrary
         new TotemData { Id = "summon_building",  DisplayName = "召喚建築",  Type = TotemType.Summon, BaseAbilityPointCost = 22, RequiredPlayerLevel = 30 }, // TODO-STUB: 生成建築物/堡壘實體，未實作
         new TotemData { Id = "summon_vehicle",   DisplayName = "召喚載具",  Type = TotemType.Summon, BaseAbilityPointCost = 20, RequiredPlayerLevel = 30 }, // TODO-STUB: 召喚可乘坐載具，未實作
 
-        // ── 領域圖騰（LV 50+）────────────────────────────────────
+        // ── 領域技能因子（LV 50+）────────────────────────────────────
         new TotemData { Id = "domain_barrier", DisplayName = "結界",      Type = TotemType.Domain, BaseAbilityPointCost = 20, RequiredPlayerLevel = 50 }, // TODO-IMPL: 石塊圓環佔位，無真實阻擋邏輯
         new TotemData { Id = "domain_terrain", DisplayName = "地形改造",  Type = TotemType.Domain, BaseAbilityPointCost = 25, RequiredPlayerLevel = 50 }, // TODO-IMPL: 暫以爆炸改地形，無細粒度控制
         new TotemData { Id = "domain_weather", DisplayName = "天候操控",  Type = TotemType.Domain, BaseAbilityPointCost = 30, RequiredPlayerLevel = 50 }, // TODO-IMPL: 暫以水格降雨，無天候系統
@@ -91,10 +91,10 @@ public static class TotemLibrary
         new EngraveData { Id = "orange_reflect_atk",DisplayName = "反射攻擊",  Color = EngraveColor.Orange, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 6 }, // TODO-STUB: 吸收/轉化/反射/轉向來襲攻擊，未實作
         new EngraveData { Id = "orange_charm",      DisplayName = "操控",      Color = EngraveColor.Orange, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f,               BaseCost = 8 }, // TODO-STUB: 操控 NPC / 野怪行為，未接 AI 系統
 
-        // ── 藍：圖騰改造 ─────────────────────────────────────────
+        // ── 藍：技能因子改造 ─────────────────────────────────────────
         new EngraveData { Id = "blue_multi",            DisplayName = "多段發動",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 1f,   BaseEffect = 1f,  BaseCost = 5 },
-        // [移至被動圖騰層] blue_passive → passive_continuous / passive_switch（見 TotemType.Passive）
-        // [移至被動圖騰層] blue_switch_mode → passive_switch
+        // [移至被動技能因子層] blue_passive → passive_continuous / passive_switch（見 TotemType.Passive）
+        // [移至被動技能因子層] blue_switch_mode → passive_switch
         new EngraveData { Id = "blue_chargeable",       DisplayName = "可儲存式",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0.5f, BaseEffect = 1f,  BaseCost = 5 }, // TODO-STUB: 儲存集氣後一次爆發，集氣系統未實作
         new EngraveData { Id = "blue_condition_trigger",DisplayName = "條件觸發",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 4 }, // TODO-STUB: 條件觸發邏輯未實作
         new EngraveData { Id = "blue_no_interrupt",     DisplayName = "不可打斷",   Color = EngraveColor.Blue, ScalingType = ScalingType.Linear,     ScalingCoefficient = 0f,   BaseEffect = 1f,  BaseCost = 4 }, // TODO-STUB: 姿態系統未實作（Phase 2）
@@ -111,9 +111,9 @@ public static class TotemLibrary
         new EngraveData { Id = "red_effect_steal",  DisplayName = "效果劫奪",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 6 }, // TODO-STUB: 替代效果（負向）— 目標 Buff 轉移至施法者
         new EngraveData { Id = "red_target_replace",DisplayName = "目標替代",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 7 }, // TODO-STUB: 替代效果（負向）— 命中改為對目標盟友生效
         new EngraveData { Id = "red_dot",           DisplayName = "持續傷害",       Color = EngraveColor.Red, ScalingType = ScalingType.Linear,     ScalingCoefficient = 2f,   BaseEffect = 5f,  BaseCost = 3 }, // TODO-STUB: DoT 每秒傷害，持續時間系統未實作
-        new EngraveData { Id = "red_ability_seal",  DisplayName = "能力封印",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 7 }, // TODO-STUB: 封印目標指定法陣/能力，未實作
-        new EngraveData { Id = "red_ability_copy",  DisplayName = "能力複製",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f,               BaseCost = 8 }, // TODO-STUB: 臨時複製目標法陣，未接技能複製積木
-        new EngraveData { Id = "red_ability_steal", DisplayName = "能力奪取",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.3f,               BaseCost = 10}, // TODO-STUB: 掠奪目標法陣使用權，未接技能掠奪積木
+        new EngraveData { Id = "red_ability_seal",  DisplayName = "能力封印",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f,               BaseCost = 7 }, // TODO-STUB: 封印目標指定技能整構/能力，未實作
+        new EngraveData { Id = "red_ability_copy",  DisplayName = "能力複製",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.5f,               BaseCost = 8 }, // TODO-STUB: 臨時複製目標技能整構，未接技能複製積木
+        new EngraveData { Id = "red_ability_steal", DisplayName = "能力奪取",       Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 0.3f,               BaseCost = 10}, // TODO-STUB: 掠奪目標技能整構使用權，未接技能掠奪積木
         new EngraveData { Id = "red_burn",          DisplayName = "燒傷",           Color = EngraveColor.Red, ScalingType = ScalingType.Linear,     ScalingCoefficient = 1f,   BaseEffect = 0f,  BaseCost = 3 }, // TODO-STUB: 火焰 DoT 狀態，未接元素狀態系統
         new EngraveData { Id = "red_bleed",         DisplayName = "流血",           Color = EngraveColor.Red, ScalingType = ScalingType.Linear,     ScalingCoefficient = 1f,   BaseEffect = 0f,  BaseCost = 3 }, // TODO-STUB: 物理 DoT 狀態，未實作
         new EngraveData { Id = "red_petrify",       DisplayName = "石化",           Color = EngraveColor.Red, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.5f,               BaseCost = 6 }, // TODO-STUB: 使目標完全靜止，未接移動控制
@@ -162,7 +162,7 @@ public static class TotemLibrary
         new EngraveData { Id = "elem_thunder", DisplayName = "雷屬性",  Color = EngraveColor.Elemental, Element = ElementType.Thunder, ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.2f, BaseCost = 6 },
         new EngraveData { Id = "elem_poison",  DisplayName = "毒屬性",  Color = EngraveColor.Elemental, Element = ElementType.Poison,  ScalingType = ScalingType.Hyperbolic, ScalingCoefficient = 1.0f, BaseCost = 5 }, // TODO-STUB: 毒屬性反應未實作
 
-        // ── 動作（Action）刻印：各圖騰預設基礎行為，圖騰加入時自動插入 ──────
+        // ── 動作（Action）刻印：各技能因子預設基礎行為，技能因子加入時自動插入 ──────
         // TODO-STUB: 所有 act_ 刻印均為資料佔位，SpellCaster 尚未讀取 Category/Trigger
         new EngraveData { Id = "act_area_fan",         DisplayName = "扇形衝擊發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
         new EngraveData { Id = "act_area_around",      DisplayName = "周身衝擊發動",    Color = EngraveColor.Action, Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast,  ScalingType = ScalingType.Linear, ScalingCoefficient = 0f, BaseCost = 0 },
@@ -200,7 +200,7 @@ public static class TotemLibrary
     };
 
     // ════════════════════════════════════════════════════════════
-    //  Action 刻印 Id → 此 Action 需要容器效果編輯（雙擊圖騰可進入）
+    //  Action 刻印 Id → 此 Action 需要容器效果編輯（雙擊技能因子可進入）
     // ════════════════════════════════════════════════════════════
 
     public static readonly HashSet<string> ContainerActionIds = new()
@@ -210,7 +210,7 @@ public static class TotemLibrary
     };
 
     // ════════════════════════════════════════════════════════════
-    //  圖騰 → 預設 Action 刻印對照（圖騰 Id → Action 刻印 Id）
+    //  技能因子 → 預設 Action 刻印對照（技能因子 Id → Action 刻印 Id）
     // ════════════════════════════════════════════════════════════
 
     public static readonly Dictionary<string, string> DefaultActionEngraveId = new()

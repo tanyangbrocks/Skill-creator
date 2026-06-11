@@ -1,6 +1,6 @@
 namespace SkillCreator.AbilitySystem;
 
-// 跨法陣訊號匯流排（Broadcast / OnReceive 積木的後端）
+// 跨技能整構訊號匯流排（Broadcast / OnReceive 積木的後端）
 // 訊號為「本幀有效」語意：每幀起始由 Main._Process 呼叫 ClearFrame()，
 // 確保所有在同幀廣播的訊號可被同幀的所有 OnReceive 接收。
 public static class EventBus

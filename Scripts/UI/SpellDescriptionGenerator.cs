@@ -4,7 +4,7 @@ using System.Text;
 using SkillCreator.AbilitySystem;
 using SkillCreator.AbilitySystem.Data;
 
-// Stage 5：法陣文案自動生成
+// Stage 5：技能整構文案自動生成
 //   GenerateStructured → 編輯器右側面板（設計者快速確認）
 //   GenerateProse      → SpellListUI Tooltip（玩家視角）
 public static class SpellDescriptionGenerator
@@ -41,8 +41,11 @@ public static class SpellDescriptionGenerator
         var sb = new StringBuilder();
 
         float mp = AbilityPointCalculator.CalculateMpCost(spell);
-        sb.Append(Ct.GetValueOrDefault(spell.Container, "施放"));
-        sb.Append("  ");
+        if (spell.Container != ContainerType.DirectCast)
+        {
+            sb.Append(Ct.GetValueOrDefault(spell.Container, ""));
+            sb.Append("  ");
+        }
         sb.Append(Act.GetValueOrDefault(spell.ActivationType, ""));
         sb.AppendLine($"  MP {mp:F0}");
         if (spell.IsPassive) sb.AppendLine("[被動]");
@@ -105,9 +108,10 @@ public static class SpellDescriptionGenerator
         float mp = AbilityPointCalculator.CalculateMpCost(spell);
         string passiveStr = spell.IsPassive ? "被動" : "主動";
         string actStr     = Act.GetValueOrDefault(spell.ActivationType, "宣告型");
-        string ctStr      = Ct.GetValueOrDefault(spell.Container, "施放");
+        string ctStr = spell.Container != ContainerType.DirectCast
+            ? Ct.GetValueOrDefault(spell.Container, "") + "，" : "";
 
-        sb.Append($"{passiveStr}技能，{actStr}，{ctStr}，消耗 MP {mp:F0}。");
+        sb.Append($"{passiveStr}技能，{actStr}，{ctStr}消耗 MP {mp:F0}。");
 
         var nonEmpty = spell.Slots.Where(s => !s.IsEmpty).ToList();
         if (nonEmpty.Count > 0)

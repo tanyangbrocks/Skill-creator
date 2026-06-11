@@ -428,7 +428,7 @@ public partial class ScratchCanvas : Control
     private static readonly Color CLvnd  = new(0.95f, 0.65f, 0.95f); // 淡紫 TaskCounter
     private static readonly Color CVec   = new(0.30f, 0.88f, 0.80f); // 青綠 Vector
     private static readonly Color CGray  = new(0.75f, 0.75f, 0.75f); // 灰   fallback
-    private static readonly Color CTotem   = new(0.28f, 0.78f, 0.88f); // 青藍  圖騰
+    private static readonly Color CTotem   = new(0.28f, 0.78f, 0.88f); // 青藍  技能因子
     private static readonly Color CEngrave = new(0.72f, 0.55f, 0.92f); // 淡紫  刻印
 
     // 積木描述器（顏色、UI 名稱、預設積木工廠、參數 UI 建構器）
@@ -466,8 +466,8 @@ public partial class ScratchCanvas : Control
         // ── 技能呼叫 ──────────────────────────────────────────────────
         { BlockType.InvokeTotem,  new(COrng, "使用技能", () => B(BlockType.InvokeTotem,  ("totemName", "")),
             (r, b, _) => r.AddChild(new TotemDropZone(b))) },
-        { BlockType.InvokeSpell,  new(COrng, "施放其他法陣", () => B(BlockType.InvokeSpell,  ("spellName", "")),
-            (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "法陣名", 90))) },
+        { BlockType.InvokeSpell,  new(COrng, "施放其他技能整構", () => B(BlockType.InvokeSpell,  ("spellName", "")),
+            (r, b, _) => r.AddChild(SmallEdit(b, "spellName", "整構名", 90))) },
 
         // ── 控制流 ────────────────────────────────────────────────────
         { BlockType.If,           new(CFlow, "如果",        () => B(BlockType.If, ("conditionType", "totemDone"), ("totemName", "")),
@@ -482,7 +482,7 @@ public partial class ScratchCanvas : Control
             (r, b, _) => { r.AddChild(SmallSpin(b, "radius", 1f, 30f, 1f, 40)); r.AddChild(TinyLbl("格內")); }) },
         { BlockType.Evaluate,     new(CFlow, "條件成立執行（無 ELSE）", () => B(BlockType.Evaluate, ("conditionType", "compare"), ("left", "x"), ("op", ">"), ("right", "0")),
             ConditionUI) },
-        { BlockType.Die,          new(CRed,  "終止法陣",     () => B(BlockType.Die),
+        { BlockType.Die,          new(CRed,  "終止技能整構",     () => B(BlockType.Die),
             null) },
 
         // ── 時序 ──────────────────────────────────────────────────────
@@ -531,7 +531,7 @@ public partial class ScratchCanvas : Control
         // ── 執行追蹤 ──────────────────────────────────────────────────
         { BlockType.LoopcastIndex,new(CYlw,  "本陣觸發次數", () => B(BlockType.LoopcastIndex, ("resultVar", "loop_idx"), ("global", false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
-        { BlockType.SuccessCount, new(CYlw,  "命中圖騰數量", () => B(BlockType.SuccessCount,  ("resultVar", "hit_count"), ("global", false)),
+        { BlockType.SuccessCount, new(CYlw,  "命中技能因子數量", () => B(BlockType.SuccessCount,  ("resultVar", "hit_count"), ("global", false)),
             (r, b, _) => { r.AddChild(TinyLbl("→")); r.AddChild(SmallEdit(b, "resultVar", "存入變數", 64)); r.AddChild(CheckBox(b, "global", "全域")); }) },
 
         // ── 列表 ──────────────────────────────────────────────────────
@@ -804,13 +804,13 @@ public partial class ScratchCanvas : Control
                 r.AddChild(SmallEdit(b, "label", "標籤名", 80));
             }) },
 
-        // ── 圖騰／刻印（Direction A）─────────────────────────────────
-        { BlockType.Totem,     new(CTotem,   "▸ 圖騰",
+        // ── 技能因子／刻印（Direction A）─────────────────────────────────
+        { BlockType.Totem,     new(CTotem,   "▸ 技能因子",
             () => B(BlockType.Totem, ("totemId", "")),
             (r, b, _) => {
                 string tid = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
                 if (tid == "custom")
-                    r.AddChild(SmallEdit(b, "customName", "圖騰名稱", 80));
+                    r.AddChild(SmallEdit(b, "customName", "技能因子名稱", 80));
             }) },
         { BlockType.Engraving, new(CEngrave, "◆ 刻印",
             () => B(BlockType.Engraving, ("engraveId", ""), ("pts", 0f)),
@@ -825,7 +825,7 @@ public partial class ScratchCanvas : Control
     internal static Color     BlockColor(BlockType t) =>
         _descs.TryGetValue(t, out var d) ? d.Color : CGray;
 
-    // 圖騰／刻印積木用動態名稱；其他積木 fallback 到靜態版本
+    // 技能因子／刻印積木用動態名稱；其他積木 fallback 到靜態版本
     internal static string    BlockName(BlockNode node)
     {
         if (node.Type == BlockType.Totem)
@@ -949,8 +949,8 @@ public partial class ScratchCanvas : Control
     }
 }
 
-// ── InvokeTotem 圖騰插槽拖放目標 ────────────────────────────────────────────────
-// 取代 SlotPicker 下拉選單；直接把圖騰積木（Totem script）拖進來即完成綁定
+// ── InvokeTotem 技能因子插槽拖放目標 ────────────────────────────────────────────────
+// 取代 SlotPicker 下拉選單；直接把技能因子積木（Totem script）拖進來即完成綁定
 internal sealed partial class TotemDropZone : Panel
 {
     internal static readonly List<TotemDropZone> ActiveZones = new();
@@ -999,7 +999,7 @@ internal sealed partial class TotemDropZone : Panel
         var bound = _block.Params.TryGetValue("totemName", out var v) ? v?.ToString() ?? "" : "";
         if (string.IsNullOrEmpty(bound))
         {
-            _label.Text = "拖入圖騰";
+            _label.Text = "拖入技能因子";
             _label.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f));
         }
         else

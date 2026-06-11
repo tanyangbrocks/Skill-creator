@@ -68,7 +68,7 @@ public class ExecutionContext
     // ForEachNearby 迭代時的效果原點覆蓋（由 ConsumeInvokeTotem 設定，取代 player.Position 暫改）
     public GridPos? EffectOriginOverride { get; set; }
 
-    // 投射物 / 接觸命中時的固定施放原點（整個法陣生命週期有效）
+    // 投射物 / 接觸命中時的固定施放原點（整個技能整構生命週期有效）
     // Runner 跨幀模式下 player.Position 不再可靠，靠此欄位保留命中點
     public GridPos? FixedOrigin { get; set; }
 
@@ -103,14 +103,14 @@ public class ExecutionContext
     // 實例變數（此次施放獨立）
     public Dictionary<string, float> InstanceVars { get; } = new();
 
-    // 全域變數（跨法陣共享，持久存活）
+    // 全域變數（跨技能整構共享，持久存活）
     public static Dictionary<string, float> GlobalVars { get; } = new();
 
     // ── 列表變數 ─────────────────────────────────────────────────
     public Dictionary<string, List<float>> InstanceLists { get; } = new();
     public static Dictionary<string, List<float>> GlobalLists { get; } = new();
 
-    // ── 任務計數器（全域命名，跨法陣，僅 Main._Ready 重置）────────
+    // ── 任務計數器（全域命名，跨技能整構，僅 Main._Ready 重置）────────
     public static Dictionary<string, float> TaskCounters      { get; } = new();
     public static HashSet<string>           TaskCounterReached { get; } = new();
 
@@ -131,7 +131,7 @@ public class ExecutionContext
         return dict.TryGetValue(name, out var list) ? list : null;
     }
 
-    // 圖騰執行結果（由呼叫方在圖騰執行後寫入）
+    // 技能因子執行結果（由呼叫方在技能因子執行後寫入）
     public HashSet<string> HitTotems     { get; } = new();
     public HashSet<string> DoneTotems    { get; } = new();
     public HashSet<string> FizzledTotems { get; } = new();

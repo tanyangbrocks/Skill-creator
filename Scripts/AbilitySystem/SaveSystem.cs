@@ -5,7 +5,7 @@ using Godot;
 using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.VM;
 
-// 法陣存讀檔：user://loadout.json（System.Text.Json，不依賴 Newtonsoft）
+// 技能整構存讀檔：user://loadout.json（System.Text.Json，不依賴 Newtonsoft）
 public static class SaveSystem
 {
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
@@ -218,7 +218,7 @@ public static class SaveSystem
         if (dto.ContainerEffect is not null && depth < SafetyGuard.MaxContainerDepth)
             spell.ContainerEffect = FromDto(dto.ContainerEffect, totemMap, engraveMap, depth + 1);
 
-        // 向後相容：舊存檔用 IsPassive flag，新版改由 Passive 圖騰決定
+        // 向後相容：舊存檔用 IsPassive flag，新版改由 Passive 技能因子決定
         if (dto.IsPassive && !spell.IsPassive && totemMap.TryGetValue("passive_continuous", out var pt))
             spell.Slots.Insert(0, new SpellSlot { Totem = pt });
 
@@ -241,7 +241,7 @@ public static class SaveSystem
         return spell;
     }
 
-    // 刻印需要 clone，避免不同法陣共享同一個 PointsInvested 可寫欄位
+    // 刻印需要 clone，避免不同技能整構共享同一個 PointsInvested 可寫欄位
     private static EngraveData CloneEngrave(EngraveData src, int pts) => new()
     {
         Id                  = src.Id,

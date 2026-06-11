@@ -44,7 +44,7 @@ public partial class AbilityEditorUI : Control
     // Header 導覽元素
     private Button   _backBtn           = null!;
     private Label    _breadcrumbLabel   = null!;
-    // 左側面板：0=圖騰 1=積木 2=刻印
+    // 左側面板：0=技能因子 1=積木 2=刻印
     private int           _activeLeftTab  = 1;
     private int           _activeSubTab   = 0;
     private VBoxContainer _leftContent    = null!;
@@ -131,9 +131,9 @@ public partial class AbilityEditorUI : Control
         };
         row.AddChild(_backBtn);
 
-        // ── 法陣名稱 ──
+        // ── 技能整構名稱 ──
         _nameInput = new LineEdit();
-        _nameInput.PlaceholderText = "輸入法陣名稱（必填）";
+        _nameInput.PlaceholderText = "輸入技能整構名稱（必填）";
         _nameInput.CustomMinimumSize = new Vector2(180, 34);
         _nameInput.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         _nameInput.TextChanged += t => { _spell.Name = t; RefreshDescription(); };
@@ -189,7 +189,7 @@ public partial class AbilityEditorUI : Control
         vbox.AddChild(title);
         vbox.AddChild(new HSeparator());
 
-        var chk = new CheckButton { Text = "圖騰加入時自動插入基礎 Action 刻印" };
+        var chk = new CheckButton { Text = "技能因子加入時自動插入基礎 Action 刻印" };
         chk.ButtonPressed = EditorSettings.AutoInsertBaseEngraving;
         chk.AddThemeFontSizeOverride("font_size", 12);
         chk.Toggled += on => EditorSettings.AutoInsertBaseEngraving = on;
@@ -253,7 +253,7 @@ public partial class AbilityEditorUI : Control
         _                            => "容器",
     };
 
-    // ── 左側面板（母分類 tabs：圖騰 / 積木 / 刻印） ──────────────
+    // ── 左側面板（母分類 tabs：技能因子 / 積木 / 刻印） ──────────────
 
     private void BuildLeftPanel(HBoxContainer body)
     {
@@ -273,7 +273,7 @@ public partial class AbilityEditorUI : Control
         outer.AddChild(tabRow);
 
         var tabGrp  = new ButtonGroup();
-        var tabNames = new[] { "圖騰", "積木", "刻印" };
+        var tabNames = new[] { "技能因子", "積木", "刻印" };
         for (int ti = 0; ti < 3; ti++)
         {
             var captTi = ti;
@@ -373,7 +373,7 @@ public partial class AbilityEditorUI : Control
 
         switch (_activeLeftTab)
         {
-            case 0: // 圖騰
+            case 0: // 技能因子
             {
                 var subs = new (string lbl, TotemType t)[]
                 {
@@ -456,7 +456,7 @@ public partial class AbilityEditorUI : Control
         return btn;
     }
 
-    // 圖騰庫（依子標籤過濾，點擊加入 Totem 積木）
+    // 技能因子庫（依子標籤過濾，點擊加入 Totem 積木）
     private void BuildTotemContent(int subIdx)
     {
         var typeOrder = new[] { TotemType.Area, TotemType.Technique, TotemType.Projectile, TotemType.Passive,
@@ -486,10 +486,10 @@ public partial class AbilityEditorUI : Control
             _leftContent.AddChild(btn);
         }
 
-        // 自定義圖騰按鈕（每個子分頁底部）
+        // 自定義技能因子按鈕（每個子分頁底部）
         VSpacer(_leftContent, 6);
         var captType = filterType;
-        var customBtn = Btn("  ＋ 自定義圖騰", new Color(0.14f, 0.22f, 0.20f));
+        var customBtn = Btn("  ＋ 自定義技能因子", new Color(0.14f, 0.22f, 0.20f));
         customBtn.Alignment = HorizontalAlignment.Left;
         customBtn.CustomMinimumSize = new Vector2(0, 28);
         customBtn.AddThemeFontSizeOverride("font_size", 11);
@@ -705,7 +705,7 @@ public partial class AbilityEditorUI : Control
             RefreshDescription();
             if (inserted) SyncCanvas();
         };
-        // 雙擊圖騰積木 → 若該圖騰後面有容器型 Action 刻印則進入容器效果編輯
+        // 雙擊技能因子積木 → 若該技能因子後面有容器型 Action 刻印則進入容器效果編輯
         _canvas.BlockDoubleClicked += node =>
         {
             if (node.Type != BlockType.Totem) return;
@@ -714,7 +714,7 @@ public partial class AbilityEditorUI : Control
             string totemId = node.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
             string customName = node.Params.TryGetValue("customName", out var cn) ? cn?.ToString() ?? "" : "";
             string displayName = totemId == "custom"
-                ? (string.IsNullOrEmpty(customName) ? "自定義圖騰" : customName)
+                ? (string.IsNullOrEmpty(customName) ? "自定義技能因子" : customName)
                 : (TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == totemId)?.DisplayName ?? totemId);
 
             int idx = _spell.Blocks.IndexOf(node);
@@ -801,7 +801,7 @@ public partial class AbilityEditorUI : Control
         VSpacer(vbox, 4);
         vbox.AddChild(new HSeparator());
         VSpacer(vbox, 2);
-        vbox.AddChild(SectionLbl("  法陣摘要"));
+        vbox.AddChild(SectionLbl("  技能整構摘要"));
         VSpacer(vbox, 2);
 
         var descMargin = new MarginContainer();
@@ -824,7 +824,7 @@ public partial class AbilityEditorUI : Control
         saveMargin.AddThemeConstantOverride("margin_left", 8);
         saveMargin.AddThemeConstantOverride("margin_right", 8);
         saveMargin.AddThemeConstantOverride("margin_bottom", 12);
-        var saveBtn = Btn("儲存法陣", new Color(0.15f, 0.35f, 0.55f));
+        var saveBtn = Btn("儲存技能整構", new Color(0.15f, 0.35f, 0.55f));
         saveBtn.CustomMinimumSize = new Vector2(0, 38);
         saveBtn.Pressed += SaveSpell;
         saveMargin.AddChild(saveBtn);
@@ -1002,7 +1002,7 @@ public partial class AbilityEditorUI : Control
         var errors = new List<string>();
 
         if (string.IsNullOrWhiteSpace(_spell.Name))
-            errors.Add("• 請填寫法陣名稱（必填）");
+            errors.Add("• 請填寫技能整構名稱（必填）");
 
         // 主動技能必須有發動方式（此處用 ActivationType 有無 None 值判斷）
         // ActivationType 預設為 Instant，無 None 值，故無需額外驗證
@@ -1036,7 +1036,7 @@ public partial class AbilityEditorUI : Control
                                   .ToArray();
         SaveSystem.Save(allSpells, _activeEditorSlot, Loadout.PassiveSpells);
 
-        GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 法陣「{_spell.Name}」  " +
+        GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 技能整構「{_spell.Name}」  " +
                  $"主被動：{(_spell.IsPassive ? "被動" : "主動")}  " +
                  $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
                  $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}");
@@ -1191,15 +1191,15 @@ public partial class AbilityEditorUI : Control
 
     private static string TotemTypeName(TotemType t) => t switch
     {
-        TotemType.Area         => "── 範圍圖騰 ──",
-        TotemType.Technique    => "── 武技圖騰 ──",
-        TotemType.Projectile   => "── 投射物圖騰 ──",
-        TotemType.Passive      => "── 被動圖騰 ──",
-        TotemType.Morph        => "── 變幻圖騰 ──",
-        TotemType.Displacement => "── 位移圖騰 ──",
-        TotemType.Summon       => "── 召喚圖騰 ──",
-        TotemType.Domain       => "── 領域圖騰 ──",
-        TotemType.Custom       => "── 自定義圖騰 ──",
+        TotemType.Area         => "── 範圍技能因子 ──",
+        TotemType.Technique    => "── 武技技能因子 ──",
+        TotemType.Projectile   => "── 投射物技能因子 ──",
+        TotemType.Passive      => "── 被動技能因子 ──",
+        TotemType.Morph        => "── 變幻技能因子 ──",
+        TotemType.Displacement => "── 位移技能因子 ──",
+        TotemType.Summon       => "── 召喚技能因子 ──",
+        TotemType.Domain       => "── 領域技能因子 ──",
+        TotemType.Custom       => "── 自定義技能因子 ──",
         _                      => "──",
     };
 

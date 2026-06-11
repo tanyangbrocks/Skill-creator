@@ -45,7 +45,7 @@ public static class SnapshotManager
     }
 
     /// <summary>
-    /// Rollback：彈出棧頂快照，還原實體 + Tile 狀態，並清除錨點後提交的法陣（退還 MP）。
+    /// Rollback：彈出棧頂快照，還原實體 + Tile 狀態，並清除錨點後提交的技能整構（退還 MP）。
     /// 棧為空時靜默返回。
     /// </summary>
     public static void ApplyLatest(
@@ -73,7 +73,7 @@ public static class SnapshotManager
         // 還原 Tile 區域
         world.RestoreRegion(snap.Tiles);
 
-        // 清除錨點後提交的法陣並退還 MP
+        // 清除錨點後提交的技能整構並退還 MP
         runner.PruneAfter(snap.AnchorTimestamp);
     }
 

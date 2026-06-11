@@ -13,7 +13,7 @@ public static class AbilityPointCalculator
         { AbilityActivationType.Sustained, 1.5f },
     };
 
-    // 計算法陣的總能力點消耗（設計時資源）
+    // 計算技能整構的總能力點消耗（設計時資源）
     public static int CalculateTotalCost(SpellArray spell)
     {
         int total = 0;
@@ -42,7 +42,7 @@ public static class AbilityPointCalculator
     public static float LinearEffect(float points, float baseValue, float k)
         => baseValue + points * k;
 
-    // 判斷法陣能力點是否超過境界上限（數值定義於 PlayerController.TierApCap）
+    // 判斷技能整構能力點是否超過境界上限（數值定義於 PlayerController.TierApCap）
     public static bool ExceedsLevelCap(SpellArray spell, int playerLevel)
         => CalculateTotalCost(spell) > PlayerController.TierApCap(playerLevel);
 }

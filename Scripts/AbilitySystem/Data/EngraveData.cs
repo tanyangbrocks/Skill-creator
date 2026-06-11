@@ -13,7 +13,7 @@ public class EngraveData
     // Linear 公式的基礎值
     public float BaseEffect { get; init; } = 0f;
 
-    // 局部（只影響所在圖騰）或全域（影響整個法陣所有圖騰）
+    // 局部（只影響所在技能因子）或全域（影響整個技能整構所有技能因子）
     public bool IsGlobal { get; init; } = false;
 
     // 刻印本身的建構基礎成本（設計時固定）
@@ -24,6 +24,10 @@ public class EngraveData
 
     // 屬性元素（Elemental 刻印專用；None = 非屬性刻印）
     public ElementType Element { get; init; } = ElementType.None;
+
+    // 刻印類別與觸發時機（Action 刻印專用）
+    public EngraveCategory Category { get; init; } = EngraveCategory.Modifier;
+    public EngraveTrigger  Trigger  { get; init; } = EngraveTrigger.OnCast;
 
     // 是否為限制型（黃色）：加入後回收能力點，而非消耗
     public bool IsRestriction { get; init; } = false;
