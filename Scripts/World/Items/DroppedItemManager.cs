@@ -24,7 +24,7 @@ public class DroppedItemManager
         }
     }
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         for (int i = _items.Count - 1; i >= 0; i--)
         {

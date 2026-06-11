@@ -16,7 +16,7 @@ public class EnemyManager
     public void Spawn(GridPos pos, EnemyType type = EnemyType.Melee, float maxHp = -1f)
         => Enemies.Add(new Enemy(pos, type, maxHp));
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         // ── 敵人更新 ────────────────────────────────────────────
         foreach (var e in Enemies)

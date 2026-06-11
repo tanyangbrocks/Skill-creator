@@ -48,7 +48,7 @@ public class SpellProjectile
         _remainingTiles= MaxRange;
     }
 
-    public void Update(TileWorld world, EnemyManager enemies, float delta)
+    public void Update(TileWorld3D world, EnemyManager enemies, float delta)
     {
         if (!IsAlive) return;
 
@@ -94,7 +94,7 @@ public class SpellProjectile
         if (--_remainingTiles <= 0) IsAlive = false;
     }
 
-    private void HitAt(GridPos pos, TileWorld world, EnemyManager enemies, EntityInfo? hitTarget = null)
+    private void HitAt(GridPos pos, TileWorld3D world, EnemyManager enemies, EntityInfo? hitTarget = null)
     {
         if (_runner != null)
         {

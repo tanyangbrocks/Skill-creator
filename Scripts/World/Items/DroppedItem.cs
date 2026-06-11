@@ -18,7 +18,7 @@ public class DroppedItem
         Stack    = stack;
     }
 
-    public void Update(TileWorld world, float delta)
+    public void Update(TileWorld3D world, float delta)
     {
         LifeTime -= delta;
         if (!IsAlive) return;

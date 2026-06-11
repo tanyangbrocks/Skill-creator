@@ -24,7 +24,7 @@ public sealed class EnemyProjectile
         _remaining = MaxRange;
     }
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         if (!IsAlive) return;
 

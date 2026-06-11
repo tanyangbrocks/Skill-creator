@@ -35,6 +35,9 @@ public partial class CameraController : Node3D
     /// <summary>設定此節點每幀跟隨的目標（玩家 Node3D）。</summary>
     public Node3D? Target { get; set; }
 
+    /// <summary>當 Target 為 null 時，直接指定跟隨位置（World 座標）。</summary>
+    public Vector3 TargetPosition { get; set; }
+
     private Camera3D _cam = null!;
     private float    _yaw; // 水平旋轉角（度），TPS / FPS 共用
 
@@ -51,6 +54,8 @@ public partial class CameraController : Node3D
     {
         if (Target != null)
             GlobalPosition = Target.GlobalPosition;
+        else
+            GlobalPosition = TargetPosition;
         UpdateCameraTransform();
     }
 
@@ -75,6 +80,14 @@ public partial class CameraController : Node3D
 
     // ── 公開方法 ─────────────────────────────────────────────────────────────
 
+    /// <summary>螢幕座標 → 世界 XY（SideScroll2D 模式，Z=0 平面）</summary>
+    public Vector3 ProjectScreenToWorld(Vector2 screenPos) =>
+        _cam.ProjectPosition(screenPos, SideDist);
+
+    /// <summary>世界座標 → 螢幕座標（2D HUD 疊加用）</summary>
+    public Vector2 WorldToScreen(Vector3 worldPos) =>
+        _cam.UnprojectPosition(worldPos);
+
     public void CycleMode()
     {
         Mode = (CameraMode)(((int)Mode + 1) % 4);
@@ -85,6 +98,13 @@ public partial class CameraController : Node3D
     public void SetMode(CameraMode m)
     {
         Mode = m;
+        ApplyProjection();
+    }
+
+    /// <summary>調整正交投影尺寸（縮放），只在正交模式下有效。</summary>
+    public void SetOrthoSize(float size)
+    {
+        OrthoSize = size;
         ApplyProjection();
     }
 

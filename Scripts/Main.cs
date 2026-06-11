@@ -13,7 +13,11 @@ namespace SkillCreator;
 
 public partial class Main : Node
 {
-    private TileWorldRenderer        _world      = null!;
+    private TileWorldRenderer3D      _renderer3d  = null!;
+    private TileWorld3D              _world3d     = null!;
+    private CameraController         _camera3d    = null!;
+    private int                      _simStepsPerFrame = 1;
+    private bool                     _simPaused        = false;
     private AbilityEditorUI          _editor     = null!;
     private SpellListUI              _spellList  = null!;
     private PlayerController         _player     = null!;
@@ -137,11 +141,16 @@ public partial class Main : Node
     private static readonly string[] _slotKeys =
         { "U", "I", "O", "P", "U+I", "I+O", "O+P", "U+I+O", "I+O+P", "U+I+O+P" };
 
-    // 鏡頭縮放（1 = 最遠/全覽，10 = 最近/預設）
-    private float _cameraZoom = 10f;
-    private const float ZoomMin  = 1f;
-    private const float ZoomMax  = 10f;
-    private const float ZoomStep = 1.2f; // 每格滾輪縮放倍率（約 12 步橫跨全範圍）
+    // 鏡頭縮放（3D 模式：調整正交尺寸）
+    private float _orthoZoom = 30f;
+    private const float ZoomMin  = 8f;
+    private const float ZoomMax  = 80f;
+    private const float ZoomStep = 1.2f;
+
+    // 世界尺寸（3D）
+    private const int WorldW = 600;
+    private const int WorldH = 200;
+    private const int WorldD = 32;
 
     private bool _editorOpen = false;
 
@@ -160,12 +169,16 @@ public partial class Main : Node
         GameClock.Reset();
         CombatState.Reset();
 
-        // ── 世界渲染器 ──────────────────────────────────────────
-        _world = new TileWorldRenderer();
-        AddChild(_world);
+        // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
+        _world3d = new TileWorld3D(WorldW, WorldH, WorldD);
+        var spawnData = MapGenerator3D.Generate(_world3d);
 
-        // ── 程序生成地圖 ───────────────────────────────────────
-        var spawnData = MapGenerator.Generate(_world.World);
+        _renderer3d = new TileWorldRenderer3D();
+        _renderer3d.Initialize(_world3d);
+        AddChild(_renderer3d);
+
+        _camera3d = new CameraController();
+        AddChild(_camera3d);
 
         // ── 玩家 ───────────────────────────────────────────────
         _player = new PlayerController(spawnData.PlayerSpawn);
@@ -194,17 +207,11 @@ public partial class Main : Node
             if (slotEmpty) _player.Equipment.TryEquip(_player.Inventory, i);
         }
 
-        _world.Player          = _player;
-        _world.Enemies         = _enemies;
-        _world.Projectiles     = _projectiles;
-        _world.DroppedItems    = _droppedItems;
-        _world.PaintingEnabled = false;  // 遊玩模式下禁用 debug 繪圖筆，改由採掘/放置系統接手
-
-        _world.World.OnExplosion += (center, radius) =>
+        _world3d.OnExplosion += (center, radius) =>
             _enemies.ApplyExplosionDamage(center, radius, 40f);
 
         // 方塊被摧毀時產生掉落物
-        _world.World.OnTileDestroyed += (pos, mat) => _droppedItems.Spawn(pos, mat);
+        _world3d.OnTileDestroyed += (pos, mat) => _droppedItems.Spawn(pos, mat);
 
         SpawnEnemies(spawnData.EnemySpawns);
 
@@ -257,7 +264,7 @@ public partial class Main : Node
             btn.ToggleMode = true; btn.ButtonGroup = new ButtonGroup();
             btn.ButtonPressed = (steps == 1);
             var sp = steps;
-            btn.Toggled += on => { if (on) _world.SimStepsPerFrame = sp; };
+            btn.Toggled += on => { if (on) _simStepsPerFrame = sp; };
             speedRow.AddChild(btn);
         }
         toolbar.AddChild(speedRow);
@@ -331,7 +338,7 @@ public partial class Main : Node
             btn.ToggleMode = true; btn.ButtonGroup = grp;
             btn.ButtonPressed = (mat == MaterialType.Sand);
             var m = mat;
-            btn.Toggled += on => { if (on) _world.SelectedMaterial = m; };
+            btn.Toggled += on => { if (on) GD.Print($"[繪圖] 材質切換（3D 模式暫未實作）: {m}"); };
             paintVBox.AddChild(btn);
         }
         paintVBox.AddChild(new HSeparator());
@@ -343,7 +350,7 @@ public partial class Main : Node
             btn.ToggleMode = true; btn.ButtonGroup = new ButtonGroup();
             btn.ButtonPressed = (size == 2);
             var s = size;
-            btn.Toggled += on => { if (on) _world.BrushSize = s; };
+            btn.Toggled += on => { _ = s; }; // stub：3D 繪圖筆暫未實作
             brushRow.AddChild(btn);
         }
         paintVBox.AddChild(brushRow);
@@ -610,7 +617,7 @@ public partial class Main : Node
             var mouse = GetViewport().GetMousePosition();
             _dragFloatIcon.Position = mouse - new Vector2(15f, 15f);
         }
-        _paintModeLabel.Visible = _world.PaintingEnabled;
+        _paintModeLabel.Visible = false; // 3D 模式暫不支援繪圖筆
 
         // 境界門檻同步至刻印庫（讓鎖定狀態即時反映）
         _editor.PlayerLevel = _player.Level;
@@ -636,19 +643,13 @@ public partial class Main : Node
             if (_breakthroughTimer <= 0f) _breakthroughLabel.Visible = false;
         }
 
-        // 滑鼠世界格座標：明確用 Camera.GetScreenCenterPosition 換算，
-        // 避免 GetLocalMousePosition 未正確套用 Camera2D zoom 的問題
+        // 滑鼠世界格座標：透過 CameraController 將螢幕座標投影到 Z=0 平面取得世界座標
         {
-            var screenMouse  = GetViewport().GetMousePosition();
-            var viewportSize = GetViewport().GetVisibleRect().Size;
-            // 直接用玩家當前位置換算畫布中心（避免 GetScreenCenterPosition 單幀落後問題）
-            var camCenter    = new Vector2(
-                (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
-                (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
-            var canvasMouse  = camCenter + (screenMouse - viewportSize * 0.5f) / _cameraZoom;
+            var screenMouse = GetViewport().GetMousePosition();
+            var worldPos3   = _camera3d.ProjectScreenToWorld(screenMouse);
             _player.MouseGridPos = new GridPos(
-                Math.Clamp((int)(canvasMouse.X / TileWorldRenderer.TilePixels), 0, _world.World.Width  - 1),
-                Math.Clamp((int)(canvasMouse.Y / TileWorldRenderer.TilePixels), 0, _world.World.Height - 1));
+                Math.Clamp((int)worldPos3.X, 0, _world3d.Width  - 1),
+                Math.Clamp((int)worldPos3.Y, 0, _world3d.Height - 1));
 
             if (_debugCoordEnabled)
             {
@@ -660,11 +661,11 @@ public partial class Main : Node
                 _debugCoordLabel.Text =
                     $"[偵錯]  F2=座標  F3=VM追蹤\n" +
                     $"螢幕:  ({screenMouse.X:F0}, {screenMouse.Y:F0}) px\n" +
-                    $"畫布:  ({canvasMouse.X:F0}, {canvasMouse.Y:F0}) px\n" +
+                    $"世界:  ({worldPos3.X:F2}, {worldPos3.Y:F2}, {worldPos3.Z:F2})\n" +
                     $"格:    ({mgp.X}, {mgp.Y})\n" +
                     $"玩家:  ({pp.X}, {pp.Y})\n" +
                     $"方向:  ({ddx}, {ddy})\n" +
-                    $"縮放:  {_cameraZoom:F1}×";
+                    $"OrthoZoom: {_orthoZoom:F1}";
             }
 
             if (_debugSurvivalEnabled) RefreshSurvivalDebug();
@@ -698,36 +699,42 @@ public partial class Main : Node
             _prevCastU = curU; _prevCastI = curI; _prevCastO = curO; _prevCastP = curP;
         }
 
-        _player.UpdateEnvironment(_world.World);  // W-5b：設置氧氣/環境溫度旗標
+        _player.UpdateEnvironment(_world3d);  // W-5b：設置氧氣/環境溫度旗標
         _player.Tick(dt);
-        _enemies.Update(_world.World, _player, dt);
+
+        // 世界 CA 模擬（SimStepsPerFrame 步/幀，暫停時跳過）
+        if (!_simPaused)
+        {
+            _world3d.ClearOccupied();
+            _world3d.SetOccupied(_player.Position.X, _player.Position.Y, 0);
+            foreach (var e in _enemies.Enemies)
+                if (e.IsAlive) _world3d.SetOccupied(e.Position.X, e.Position.Y, 0);
+            for (int _s = 0; _s < _simStepsPerFrame; _s++)
+                _world3d.Tick();
+            _renderer3d.RebuildDirtyMeshes();
+        }
+
+        _enemies.Update(_world3d, _player, dt);
         _runner.Update(dt);
 
         // 投射物更新
         for (int i = _projectiles.Count - 1; i >= 0; i--)
             if (!_projectiles[i].IsAlive) _projectiles.RemoveAt(i);
-        foreach (var p in _projectiles) p.Update(_world.World, _enemies, dt);
+        foreach (var p in _projectiles) p.Update(_world3d, _enemies, dt);
 
         // 物理
-        _player.ApplyPhysics(_world.World, dt);
+        _player.ApplyPhysics(_world3d, dt);
 
-        // 鏡頭跟隨玩家（Camera2D.Limit 自動限制於世界邊界）
-        _world.Camera.Position = new Vector2(
-            (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
-            (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
-        _world.Camera.Zoom = new Vector2(_cameraZoom, _cameraZoom);
+        // 鏡頭跟隨玩家（CameraController 接管，只需更新目標位置）
+        _camera3d.TargetPosition = new Vector3(
+            _player.Position.X + 0.5f, _player.Position.Y + 0.5f, 0f);
 
         // 掉落物（重力 + 壽命 + 自動拾取）
-        _droppedItems.Update(_world.World, _player, dt);
+        _droppedItems.Update(_world3d, _player, dt);
 
         // 傷害數字動畫更新
         if (ShowDamageNumbers && _dmgPool != null)
         {
-            var vpSize    = GetViewport().GetVisibleRect().Size;
-            var camCenter = new Vector2(
-                (_player.Position.X + 0.5f) * TileWorldRenderer.TilePixels,
-                (_player.Position.Y + 0.5f) * TileWorldRenderer.TilePixels);
-
             for (int i = 0; i < DmgPoolSize; i++)
             {
                 if (!_dmgPool[i].Active) continue;
@@ -741,8 +748,10 @@ public partial class Main : Node
                     continue;
                 }
 
-                var screenPos = vpSize * 0.5f + (_dmgPool[i].WorldPx - camCenter) * _cameraZoom;
-                screenPos.Y  -= _dmgPool[i].RiseY;
+                // WorldPx 現在存放世界單位座標，透過 CameraController 投影到螢幕
+                var worldPos3d = new Vector3(_dmgPool[i].WorldPx.X, _dmgPool[i].WorldPx.Y, 0f);
+                var screenPos  = _camera3d.WorldToScreen(worldPos3d);
+                screenPos.Y   -= _dmgPool[i].RiseY;
                 _dmgPool[i].Lbl.Position = screenPos;
 
                 float alpha = Math.Clamp(_dmgPool[i].Timer / 0.4f, 0f, 1f);
@@ -755,14 +764,14 @@ public partial class Main : Node
         int dx = 0;
         if (Input.IsActionPressed(InputBindings.MoveLeft))  dx = -1;
         if (Input.IsActionPressed(InputBindings.MoveRight)) dx =  1;
-        if (dx != 0) _player.TryMove(_world.World, dx, 0);
+        if (dx != 0) _player.TryMove(_world3d, dx, 0);
 
         // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD/面板上時不觸發）
         if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
             var target = _player.MouseGridPos;
             if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
-                _player.TickMining(_world.World, target, dt);
+                _player.TickMining(_world3d, target, dt);
             else
                 _player.CancelMining();
         }
@@ -784,9 +793,9 @@ public partial class Main : Node
                 if (itemData.IsPlaceable && itemData.PlaceAs.HasValue
                     && target != _player.Position
                     && _player.Position.DistanceTo(target) <= PlayerController.MiningRange
-                    && _world.World.TypeAt(target.X, target.Y) == MaterialType.Air)
+                    && _world3d.TypeAt(target.X, target.Y) == MaterialType.Air)
                 {
-                    _world.World.Set(target.X, target.Y, itemData.PlaceAs.Value);
+                    _world3d.Set(target.X, target.Y, itemData.PlaceAs.Value);
                     _player.Inventory.Consume(_player.Inventory.ActiveHotbarIndex);
                     _placeCooldown = 0.12f;
                 }
@@ -815,14 +824,14 @@ public partial class Main : Node
             bool ctrl = Input.IsKeyPressed(Key.Ctrl);
             if (mw.ButtonIndex == MouseButton.WheelUp)
             {
-                if (ctrl) _cameraZoom = Math.Clamp(_cameraZoom * ZoomStep, ZoomMin, ZoomMax);
+                if (ctrl) { _orthoZoom = Math.Clamp(_orthoZoom / ZoomStep, ZoomMin, ZoomMax); _camera3d.SetOrthoSize(_orthoZoom); }
                 else _player.Inventory.ActiveHotbarIndex =
                     (_player.Inventory.ActiveHotbarIndex - 1 + Inventory.HotbarSize) % Inventory.HotbarSize;
                 return;
             }
             if (mw.ButtonIndex == MouseButton.WheelDown)
             {
-                if (ctrl) _cameraZoom = Math.Clamp(_cameraZoom / ZoomStep, ZoomMin, ZoomMax);
+                if (ctrl) { _orthoZoom = Math.Clamp(_orthoZoom * ZoomStep, ZoomMin, ZoomMax); _camera3d.SetOrthoSize(_orthoZoom); }
                 else _player.Inventory.ActiveHotbarIndex =
                     (_player.Inventory.ActiveHotbarIndex + 1) % Inventory.HotbarSize;
                 return;
@@ -884,8 +893,7 @@ public partial class Main : Node
         }
         else if (k.IsAction(InputBindings.TogglePaint))
         {
-            _world.PaintingEnabled   = !_world.PaintingEnabled;
-            _paintToolPanel.Visible  = _world.PaintingEnabled;
+            _paintToolPanel.Visible  = !_paintToolPanel.Visible; // 3D 模式：只切換面板顯示
         }
         else if (k.IsAction(InputBindings.DebugCoord))
         {
@@ -926,11 +934,11 @@ public partial class Main : Node
         {
             ToggleEditor();
         }
-        else if (k.IsAction(InputBindings.Jump) && !_editorOpen && _player.IsOnGround(_world.World))
+        else if (k.IsAction(InputBindings.Jump) && !_editorOpen && _player.IsOnGround(_world3d))
         {
             _player.StartJump();
         }
-        else if (k.Keycode == Key.Up && !_editorOpen && _player.IsOnGround(_world.World))
+        else if (k.Keycode == Key.Up && !_editorOpen && _player.IsOnGround(_world3d))
         {
             _player.StartJump(); // 方向鍵上仍可跳（不加入鍵位系統，固定輔助鍵）
         }
@@ -955,7 +963,7 @@ public partial class Main : Node
             GD.Print($"[施放] 槽位 {slotIdx} 空白");
             return;
         }
-        var result = SpellCaster.TryCast(spell, _player, _world.World, _enemies, _editor.Loadout, _runner);
+        var result = SpellCaster.TryCast(spell, _player, _world3d, _enemies, _editor.Loadout, _runner);
         if (!result.Ok)
             GD.Print($"[施放] 槽位 {slotIdx} 失敗：MP 不足或冷卻中");
         else if (result.Projectile != null)
@@ -1131,8 +1139,8 @@ public partial class Main : Node
             _spellList.Visible = false;
             _editor.Visible    = false;
         }
-        _world.Visible = !_editorOpen;
-        _world.Paused  = _editorOpen;
+        _renderer3d.Visible = !_editorOpen;
+        _simPaused          = _editorOpen;
     }
 
     // 圓球列表：點擊主動技能圓球 → 進入對應槽位編輯
@@ -1290,13 +1298,13 @@ public partial class Main : Node
         const int Radius = 5;
         var pp = _player.Position;
 
-        SnapshotManager.TakeSnapshot(pp, Radius, _player, _enemies, _world.World);
+        SnapshotManager.TakeSnapshot(pp, Radius, _player, _enemies, _world3d);
 
         _snapBefore = new SnapCompare(
             _player.Hp,
             _enemies.Enemies.Where(e => e.IsAlive).Select(e => e.Id).ToArray(),
             _enemies.Enemies.Where(e => e.IsAlive).Select(e => e.Hp).ToArray(),
-            _world.World.TypeAt(pp.X, pp.Y + 1)  // 腳下那格
+            _world3d.TypeAt(pp.X, pp.Y + 1)  // 腳下那格
         );
 
         GD.Print($"[Snap F5] Anchor @ ({pp.X},{pp.Y}) r={Radius}  HP={_player.Hp:F1}" +
@@ -1313,11 +1321,11 @@ public partial class Main : Node
             return;
         }
 
-        SnapshotManager.ApplyLatest(_player, _enemies, _world.World, _runner);
+        SnapshotManager.ApplyLatest(_player, _enemies, _world3d, _runner);
 
         float newHp   = _player.Hp;
         var pp        = _player.Position;
-        var tileAfter = _world.World.TypeAt(pp.X, pp.Y + 1);
+        var tileAfter = _world3d.TypeAt(pp.X, pp.Y + 1);
         bool hpOk     = MathF.Abs(newHp - _snapBefore.PlayerHp) < 0.5f;
         bool tileOk   = tileAfter == _snapBefore.TileUnderPlayer;
 
@@ -1834,8 +1842,7 @@ public partial class Main : Node
         if (slot < 0) return;
 
         ref var d = ref _dmgPool[slot];
-        d.WorldPx   = new Vector2((pos.X + 0.5f) * TileWorldRenderer.TilePixels,
-                                  (pos.Y + 0.5f) * TileWorldRenderer.TilePixels);
+        d.WorldPx   = new Vector2(pos.X + 0.5f, pos.Y + 0.5f); // 世界單位（tile 中心）
         d.Timer     = DmgNumDuration;
         d.RiseY     = 0f;
         d.Active    = true;

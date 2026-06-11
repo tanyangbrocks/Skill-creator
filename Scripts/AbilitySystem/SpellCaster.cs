@@ -23,7 +23,7 @@ public static class SpellCaster
 
     // runner != null 時，DirectCast 技能整構提交給 Runner 做跨幀執行（Wait 真實計時）
     // runner == null 時維持同步執行（Projectile/Contact 命中時使用）
-    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
+    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
         if (!player.CanCast) return SpellCastResult.Failed;
@@ -87,7 +87,7 @@ public static class SpellCaster
     // ── 召喚物容器（TODO-STUB：佔位）──────────────────────────────
     // 最終應由召喚物 AI 實體裝載 SpellArray 並在其行動時執行；
     // 目前直接在玩家位置執行效果作為佔位，等召喚物 AI 系統完成後替換。
-    private static void ExecuteSummonContainer(SpellArray spell, PlayerController player, TileWorld world,
+    private static void ExecuteSummonContainer(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
     {
         if (runner != null)
@@ -98,7 +98,7 @@ public static class SpellCaster
 
     // ── Contact 容器：近戰範圍命中 ────────────────────────────────
 
-    private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld world,
+    private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
     {
         int fx = player.Facing.X;
@@ -152,7 +152,7 @@ public static class SpellCaster
     // atHitPoint：效果中心即 player.Position（投射物命中 / 接觸命中時為 true）
     //             technique_slash 等會用此 flag 把爆炸 offset 改為 0，避免偏移到命中點之外
     // hitTarget：投射物/接觸命中的敵人快照，預設 CurrentIterEntity 讓 固定傷害 積木可對其扣血
-    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world,
+    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0,
         bool atHitPoint = false, EntityInfo? hitTarget = null)
     {
@@ -232,7 +232,7 @@ public static class SpellCaster
 
     // ── 連段執行 ─────────────────────────────────────────────────
 
-    private static void TriggerCombo(string name, PlayerController player, TileWorld world,
+    private static void TriggerCombo(string name, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, int depth)
     {
         if (loadout is null || depth >= SafetyGuard.MaxComboDepth) return;
@@ -289,7 +289,7 @@ public static class SpellCaster
 
     internal static void ConsumeInvokeTotem(
         ExecutionContext ctx, Dictionary<string, SpellSlot> slotByRef,
-        PlayerController player, TileWorld world, bool atHitPoint)
+        PlayerController player, TileWorld3D world, bool atHitPoint)
     {
         string name = ctx.PendingInvokeTotem!;
         ctx.PendingInvokeTotem = null;
@@ -382,7 +382,7 @@ public static class SpellCaster
     // ── 技能因子解析：觸發條件 or 執行效果 ──────────────────────────────
 
     internal static void ResolveTotem(string name, SpellSlot slot,
-        ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
+        ExecutionContext ctx, PlayerController player, TileWorld3D world, bool atHitPoint = false)
     {
         // 所有技能因子類型均為執行型（無條件評估），直接執行並記錄命中
         ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
@@ -393,7 +393,7 @@ public static class SpellCaster
     // ── 分派到各類型技能因子執行器 ─────────────────────────────────────
 
     // Design B：以 Action 刻印 Id 驅動技能因子行為
-    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld3D world,
         bool atHitPoint = false, GridPos? originOverride = null)
     {
         // 1. 先從插槽刻印找 OnCast Action 刻印
@@ -425,7 +425,7 @@ public static class SpellCaster
 
     // 以 act_* 刻印 Id 分派到對應執行器
     private static void DispatchAction(string actionId, SpellSlot slot, PlayerController player,
-        TileWorld world, bool atHitPoint, GridPos? originOverride)
+        TileWorld3D world, bool atHitPoint, GridPos? originOverride)
     {
         switch (actionId)
         {
@@ -474,14 +474,14 @@ public static class SpellCaster
         }
     }
 
-    private static void ExecuteArea(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    private static void ExecuteArea(SpellSlot slot, PlayerController player, TileWorld3D world, GridPos? originOverride)
     {
         // TODO-STUB: 範圍形狀施放（扇形/周身/遠距圓形/射線衝擊），目前以爆炸佔位
         var origin = originOverride ?? player.Position;
         world.Explode(origin.X, origin.Y, 2);
     }
 
-    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld3D world, GridPos? originOverride)
     {
         // TODO-STUB: 投射物技能因子（能量/實物投射），目前以爆炸佔位
         var origin = originOverride ?? player.Position;
@@ -518,7 +518,7 @@ public static class SpellCaster
 
     // ── 武技 ──────────────────────────────────────────────────────
 
-    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld3D world,
         bool atHitPoint = false, GridPos? originOverride = null)
     {
         var m = ReadMods(slot);
@@ -606,7 +606,7 @@ public static class SpellCaster
         }
     }
 
-    private static void ApplyElement(TileWorld world, GridPos pos, int radius, in Mods m)
+    private static void ApplyElement(TileWorld3D world, GridPos pos, int radius, in Mods m)
     {
         if (m.Fire)  world.SpawnEffect("fire",  pos, new Dictionary<string, object?> { ["radius"] = radius });
         if (m.Water) world.SpawnEffect("water", pos, new Dictionary<string, object?> { ["radius"] = radius });
@@ -614,7 +614,7 @@ public static class SpellCaster
 
     // ── 變幻 ──────────────────────────────────────────────────────
 
-    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var p = originOverride ?? player.Position;
@@ -635,7 +635,7 @@ public static class SpellCaster
 
     // ── 位移 ──────────────────────────────────────────────────────
 
-    private static void ExecuteDisplacement(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteDisplacement(SpellSlot slot, PlayerController player, TileWorld3D world)
     {
         int fx = player.Facing.X, fy = player.Facing.Y;
         switch (slot.Totem!.Id)
@@ -668,7 +668,7 @@ public static class SpellCaster
 
     // ── 召喚 ──────────────────────────────────────────────────────
 
-    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var origin = originOverride ?? player.Position;
@@ -691,7 +691,7 @@ public static class SpellCaster
 
     // ── 領域 ──────────────────────────────────────────────────────
 
-    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var pos = originOverride ?? player.Position;

@@ -597,6 +597,13 @@ public sealed class TileWorld3D : IWorldInterface
     public bool InBounds(int x, int y, int z) =>
         (uint)x < (uint)Width && (uint)y < (uint)Height && (uint)z < (uint)Depth;
 
+    // Phase 2-B：2D 相容性 shim（SideScroll2D = Z=0 平面）
+    public MaterialType TypeAt(int x, int y) => GetTile(x, y, 0);
+    public bool InBoundsPublic(int x, int y) => InBounds(x, y, 0);
+    public void Set(int x, int y, MaterialType type) => SetTile(x, y, 0, type);
+    public void ApplyElementalImpact(int x, int y, ElementType elem) => ApplyElementalImpact(x, y, 0, elem);
+    public void Explode(int cx, int cy, int r) => Explode(cx, cy, 0, r);
+
     public IReadOnlyDictionary<Vector3I, Chunk3D> ActiveChunks => _chunks;
 
     private Chunk3D GetOrCreateChunk(Vector3I coord)

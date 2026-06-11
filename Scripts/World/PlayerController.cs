@@ -173,7 +173,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     /// · 氧氣：站在 Water 格 → 缺氧
     /// · 體溫：基礎室溫 + 元素 Aura 溫度偏移（Fire 加熱 / Ice‧Water 降溫）
     /// </summary>
-    public void UpdateEnvironment(TileWorld world)
+    public void UpdateEnvironment(TileWorld3D world)
     {
         var tile = world.TypeAt(Position.X, Position.Y);
         State.IsOxygenDeprived  = tile == MaterialType.Water;
@@ -193,7 +193,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     }
 
     // 水平移動（A/D），同時更新朝向
-    public bool TryMove(TileWorld world, int dx, int dy)
+    public bool TryMove(TileWorld3D world, int dx, int dy)
     {
         if (!CanMove || Aura.IsImmobilized) return false;
         var next = new GridPos(Position.X + dx, Position.Y + dy);
@@ -207,7 +207,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     }
 
     // 重力 + 跳躍物理（每幀由 Main._Process 呼叫）
-    public void ApplyPhysics(TileWorld world, float delta)
+    public void ApplyPhysics(TileWorld3D world, float delta)
     {
         _vy     = Math.Clamp(_vy + Gravity * delta, -MaxFallSpeed, MaxFallSpeed);
         _fractY += _vy * delta;
@@ -235,7 +235,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
         { _vy = 0f; _fractY = 0f; }
     }
 
-    public bool IsOnGround(TileWorld world)
+    public bool IsOnGround(TileWorld3D world)
     {
         var below = new GridPos(Position.X, Position.Y + 1);
         return world.TypeAt(below.X, below.Y) != MaterialType.Air;
@@ -286,7 +286,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     }
 
     // 回傳 true 代表本幀破壞了方塊
-    public bool TickMining(TileWorld world, GridPos target, float delta)
+    public bool TickMining(TileWorld3D world, GridPos target, float delta)
     {
         var mat  = world.TypeAt(target.X, target.Y);
         var data = MaterialRegistry.Get(mat);

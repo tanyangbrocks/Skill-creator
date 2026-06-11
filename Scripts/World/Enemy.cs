@@ -175,7 +175,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     // ── 每幀更新 ──────────────────────────────────────────────────
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         Aura.Process(delta, this);
         ApplyGravity(world, delta);
@@ -197,7 +197,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     // ── Melee ─────────────────────────────────────────────────────
 
-    private void UpdateMelee(TileWorld world, PlayerController player,
+    private void UpdateMelee(TileWorld3D world, PlayerController player,
         float delta, int dist, int dx)
     {
         State = dist <= AttackRange ? EnemyState.Attack
@@ -228,7 +228,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     private const int RangedPreferredDist = 8;
 
-    private void UpdateRanged(TileWorld world, PlayerController player,
+    private void UpdateRanged(TileWorld3D world, PlayerController player,
         float delta, int dist, int dx)
     {
         if (dist > DetectRange) { State = EnemyState.Idle; return; }
@@ -270,7 +270,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     // ── Patrol ────────────────────────────────────────────────────
 
-    private void UpdatePatrol(TileWorld world, PlayerController player,
+    private void UpdatePatrol(TileWorld3D world, PlayerController player,
         float delta, int dist, int dx)
     {
         if (dist <= AttackRange)
@@ -321,7 +321,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     // ── Heavy ─────────────────────────────────────────────────────
 
-    private void UpdateHeavy(TileWorld world, PlayerController player,
+    private void UpdateHeavy(TileWorld3D world, PlayerController player,
         float delta, int dist, int dx)
     {
         State = dist <= AttackRange ? EnemyState.Attack
@@ -350,7 +350,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     // ── 共用工具 ──────────────────────────────────────────────────
 
-    private void TryMoveX(TileWorld world, int dx)
+    private void TryMoveX(TileWorld3D world, int dx)
     {
         if (dx == 0) return;
         var next = new GridPos(Position.X + dx, Position.Y);
@@ -358,7 +358,7 @@ public class Enemy : IElementalTarget, ISnapshottable
             Position = next;
     }
 
-    private void ApplyGravity(TileWorld world, float delta)
+    private void ApplyGravity(TileWorld3D world, float delta)
     {
         _vy     = Math.Min(_vy + Gravity * delta, MaxFallSpeed);
         _fractY += _vy * delta;
