@@ -640,7 +640,8 @@ public partial class AbilityEditorUI : Control
     // 刻印庫（依子標籤過濾，點擊加入 Engraving 積木）
     private void BuildEngraveContent(int subIdx)
     {
-        var colorOrder = new[] { EngraveColor.White, EngraveColor.Orange, EngraveColor.Blue, EngraveColor.Red,
+        var colorOrder = new[] { EngraveColor.Action,
+                                  EngraveColor.White, EngraveColor.Orange, EngraveColor.Blue, EngraveColor.Red,
                                   EngraveColor.Green, EngraveColor.Purple, EngraveColor.Yellow, EngraveColor.Black,
                                   EngraveColor.Elemental, EngraveColor.Law };
         var filterColor = subIdx < colorOrder.Length ? colorOrder[subIdx] : colorOrder[0];

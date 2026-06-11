@@ -159,11 +159,50 @@ public partial class ScriptCanvas : Control
             {
                 UpdatePalettePreview(mm.GlobalPosition);
             }
+            // 圖騰拖曳中：高亮所有 TotemDropZone
+            if (IsTotemDragging())
+                UpdateTotemZoneHighlight(mm.GlobalPosition);
+            else
+                ClearTotemZoneHighlights();
             return;
         }
 
         if (@event is InputEventMouseButton mb && !mb.Pressed && mb.ButtonIndex == MouseButton.Left)
         {
+            // 圖騰 script 拖到 InvokeTotem 插槽 → 綁定（保留圖騰積木不移除）
+            if (_dragging != null && _dragging.Blocks.Count > 0 &&
+                _dragging.Blocks[0].Type == BlockType.Totem)
+            {
+                foreach (var zone in TotemDropZone.ActiveZones)
+                {
+                    if (!zone.GetGlobalRect().HasPoint(mb.GlobalPosition)) continue;
+                    zone.Bind(_dragging.Blocks[0]);
+                    ClearTotemZoneHighlights();
+                    _snapHL.Visible = false;
+                    _dragging.ZIndex = 0;
+                    _dragging = null;
+                    Changed?.Invoke();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+
+            // 調色盤 Totem 積木拖到 InvokeTotem 插槽 → 綁定（不在畫布新增積木）
+            if (BlockDrag.Active && BlockDrag.Block?.Type == BlockType.Totem)
+            {
+                foreach (var zone in TotemDropZone.ActiveZones)
+                {
+                    if (!zone.GetGlobalRect().HasPoint(mb.GlobalPosition)) continue;
+                    zone.Bind(BlockDrag.Block);
+                    ClearTotemZoneHighlights();
+                    HidePalettePreview();
+                    BlockDrag.Clear();
+                    Changed?.Invoke();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+
             // Palette drop on canvas
             if (BlockDrag.Active && BlockDrag.SourceList == null && BlockDrag.Block != null)
             {
@@ -187,6 +226,22 @@ public partial class ScriptCanvas : Control
                 GetViewport().SetInputAsHandled();
             }
         }
+    }
+
+    private bool IsTotemDragging() =>
+        (_dragging != null && _dragging.Blocks.Count > 0 && _dragging.Blocks[0].Type == BlockType.Totem) ||
+        (BlockDrag.Active && BlockDrag.Block?.Type == BlockType.Totem);
+
+    private void UpdateTotemZoneHighlight(Vector2 mouseGlobal)
+    {
+        foreach (var zone in TotemDropZone.ActiveZones)
+            zone.SetHighlight(zone.GetGlobalRect().HasPoint(mouseGlobal));
+    }
+
+    private void ClearTotemZoneHighlights()
+    {
+        foreach (var zone in TotemDropZone.ActiveZones)
+            zone.SetHighlight(false);
     }
 
     private void UpdateSnapHighlight(Vector2 mouseGlobal)
