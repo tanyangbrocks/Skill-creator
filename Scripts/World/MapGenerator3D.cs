@@ -178,7 +178,9 @@ public static class MapGenerator3D
     private static GridPos EnsureConnectivity(
         TileWorld3D world, int[,] heights, int W, int H, int D, Random rng)
     {
-        int midX = W / 2, midZ = D / 2;
+        // Z=0 = SideScroll2D 的 2D 物理平面；TypeAt(x,y) shim 固定查 Z=0，
+        // 出生點必須在同一平面，否則 TryMove/ApplyPhysics 碰撞永遠與玩家位置不符。
+        int midX = W / 2, midZ = 0;
         int spawnY   = Math.Max(0, heights[midX, midZ] - 1);
         var start    = new GridPos(midX, spawnY, midZ);
         var visited  = FloodFill3D(world, start, W, H, D);

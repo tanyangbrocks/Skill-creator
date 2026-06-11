@@ -6,14 +6,14 @@ using Godot;
 /// Phase 2-A：四視角鏡頭控制器。
 /// 掛在玩家附近的 Node3D 上；Tab 鍵循環切換模式。
 /// 世界座標：Y+ = 向下（CA 重力方向），因此世界「上方」= -Y。
-/// Phase 2-C：加入滑鼠捕捉 + pitch 旋轉。
+/// Phase 2-C：右鍵拖曳旋轉（不捕捉滑鼠），加入 pitch 控制。
 /// </summary>
 public partial class CameraController : Node3D
 {
     public enum CameraMode
     {
-        ThirdPerson,   // 第三人稱（SpringArm 風格，滑鼠旋轉）
-        FirstPerson,   // 第一人稱（眼睛高度，滑鼠旋轉）
+        ThirdPerson,   // 第三人稱（SpringArm 風格，右鍵拖曳旋轉）
+        FirstPerson,   // 第一人稱（眼睛高度，右鍵拖曳旋轉）
         Isometric,     // 俯視 45°/等角（正交投影）
         SideScroll2D,  // 2D 側捲（正交投影，沿 -Z 看，Z=0 鎖定玩家）
     }
@@ -28,6 +28,14 @@ public partial class CameraController : Node3D
     [Export] public float OrthoSize     = 30f;   // 正交投影尺寸（tiles）
     [Export] public float SideDist      = 40f;   // 2D 視角相機距離（沿 +Z 偏移）
     [Export] public float MouseSens     = 0.25f; // 滑鼠靈敏度（TPS/FPS）
+
+    /// <summary>
+    /// 是否在旋轉時隱藏游標（Captured 模式）。
+    /// 預設 false；未來由「設定」面板控制。
+    /// true  → Captured 模式：游標隱藏，不需按住按鈕，無邊界限制。
+    /// false → Visible 模式：右鍵按住拖曳旋轉，游標始終可見。
+    /// </summary>
+    public bool HideCursorOnLook { get; set; } = false;
 
     // ── 狀態 ─────────────────────────────────────────────────────────────────
     public CameraMode Mode { get; private set; } = CameraMode.ThirdPerson;
@@ -62,7 +70,7 @@ public partial class CameraController : Node3D
 
     public override void _UnhandledInput(InputEvent ev)
     {
-        // Escape：釋放滑鼠捕捉（不切換視角，只解除 Captured 讓滑鼠可操作 HUD）
+        // Escape：若在 Captured 模式中釋放游標（不切換視角）
         if (ev is InputEventKey ek && ek.Pressed && !ek.Echo && ek.Keycode == Key.Escape
             && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
@@ -79,11 +87,18 @@ public partial class CameraController : Node3D
             return;
         }
 
-        // 滑鼠移動：TPS / FPS 水平 + 垂直旋轉（需要 Captured 模式）
+        // 滑鼠移動：TPS / FPS 水平 + 垂直旋轉
+        // HideCursorOnLook=true  → Captured 模式，持續旋轉（不需按鍵）
+        // HideCursorOnLook=false → Visible 模式，右鍵按住拖曳旋轉
         if (ev is InputEventMouseMotion mm &&
-            Input.MouseMode == Input.MouseModeEnum.Captured &&
             Mode is CameraMode.ThirdPerson or CameraMode.FirstPerson)
         {
+            bool canRotate = HideCursorOnLook
+                ? Input.MouseMode == Input.MouseModeEnum.Captured
+                : Input.IsMouseButtonPressed(MouseButton.Right);
+
+            if (!canRotate) return;
+
             _yaw -= mm.Relative.X * MouseSens;
 
             // 滑鼠向上（Relative.Y < 0）→ 仰角增加（TPS 更高）／FPS 向上看
@@ -126,11 +141,18 @@ public partial class CameraController : Node3D
     }
 
     /// <summary>
-    /// 依當前視角自動管理滑鼠捕捉：TPS/FPS=Captured；Iso/SideScroll2D=Visible。
+    /// 依 HideCursorOnLook 與當前視角決定滑鼠模式。
     /// Main.cs 在切換編輯器狀態時也可主動呼叫。
     /// </summary>
     public void ApplyMouseCapture()
     {
+        if (!HideCursorOnLook)
+        {
+            // 可見模式：始終 Visible，旋轉靠右鍵按住
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+            return;
+        }
+        // 隱藏模式：TPS/FPS 自動捕捉，其餘釋放
         Input.MouseMode = Mode is CameraMode.ThirdPerson or CameraMode.FirstPerson
             ? Input.MouseModeEnum.Captured
             : Input.MouseModeEnum.Visible;
@@ -201,8 +223,8 @@ public partial class CameraController : Node3D
 
     private string ModeLabel() => Mode switch
     {
-        CameraMode.ThirdPerson  => "第三人稱",
-        CameraMode.FirstPerson  => "第一人稱",
+        CameraMode.ThirdPerson  => "第三人稱（右鍵拖曳旋轉）",
+        CameraMode.FirstPerson  => "第一人稱（右鍵拖曳旋轉）",
         CameraMode.Isometric    => "俯視 45°",
         CameraMode.SideScroll2D => "2D 側捲",
         _                       => Mode.ToString(),

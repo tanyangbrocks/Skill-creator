@@ -436,6 +436,7 @@ public partial class Main : Node
         BuildEquipPanel(hud);
         BuildFloatTooltip(hud);
         BuildDragIcon(hud);
+        BuildCrosshair(hud);
 
         // 畫筆模式指示器（F1 切換時顯示）
         _paintModeLabel = new Label();
@@ -821,7 +822,9 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
+        // 放置只在 SideScroll2D 模式生效；TPS/FPS 右鍵保留給鏡頭旋轉
+        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen
+            && _camera3d.Mode == CameraController.CameraMode.SideScroll2D)
         {
             var target = _player.MouseGridPos;
             var active = _player.Inventory.ActiveItem;
@@ -1106,6 +1109,32 @@ public partial class Main : Node
         _dragFloatIcon.Visible     = false;
         _dragFloatIcon.AddThemeStyleboxOverride("panel", _dragFloatStyle);
         hud.AddChild(_dragFloatIcon);
+    }
+
+    // ── 準心（Phase 2-C）────────────────────────────────────────────────────
+    private void BuildCrosshair(CanvasLayer hud)
+    {
+        var white = new StyleBoxFlat { BgColor = new Color(1f, 1f, 1f, 0.75f) };
+        var dark  = new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0.45f) };
+
+        // 黑色陰影（+1px 偏移，提升在亮色背景的可見度）
+        foreach (var (size, offset, style) in new (Vector2, Vector2, StyleBoxFlat)[]
+        {
+            (new Vector2(22f, 3f), new Vector2(-10f,  0f), dark),
+            (new Vector2( 3f,22f), new Vector2(  0f,-10f), dark),
+            (new Vector2(20f, 2f), new Vector2(-10f, -1f), white),
+            (new Vector2( 2f,20f), new Vector2( -1f,-10f), white),
+        })
+        {
+            var p = new Panel();
+            p.AnchorLeft = p.AnchorRight  = 0.5f;
+            p.AnchorTop  = p.AnchorBottom = 0.5f;
+            p.Size       = size;
+            p.Position   = offset;
+            p.AddThemeStyleboxOverride("panel", style);
+            p.MouseFilter = Control.MouseFilterEnum.Ignore;
+            hud.AddChild(p);
+        }
     }
 
     private int GetInvSlotUnderMouse()
