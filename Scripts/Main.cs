@@ -191,6 +191,7 @@ public partial class Main : Node
     {
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
         _world3d = new TileWorld3D(WorldW, WorldH, WorldD);
+        _world3d.InitGpu(64, WorldH, 64); // Phase 3 #2：GPU Compute Shader CA
         _mapGen   = new MapGenerator3D();
         var spawnData = _mapGen.Generate(_world3d);
 

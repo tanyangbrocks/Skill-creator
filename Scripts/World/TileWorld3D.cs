@@ -22,6 +22,10 @@ public sealed class TileWorld3D : IWorldInterface
     private readonly Random _rng = new(42);
     private int _frame;
 
+    // ── GPU CA 模擬器（Phase 3 優化）──────────────────────────────────────
+    private CaGpuSimulator? _gpuSim;
+    private int _gpuOriginX, _gpuOriginY, _gpuOriginZ;
+
     private static readonly (int dx, int dy, int dz)[] _neighbors6 =
     {
         ( 0, +1,  0), // 下（Y+）
@@ -51,6 +55,32 @@ public sealed class TileWorld3D : IWorldInterface
     }
 
     // ════════════════════════════════════════════════════════════
+    //  GPU CA 初始化（可選，失敗自動回退 CPU）
+    // ════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 初始化 GPU Compute Shader CA。
+    /// aw×ah×ad = 主動模擬區域尺寸（世界格）。
+    /// 建議：64×Height×64 或 128×Height×128。
+    /// </summary>
+    public void InitGpu(int aw, int ah, int ad)
+    {
+        _gpuSim?.Dispose();
+        _gpuSim = new CaGpuSimulator();
+        _gpuSim.Initialize(aw, ah, ad);
+        if (!_gpuSim.IsAvailable)
+        {
+            _gpuSim.Dispose();
+            _gpuSim = null;
+            GD.Print("[TileWorld3D] GPU CA 不可用，使用 CPU 路徑");
+        }
+        else
+        {
+            GD.Print($"[TileWorld3D] GPU CA 已啟用：{aw}×{ah}×{ad}");
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
     //  實體佔用登記（Phase 2 由渲染層每幀呼叫）
     // ════════════════════════════════════════════════════════════
 
@@ -71,12 +101,38 @@ public sealed class TileWorld3D : IWorldInterface
         bool xFirst = (_frame % 2 == 0);
         bool zFirst = (_frame % 4 < 2);
 
+        // ── GPU Pass：Powder + Liquid 重力（主動區域，整體批次）──────────
+        bool gpuActive = false;
+        if (_gpuSim != null && _gpuSim.IsAvailable && centerCX >= 0)
+        {
+            // 主動區域起點（以玩家所在 chunk 中心對齊）
+            int wx0 = centerCX * Chunk3D.Size - _gpuSim.AW / 2;
+            int wy0 = 0;                                            // 全高度
+            int wz0 = centerCZ >= 0
+                ? centerCZ * Chunk3D.Size - _gpuSim.AD / 2
+                : Depth / 2 - _gpuSim.AD / 2;
+
+            // 夾到世界邊界
+            wx0 = Math.Clamp(wx0, 0, Math.Max(0, Width  - _gpuSim.AW));
+            wz0 = Math.Clamp(wz0, 0, Math.Max(0, Depth  - _gpuSim.AD));
+            wy0 = Math.Clamp(wy0, 0, Math.Max(0, Height - _gpuSim.AH));
+
+            _gpuOriginX = wx0;
+            _gpuOriginY = wy0;
+            _gpuOriginZ = wz0;
+
+            _gpuSim.Upload(this, wx0, wy0, wz0);
+            _gpuSim.Simulate((uint)_frame);
+            _gpuSim.Download(this, wx0, wy0, wz0);
+            gpuActive = true;
+        }
+
+        // ── CPU Pass：Gas + Static（全部）+ Powder/Liquid（GPU 區域外）──
         // 快照本幀 dirty chunk 並立即清除（Tick 期間新產生的 dirty = 下幀標記）
         var toProcess = new List<(Vector3I coord, Chunk3D chunk)>();
         foreach (var (coord, chunk) in _chunks)
         {
             if (!chunk.IsDirty) continue;
-            // 距離裁剪：超出模擬半徑的 chunk 保持 dirty 留到玩家走近再處理
             if (simRadius >= 0 && centerCX >= 0)
             {
                 int dx = Math.Abs(coord.X - centerCX);
@@ -98,7 +154,6 @@ public sealed class TileWorld3D : IWorldInterface
             int wy0 = coord.Y * Chunk3D.Size;
             int wz0 = coord.Z * Chunk3D.Size;
 
-            // 由 chunk 底部往上（高 ly = 底部）
             for (int ly = Chunk3D.Size - 1; ly >= 0; ly--)
             for (int lzi = 0; lzi < Chunk3D.Size; lzi++)
             for (int lxi = 0; lxi < Chunk3D.Size; lxi++)
@@ -111,13 +166,34 @@ public sealed class TileWorld3D : IWorldInterface
 
                 switch (MaterialRegistry.Get(GetTile(wx, wy, wz)).Physics)
                 {
-                    case PhysicsCategory.Powder: UpdatePowder(wx, wy, wz); break;
-                    case PhysicsCategory.Liquid: UpdateLiquid(wx, wy, wz); break;
+                    case PhysicsCategory.Powder:
+                        // GPU 已處理主動區域內的 Powder，只補跑區域外
+                        if (!gpuActive || !InGpuZone(wx, wy, wz))
+                            UpdatePowder(wx, wy, wz);
+                        break;
+
+                    case PhysicsCategory.Liquid:
+                        if (!gpuActive || !InGpuZone(wx, wy, wz))
+                            UpdateLiquid(wx, wy, wz);
+                        else
+                            CheckElementalCaReactions(wx, wy, wz); // 僅元素反應
+                        break;
+
                     case PhysicsCategory.Gas:    UpdateGas(wx, wy, wz);    break;
                     case PhysicsCategory.Static: UpdateStatic(wx, wy, wz); break;
                 }
             }
         }
+    }
+
+    // ── GPU 區域邊界判斷 ──────────────────────────────────────────────────
+
+    private bool InGpuZone(int x, int y, int z)
+    {
+        if (_gpuSim == null) return false;
+        return x >= _gpuOriginX && x < _gpuOriginX + _gpuSim.AW
+            && y >= _gpuOriginY && y < _gpuOriginY + _gpuSim.AH
+            && z >= _gpuOriginZ && z < _gpuOriginZ + _gpuSim.AD;
     }
 
     // ── 粉末（沙，Y+ 向下重力 + 隨機斜向滑落）──────────────────────────
@@ -426,6 +502,21 @@ public sealed class TileWorld3D : IWorldInterface
 
     private void WriteCell(int x, int y, int z, TileCell cell)
     {
+        var coord = WorldToChunk(x, y, z);
+        var chunk = GetOrCreateChunk(coord);
+        var (lx, ly, lz) = WorldToLocal(x, y, z);
+        chunk.Cells[chunk.Idx(lx, ly, lz)] = cell;
+        chunk.MarkDirty(lx, ly, lz);
+    }
+
+    /// <summary>
+    /// GPU 下載專用寫入：跳過 Timer/Variant 的隨機重設，
+    /// 且不覆蓋有實體佔用的格子。
+    /// </summary>
+    public void SetCellFromGpu(int x, int y, int z, TileCell cell)
+    {
+        if (!InBounds(x, y, z)) return;
+        if (_occupied.Contains((x, y, z))) return; // 實體所在格保持原狀
         var coord = WorldToChunk(x, y, z);
         var chunk = GetOrCreateChunk(coord);
         var (lx, ly, lz) = WorldToLocal(x, y, z);
