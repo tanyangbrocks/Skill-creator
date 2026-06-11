@@ -61,7 +61,10 @@ public sealed class TileWorld3D : IWorldInterface
     //  模擬 Tick（Dirty Chunk 優先，由底往上掃）
     // ════════════════════════════════════════════════════════════
 
-    public void Tick()
+    /// <param name="centerCX">以玩家為中心的 Chunk X（超出半徑的 dirty chunk 暫不處理）</param>
+    /// <param name="centerCY">以玩家為中心的 Chunk Y</param>
+    /// <param name="simRadius">模擬半徑（chunk 單位，Chebyshev 距離；-1 = 全世界）</param>
+    public void Tick(int centerCX = -1, int centerCY = -1, int simRadius = -1)
     {
         _frame++;
         bool xFirst = (_frame % 2 == 0);
@@ -72,6 +75,13 @@ public sealed class TileWorld3D : IWorldInterface
         foreach (var (coord, chunk) in _chunks)
         {
             if (!chunk.IsDirty) continue;
+            // 距離裁剪：超出模擬半徑的 chunk 保持 dirty 留到玩家走近再處理
+            if (simRadius >= 0 && centerCX >= 0)
+            {
+                int dx = Math.Abs(coord.X - centerCX);
+                int dy = Math.Abs(coord.Y - centerCY);
+                if (dx > simRadius || dy > simRadius) continue;
+            }
             chunk.ClearDirty();
             chunk.ClearUpdated();
             toProcess.Add((coord, chunk));

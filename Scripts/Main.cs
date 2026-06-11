@@ -714,9 +714,18 @@ public partial class Main : Node
             _world3d.SetOccupied(_player.Position.X, _player.Position.Y, 0);
             foreach (var e in _enemies.Enemies)
                 if (e.IsAlive) _world3d.SetOccupied(e.Position.X, e.Position.Y, 0);
+
+            // 以玩家為中心的 Chunk 座標（裁剪用）
+            int pCX = _player.Position.X / Chunk3D.Size;
+            int pCY = _player.Position.Y / Chunk3D.Size;
+
             for (int _s = 0; _s < _simStepsPerFrame; _s++)
-                _world3d.Tick();
-            _renderer3d.RebuildDirtyMeshes(maxPerFrame: 30, sideScroll2D: true);
+                _world3d.Tick(centerCX: pCX, centerCY: pCY, simRadius: 6); // 半徑 6 chunk = 96 格
+
+            _renderer3d.RebuildDirtyMeshes(
+                maxPerFrame:  30,
+                sideScroll2D: true,
+                viewCX: pCX, viewCY: pCY, viewRadius: 5); // 半徑 5 chunk = 80 格（≈畫面 1.5 倍）
         }
 
         _enemies.Update(_world3d, _player, dt);

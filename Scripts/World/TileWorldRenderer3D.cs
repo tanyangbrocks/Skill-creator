@@ -51,21 +51,33 @@ public partial class TileWorldRenderer3D : Node3D
 
     /// <summary>
     /// 每幀 Tick 後呼叫；重建 MeshNeedsRebuild=true 的 Chunk。
-    /// maxPerFrame：每幀最多重建幾個，避免首幀 hang（預設 30）。
-    /// sideScroll2D：只重建 chunk Z=0 的前排，其餘直接標為 clean 跳過。
+    /// maxPerFrame  ：每幀最多重建幾個，避免首幀 hang（預設 30）。
+    /// sideScroll2D ：只重建 chunk Z=0 的前排，其餘直接標為 clean 跳過。
+    /// viewCX/viewCY：視距中心（chunk 座標）；超出 viewRadius 的 chunk 延遲重建。
+    /// viewRadius   ：視距半徑（chunk 單位，Chebyshev 距離；-1 = 全世界）。
     /// </summary>
-    public void RebuildDirtyMeshes(int maxPerFrame = 30, bool sideScroll2D = false)
+    public void RebuildDirtyMeshes(
+        int maxPerFrame  = 30,
+        bool sideScroll2D = false,
+        int viewCX = -1, int viewCY = -1, int viewRadius = -1)
     {
         if (_world == null) return;
         int rebuilt = 0;
         foreach (var (coord, chunk) in _world.ActiveChunks)
         {
             if (!chunk.MeshNeedsRebuild) continue;
-            // SideScroll2D：只有 Z=0 那排 Chunk 是可見的，其餘直接跳過
+            // SideScroll2D：只有 Z=0 那排 Chunk 是可見的，其餘直接標 clean 跳過
             if (sideScroll2D && coord.Z != 0)
             {
                 chunk.MeshNeedsRebuild = false;
                 continue;
+            }
+            // 視距裁剪：超出範圍的 chunk 留到玩家走近再重建
+            if (viewRadius >= 0 && viewCX >= 0)
+            {
+                int dx = Math.Abs(coord.X - viewCX);
+                int dy = Math.Abs(coord.Y - viewCY);
+                if (dx > viewRadius || dy > viewRadius) continue;
             }
             RebuildChunk(coord, chunk);
             chunk.MeshNeedsRebuild = false;
