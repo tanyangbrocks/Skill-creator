@@ -53,15 +53,15 @@ W-6 採用**蒼究版本**（相容性判斷，非硬上限）：
 
 > ⚠️ 動程式碼前必須先確認。以下標注「待確認」的需要設計決策。
 
-### 決策 A：法陣如何選擇 ManaType？【待確認】
+### 決策 A：技能整構如何選擇 ManaType？【待確認】
 
 | 選項 | 說明 | 代價 |
 |------|------|------|
 | A1. 自動用第 0 槽 | 最簡單，無選擇 | 多槽意義小 |
-| **A2. 法陣設定中選 ManaType（下拉）** | 玩家可指定每個法陣用哪種 MP | 要改 AbilityEditorUI |
-| A3. 圖騰決定 ManaType | 詭道圖騰 → 詭道 MP，天然對應 | TotemLibrary 加欄位 |
+| **A2. 技能整構設定中選 ManaType（下拉）** | 玩家可指定每個技能整構用哪種 MP | 要改 AbilityEditorUI |
+| A3. 技能因子決定 ManaType | 詭道技能因子 → 詭道 MP，天然對應 | TotemLibrary 加欄位 |
 
-**推薦 A2**：法陣層選擇，詭道作預設值，玩家可覆蓋。
+**推薦 A2**：技能整構層選擇，詭道作預設值，玩家可覆蓋。
 
 ---
 
@@ -281,7 +281,7 @@ public bool UseEnergyBottle(ItemId bottleId, int slotIndex);
 
 2. **HUD 多條 MP 排版** — 3 條並排還是堆疊，需要 UI 決策（決策 E）。
 
-3. **SpellArray + AbilityEditorUI 的 ManaType 選擇器** — 在法陣設定中加選擇 MP 類型的下拉，需改 UI（取決於決策 A）。
+3. **SpellArray + AbilityEditorUI 的 ManaType 選擇器** — 在技能整構設定中加選擇 MP 類型的下拉，需改 UI（取決於決策 A）。
 
 4. **18 種基礎 MP 的逐一定義** — 純內容工作，W-6A 只需要名稱 + 根源分組，詳細 gameplay 效果（仙道 MP 讓飛行更快等）留到各自的修煉系統實作時補。
 
