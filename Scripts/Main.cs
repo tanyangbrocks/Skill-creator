@@ -22,6 +22,11 @@ public partial class Main : Node
     private SpellListUI              _spellList  = null!;
     private PlayerController         _player     = null!;
     private EnemyManager             _enemies    = new();
+
+    // Phase 2-C：實體 3D 視覺（玩家 + 敵人）
+    private Node3D         _entitiesRoot = null!;         // 統一開關用父節點
+    private MeshInstance3D _playerMesh   = null!;
+    private readonly Dictionary<int, MeshInstance3D> _enemyMeshes = new();
     private readonly List<SpellProjectile> _projectiles = new();
     private readonly SpellRunner     _runner     = new();
     private readonly DroppedItemManager _droppedItems = new();
@@ -184,6 +189,21 @@ public partial class Main : Node
         // 遊戲預設使用 2D 側捲視角（Phase 2-B），Tab 可切換
         _camera3d.SetMode(CameraController.CameraMode.SideScroll2D);
         _camera3d.SetOrthoSize(_orthoZoom);
+
+        // ── 實體 3D 視覺（Phase 2-C）────────────────────────────────
+        _entitiesRoot = new Node3D();
+        AddChild(_entitiesRoot);
+
+        _playerMesh = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(0.65f, 0.9f, 0.65f) },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.25f, 0.55f, 1.0f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
+        };
+        _entitiesRoot.AddChild(_playerMesh);
 
         // ── 玩家 ───────────────────────────────────────────────
         _player = new PlayerController(spawnData.PlayerSpawn);
@@ -739,6 +759,10 @@ public partial class Main : Node
         // 物理
         _player.ApplyPhysics(_world3d, dt);
 
+        // Phase 2-C：更新玩家與敵人的 3D 視覺位置
+        _playerMesh.Position = new Vector3(_player.Position.X + 0.5f, _player.Position.Y + 0.45f, 0.5f);
+        SyncEnemyMeshes();
+
         // 鏡頭跟隨玩家（CameraController 接管，只需更新目標位置）
         _camera3d.TargetPosition = new Vector3(
             _player.Position.X + 0.5f, _player.Position.Y + 0.5f, 0f);
@@ -1139,6 +1163,48 @@ public partial class Main : Node
             _enemies.Spawn(pos, type);
     }
 
+    // Phase 2-C：敵人 3D Mesh 同步（建立 / 更新位置 / 隱藏死亡者）
+    private void SyncEnemyMeshes()
+    {
+        foreach (var e in _enemies.Enemies)
+        {
+            if (!_enemyMeshes.TryGetValue(e.Id, out var mesh))
+            {
+                mesh = CreateEnemyMesh(e.Type);
+                _entitiesRoot.AddChild(mesh);
+                _enemyMeshes[e.Id] = mesh;
+            }
+            mesh.Visible  = e.IsAlive;
+            if (!e.IsAlive) continue;
+
+            float mh = e.Type is EnemyType.Heavy ? 1.8f : 0.9f;
+            mesh.Position = new Vector3(e.Position.X + 0.5f, e.Position.Y + mh * 0.5f, 0.5f);
+        }
+    }
+
+    private static MeshInstance3D CreateEnemyMesh(EnemyType type)
+    {
+        float w = type is EnemyType.Heavy ? 1.55f : 0.70f;
+        float h = type is EnemyType.Heavy ? 1.80f : 0.90f;
+        var col = type switch
+        {
+            EnemyType.Melee  => new Color(0.90f, 0.15f, 0.15f), // 紅
+            EnemyType.Ranged => new Color(0.90f, 0.50f, 0.10f), // 橙
+            EnemyType.Patrol => new Color(0.35f, 0.25f, 0.80f), // 藍紫
+            EnemyType.Heavy  => new Color(0.55f, 0.08f, 0.08f), // 暗紅
+            _                => new Color(0.60f, 0.60f, 0.60f),
+        };
+        return new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(w, h, w) },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = col,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
+        };
+    }
+
     private void ToggleEditor()
     {
         _editorOpen = !_editorOpen;
@@ -1147,14 +1213,17 @@ public partial class Main : Node
             _spellList.Refresh();
             _spellList.Visible = true;
             _editor.Visible    = false;
+            Input.MouseMode    = Input.MouseModeEnum.Visible; // 編輯器需要可見滑鼠
         }
         else
         {
             _spellList.Visible = false;
             _editor.Visible    = false;
+            _camera3d.ApplyMouseCapture(); // 回到遊戲，視角需要時重新捕捉
         }
-        _renderer3d.Visible = !_editorOpen;
-        _simPaused          = _editorOpen;
+        _renderer3d.Visible   = !_editorOpen;
+        _entitiesRoot.Visible = !_editorOpen;
+        _simPaused            = _editorOpen;
     }
 
     // 圓球列表：點擊主動技能圓球 → 進入對應槽位編輯

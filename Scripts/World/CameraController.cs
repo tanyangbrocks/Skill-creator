@@ -6,20 +6,20 @@ using Godot;
 /// Phase 2-A：四視角鏡頭控制器。
 /// 掛在玩家附近的 Node3D 上；Tab 鍵循環切換模式。
 /// 世界座標：Y+ = 向下（CA 重力方向），因此世界「上方」= -Y。
+/// Phase 2-C：加入滑鼠捕捉 + pitch 旋轉。
 /// </summary>
 public partial class CameraController : Node3D
 {
     public enum CameraMode
     {
-        ThirdPerson,   // 第三人稱（SpringArm 風格，可水平旋轉）
-        FirstPerson,   // 第一人稱（眼睛高度，隨 _yaw 轉向）
+        ThirdPerson,   // 第三人稱（SpringArm 風格，滑鼠旋轉）
+        FirstPerson,   // 第一人稱（眼睛高度，滑鼠旋轉）
         Isometric,     // 俯視 45°/等角（正交投影）
         SideScroll2D,  // 2D 側捲（正交投影，沿 -Z 看，Z=0 鎖定玩家）
     }
 
     // ── 可調參數 ─────────────────────────────────────────────────────────────
     [Export] public float TpsArmLength  = 12f;   // 第三人稱臂長
-    [Export] public float TpsPitchDeg   = 30f;   // 第三人稱俯仰角（0=水平，90=正上方）
     [Export] public float FpEyeY        = -1.5f; // 第一人稱眼睛 Y 偏移（Y+=向下，故眼睛在 -Y）
     [Export] public float IsoArmLength  = 25f;   // 等角臂長
     [Export] public float IsoPitchDeg   = 45f;   // 等角俯仰角
@@ -39,7 +39,8 @@ public partial class CameraController : Node3D
     public Vector3 TargetPosition { get; set; }
 
     private Camera3D _cam = null!;
-    private float    _yaw; // 水平旋轉角（度），TPS / FPS 共用
+    private float    _yaw;         // 水平旋轉角（度），TPS / FPS 共用
+    private float    _pitch = 25f; // TPS 仰角（5~85°）/ FPS 俯仰（-80~80°）
 
     // ── 生命週期 ─────────────────────────────────────────────────────────────
 
@@ -61,6 +62,15 @@ public partial class CameraController : Node3D
 
     public override void _UnhandledInput(InputEvent ev)
     {
+        // Escape：釋放滑鼠捕捉（不切換視角，只解除 Captured 讓滑鼠可操作 HUD）
+        if (ev is InputEventKey ek && ek.Pressed && !ek.Echo && ek.Keycode == Key.Escape
+            && Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
         // Tab：循環切換視角
         if (ev is InputEventKey k && k.Pressed && !k.Echo && k.Keycode == Key.Tab)
         {
@@ -69,12 +79,17 @@ public partial class CameraController : Node3D
             return;
         }
 
-        // 滑鼠移動：TPS / FPS 水平旋轉（需要 Captured 模式）
+        // 滑鼠移動：TPS / FPS 水平 + 垂直旋轉（需要 Captured 模式）
         if (ev is InputEventMouseMotion mm &&
             Input.MouseMode == Input.MouseModeEnum.Captured &&
             Mode is CameraMode.ThirdPerson or CameraMode.FirstPerson)
         {
             _yaw -= mm.Relative.X * MouseSens;
+
+            // 滑鼠向上（Relative.Y < 0）→ 仰角增加（TPS 更高）／FPS 向上看
+            float pMin = Mode is CameraMode.ThirdPerson ?  5f : -80f;
+            float pMax = Mode is CameraMode.ThirdPerson ? 85f :  80f;
+            _pitch = Math.Clamp(_pitch - mm.Relative.Y * MouseSens, pMin, pMax);
         }
     }
 
@@ -92,6 +107,7 @@ public partial class CameraController : Node3D
     {
         Mode = (CameraMode)(((int)Mode + 1) % 4);
         ApplyProjection();
+        ApplyMouseCapture();
         GD.Print($"[Camera] 切換到：{ModeLabel()}");
     }
 
@@ -99,6 +115,7 @@ public partial class CameraController : Node3D
     {
         Mode = m;
         ApplyProjection();
+        ApplyMouseCapture();
     }
 
     /// <summary>調整正交投影尺寸（縮放），只在正交模式下有效。</summary>
@@ -106,6 +123,17 @@ public partial class CameraController : Node3D
     {
         OrthoSize = size;
         ApplyProjection();
+    }
+
+    /// <summary>
+    /// 依當前視角自動管理滑鼠捕捉：TPS/FPS=Captured；Iso/SideScroll2D=Visible。
+    /// Main.cs 在切換編輯器狀態時也可主動呼叫。
+    /// </summary>
+    public void ApplyMouseCapture()
+    {
+        Input.MouseMode = Mode is CameraMode.ThirdPerson or CameraMode.FirstPerson
+            ? Input.MouseModeEnum.Captured
+            : Input.MouseModeEnum.Visible;
     }
 
     // ── 內部 ─────────────────────────────────────────────────────────────────
@@ -130,11 +158,10 @@ public partial class CameraController : Node3D
             case CameraMode.ThirdPerson:
             {
                 float y = Mathf.DegToRad(_yaw);
-                float p = Mathf.DegToRad(TpsPitchDeg);
-                // 相機在玩家的「上方後方」：Y- 方向（= 世界上方）
+                float p = Mathf.DegToRad(_pitch); // _pitch = 仰角（5~85°），0=水平
                 var offset = new Vector3(
                     MathF.Sin(y) * TpsArmLength * MathF.Cos(p),
-                    -MathF.Sin(p) * TpsArmLength,              // Y- = 上方
+                    -MathF.Sin(p) * TpsArmLength, // Y- = 上方（世界 Y+ 向下）
                     MathF.Cos(y) * TpsArmLength * MathF.Cos(p));
                 _cam.Position = offset;
                 _cam.LookAt(GlobalPosition, WorldUp);
@@ -144,8 +171,8 @@ public partial class CameraController : Node3D
             case CameraMode.FirstPerson:
             {
                 _cam.Position = new Vector3(0f, FpEyeY, 0f);
-                // 面向 _yaw 方向（繞 Y 軸旋轉，Y+ 向下）
-                _cam.Rotation = new Vector3(0f, Mathf.DegToRad(_yaw), 0f);
+                // _pitch > 0 = 向上看（Rotation.X 取負號：正值 = 向下看）
+                _cam.Rotation = new Vector3(Mathf.DegToRad(-_pitch), Mathf.DegToRad(_yaw), 0f);
                 break;
             }
 
@@ -165,7 +192,6 @@ public partial class CameraController : Node3D
             case CameraMode.SideScroll2D:
             {
                 // 相機在 +Z 側，面向 -Z（Godot 預設朝向），XY 平面可見
-                // 玩家 Z 鎖定邏輯由 PlayerController 負責（Phase 2-B 實作）
                 _cam.Position = new Vector3(0f, 0f, SideDist);
                 _cam.Rotation = Vector3.Zero; // 預設朝 -Z 看
                 break;
