@@ -18,8 +18,11 @@ using SkillCreator.AbilitySystem.VM;
 public partial class ScriptCanvas : Control
 {
     public event Action? Changed;
-    public Action<BlockNode>? BlockDoubleClicked  { get; set; }
-    public Action<BlockNode>? PaletteBlockDropped { get; set; }
+    public Action<BlockNode>?          BlockDoubleClicked  { get; set; }
+    public Action<BlockNode, Vector2>? PaletteBlockDropped { get; set; }
+
+    public void SpawnPaletteScript(List<BlockNode> blocks, Vector2 localPos)
+        => SpawnScript(blocks, localPos, isMain: false);
 
     private List<BlockNode>                       _blocks     = new();
     private Func<List<(string, string)>>?         _getSlotOpts;
@@ -210,11 +213,11 @@ public partial class ScriptCanvas : Control
                 HidePalettePreview();
                 if (GetGlobalRect().HasPoint(mb.GlobalPosition))
                 {
+                    var localPos = mb.GlobalPosition - GlobalPosition;
                     if (PaletteBlockDropped != null)
-                        PaletteBlockDropped(BlockDrag.Block);
+                        PaletteBlockDropped(BlockDrag.Block, localPos);
                     else
-                        SpawnScript(new List<BlockNode> { BlockDrag.Block },
-                                    mb.GlobalPosition - GlobalPosition, isMain: false);
+                        SpawnScript(new List<BlockNode> { BlockDrag.Block }, localPos, isMain: false);
                 }
                 BlockDrag.Clear();
                 GetViewport().SetInputAsHandled();

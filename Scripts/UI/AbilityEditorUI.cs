@@ -706,27 +706,41 @@ public partial class AbilityEditorUI : Control
             RefreshDescription();
             if (inserted) SyncCanvas();
         };
-        // 調色盤拖放落點 → 路由至對應 Add 方法，行為與點擊按鈕完全一致
-        _canvas.PaletteBlockDropped = node =>
+        // 調色盤拖放落點 → 技能因子：浮動積木停在落點並預插動作刻印；其餘積木：浮動積木
+        _canvas.PaletteBlockDropped = (node, localPos) =>
         {
             if (node.Type == BlockType.Totem)
             {
                 string tid = node.Params.TryGetValue("totemId", out var tv) ? tv?.ToString() ?? "" : "";
-                if (tid == "custom")
-                    AddCustomTotemBlock();
+                node.Params["_actInserted"] = (object?)true;  // 防 Changed 後重複插入
+                var blocks = new List<BlockNode> { node };
+                if (EditorSettings.AutoInsertBaseEngraving
+                    && TotemLibrary.DefaultActionEngraveId.TryGetValue(tid, out var actId))
+                {
+                    blocks.Add(new BlockNode
+                    {
+                        Type   = BlockType.Engraving,
+                        Params = new Dictionary<string, object?> { ["engraveId"] = (object?)actId, ["pts"] = (object?)0f },
+                    });
+                }
+                if (_spell.Blocks.Count == 0)
+                {
+                    // 空白技能無主腳本可 snap → 直接加入，SyncCanvas 建立主腳本
+                    foreach (var b in blocks) _spell.Blocks.Add(b);
+                    SyncSlotsFromBlocks();
+                    SyncCanvas();
+                    RefreshCost();
+                    RefreshDescription();
+                }
                 else
                 {
-                    var t = TotemLibrary.AllTotems.FirstOrDefault(x => x.Id == tid);
-                    if (t != null) AddTotemBlock(t);
+                    // 已有技能 → 浮動積木停在落點，使用者手動拼接至主腳本
+                    _canvas.SpawnPaletteScript(blocks, localPos);
                 }
             }
             else
             {
-                _spell.Blocks.Add(node);
-                SyncSlotsFromBlocks();
-                SyncCanvas();
-                RefreshCost();
-                RefreshDescription();
+                _canvas.SpawnPaletteScript(new List<BlockNode> { node }, localPos);
             }
         };
         // 雙擊動作刻印積木 → 若為容器型 Action 刻印則進入容器效果編輯
