@@ -20,7 +20,7 @@ public partial class CameraController : Node3D
 
     // ── 可調參數 ─────────────────────────────────────────────────────────────
     [Export] public float TpsArmLength  = 12f;   // 第三人稱臂長
-    [Export] public float FpEyeY        = -1.5f; // 第一人稱眼睛 Y 偏移（Y+=向下，故眼睛在 -Y）
+    [Export] public float FpEyeY        = -0.3f; // 第一人稱眼睛 Y 偏移：相機在玩家格子中心往 -Y 偏 0.3，保持在格子內不踩整數邊界（player.Y + 0.2，視覺高度約 0.8 格）
     [Export] public float IsoArmLength  = 25f;   // 等角臂長
     [Export] public float IsoPitchDeg   = 45f;   // 等角俯仰角
     [Export] public float IsoYawDeg     = 45f;   // 等角水平旋轉角
@@ -39,6 +39,9 @@ public partial class CameraController : Node3D
 
     // ── 狀態 ─────────────────────────────────────────────────────────────────
     public CameraMode Mode { get; private set; } = CameraMode.ThirdPerson;
+
+    /// <summary>水平旋轉角（度）。180° = 相機在 -Z 側面向 +Z（預設）。供 Main.cs 計算相機相對移動方向。</summary>
+    public float Yaw => _yaw;
 
     /// <summary>設定此節點每幀跟隨的目標（玩家 Node3D）。</summary>
     public Node3D? Target { get; set; }
@@ -87,19 +90,13 @@ public partial class CameraController : Node3D
             return;
         }
 
-        // 滑鼠移動：TPS / FPS 水平 + 垂直旋轉
-        // HideCursorOnLook=true  → Captured 模式，持續旋轉（不需按鍵）
-        // HideCursorOnLook=false → Visible 模式，右鍵按住拖曳旋轉
+        // 滑鼠移動：TPS / FPS 水平 + 垂直旋轉（Captured 模式，游標隱藏時持續旋轉）
         if (ev is InputEventMouseMotion mm &&
             Mode is CameraMode.ThirdPerson or CameraMode.FirstPerson)
         {
-            bool canRotate = HideCursorOnLook
-                ? Input.MouseMode == Input.MouseModeEnum.Captured
-                : Input.IsMouseButtonPressed(MouseButton.Right);
+            if (Input.MouseMode != Input.MouseModeEnum.Captured) return;
 
-            if (!canRotate) return;
-
-            _yaw -= mm.Relative.X * MouseSens;
+            _yaw += mm.Relative.X * MouseSens; // +X = 向右，yaw 增加 = 視角右轉
             // 滑鼠向上（Relative.Y < 0）→ 仰角增加（TPS 更高 / FPS 向上看）
             _pitch = Math.Clamp(_pitch - mm.Relative.Y * MouseSens, -89f, 89f);
         }
@@ -190,8 +187,12 @@ public partial class CameraController : Node3D
             case CameraMode.FirstPerson:
             {
                 _cam.Position = new Vector3(0f, FpEyeY, 0f);
-                // _pitch > 0 = 向上看（Rotation.X 取負號：正值 = 向下看）
-                _cam.Rotation = new Vector3(Mathf.DegToRad(-_pitch), Mathf.DegToRad(_yaw), 0f);
+                // Ry(yaw) 讓相機朝向 (-sin yaw, 0, -cos yaw)，right = -X（yaw=180°時顛倒）
+                // Rz(180°) 翻轉 X/Y 軸：right → +X、up → -Y(WorldUp)，與 TPS LookAt 一致
+                _cam.Rotation = new Vector3(
+                    Mathf.DegToRad(-_pitch),
+                    Mathf.DegToRad(_yaw),
+                    Mathf.DegToRad(180f));
                 break;
             }
 
@@ -210,9 +211,10 @@ public partial class CameraController : Node3D
 
             case CameraMode.SideScroll2D:
             {
-                // 相機在 +Z 側，面向 -Z（Godot 預設朝向），XY 平面可見
-                _cam.Position = new Vector3(0f, 0f, SideDist);
-                _cam.Rotation = Vector3.Zero; // 預設朝 -Z 看
+                // 相機在 -Z 側，朝 +Z 看，WorldUp=(0,-1,0)
+                // → right=+X、screen-top=世界-Y（高地）= 重力方向正確
+                _cam.Position = new Vector3(0f, 0f, -SideDist);
+                _cam.LookAt(GlobalPosition, WorldUp);
                 break;
             }
         }

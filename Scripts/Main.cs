@@ -921,9 +921,8 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        // 放置只在 SideScroll2D 模式生效；TPS/FPS 右鍵保留給鏡頭旋轉
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen
-            && _camera3d.Mode == CameraController.CameraMode.SideScroll2D)
+        // 放置（右鍵，所有視角均可；TPS/FPS 目標定位待 Phase 2 尾款 Raycast 完成前以 MouseGridPos 近似）
+        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
             var target = _player.MouseGridPos;
             var active = _player.Inventory.ActiveItem;

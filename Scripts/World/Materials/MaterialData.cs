@@ -33,4 +33,17 @@ public record MaterialData(
     /// None = 無元素性（如空氣、灰燼）。
     /// </summary>
     public ElementType NativeElement { get; init; } = ElementType.None;
+
+    // ── 渲染屬性 ─────────────────────────────────────────────
+    /// <summary>
+    /// 材質不透明度（0 = 全透明，1 = 完全不透明）。
+    /// IsTransparent=true 的材質會走獨立的半透明 mesh pass（CullMode=Disabled + AlphaBlend）。
+    /// </summary>
+    public float Opacity       { get; init; } = 1.0f;
+
+    /// <summary>
+    /// 是否需要半透明渲染（水、火、蒸汽等）。
+    /// true → 進入透明 pass；false → 進入不透明 pass（CullMode=Back，效能較好）。
+    /// </summary>
+    public bool  IsTransparent { get; init; } = false;
 }

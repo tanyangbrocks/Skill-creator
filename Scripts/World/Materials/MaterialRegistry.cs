@@ -14,13 +14,13 @@ public static class MaterialRegistry
         Register(new MaterialData(MaterialType.Air,   "空氣",  new Color(0.10f, 0.10f, 0.13f), PhysicsCategory.Empty,  false, 0.0f,  0,   0  )
             { NativeElement = ElementType.None  });
         Register(new MaterialData(MaterialType.Water, "水",    new Color(0.18f, 0.42f, 0.82f), PhysicsCategory.Liquid, false, 4.0f,  0,   0  )
-            { NativeElement = ElementType.Water });
+            { NativeElement = ElementType.Water, IsTransparent = true, Opacity = 0.55f });
         Register(new MaterialData(MaterialType.Lava,  "岩漿", new Color(0.90f, 0.28f, 0.06f), PhysicsCategory.Liquid, false, 7.0f,  0,   0  )
             { NativeElement = ElementType.Fire  });
         Register(new MaterialData(MaterialType.Fire,  "火",    new Color(1.00f, 0.50f, 0.10f), PhysicsCategory.Gas,    false, 0.5f,  30,  90 )
-            { NativeElement = ElementType.Fire  });
+            { NativeElement = ElementType.Fire,  IsTransparent = true, Opacity = 0.65f });
         Register(new MaterialData(MaterialType.Steam, "蒸汽", new Color(0.70f, 0.80f, 0.90f), PhysicsCategory.Gas,    false, 0.2f,  60,  120)
-            { NativeElement = ElementType.Water });  // 蒸汽仍屬水元素（氣化的水）
+            { NativeElement = ElementType.Water, IsTransparent = true, Opacity = 0.35f });  // 蒸汽仍屬水元素（氣化的水）
 
         // 可採掘的材質：補上採掘屬性、掉落表與元素屬性
         Register(new MaterialData(MaterialType.Dirt,  "土",   new Color(0.48f, 0.34f, 0.20f), PhysicsCategory.Static, false, 8.0f,  0,   0  )
@@ -70,14 +70,16 @@ public static class MaterialRegistry
 
     public static MaterialData Get(MaterialType t) => _data[(int)t];
 
-    // 渲染顏色（加上 variant 微小色差，視覺更自然）
+    // 渲染顏色（加上 variant 微小色差，視覺更自然；alpha = 材質 Opacity）
     public static Color GetColor(MaterialType t, byte variant)
     {
-        var c = _data[(int)t].BaseColor;
-        float v = (variant / 255f) * 0.06f - 0.03f;
+        var data = _data[(int)t];
+        var c    = data.BaseColor;
+        float v  = (variant / 255f) * 0.06f - 0.03f;
         return new Color(
             Math.Clamp(c.R + v, 0f, 1f),
             Math.Clamp(c.G + v, 0f, 1f),
-            Math.Clamp(c.B + v, 0f, 1f));
+            Math.Clamp(c.B + v, 0f, 1f),
+            data.Opacity);
     }
 }
