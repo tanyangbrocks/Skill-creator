@@ -44,6 +44,16 @@ public partial class ScriptCanvas : Control
     private StyleBoxFlat _trashStyle = null!;
     private Vector2      _lastMouseGlobal;
 
+    // Pan / zoom state
+    private Vector2 _canvasPan  = Vector2.Zero;
+    private float   _canvasZoom = 1.0f;
+    private bool    _panning;
+    private Vector2 _panStart;
+    private Vector2 _panOrigin;
+    private const float ZoomMin  = 0.20f;
+    private const float ZoomMax  = 3.00f;
+    private const float ZoomStep = 0.12f;
+
     private BlockScript? MainScript => _scripts.Count > 0 ? _scripts[0] : null;
 
     public override void _Ready()
@@ -57,7 +67,6 @@ public partial class ScriptCanvas : Control
         AddChild(bg);
 
         _freeCanvas = new Control();
-        _freeCanvas.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         _freeCanvas.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(_freeCanvas);
 
@@ -124,11 +133,12 @@ public partial class ScriptCanvas : Control
 
     // ── 公開 API ─────────────────────────────────────────────────────
 
-    public void SyncFrom(List<BlockNode> blocks, Func<List<(string, string)>>? getSlotOpts)
+    public void SyncFrom(List<BlockNode> blocks, Func<List<(string, string)>>? getSlotOpts, Vector2? initialPos = null)
     {
         _blocks      = blocks;
         _getSlotOpts = getSlotOpts;
         _dragging    = null;
+        _panning     = false;
         _snapHL.Visible = false;
 
         foreach (var s in _scripts)
@@ -139,7 +149,15 @@ public partial class ScriptCanvas : Control
         _scripts.Clear();
 
         if (_blocks.Count > 0)
-            SpawnScript(_blocks, new Vector2(20f, 20f), isMain: true);
+            SpawnScript(_blocks, initialPos ?? new Vector2(20f, 20f), isMain: true);
+    }
+
+    // 重置視角到原點 1:1（載入新技能時可呼叫）
+    public void ResetView()
+    {
+        _canvasPan  = Vector2.Zero;
+        _canvasZoom = 1.0f;
+        ApplyCanvasTransform();
     }
 
     // ── 腳本生成 ──────────────────────────────────────────────────────
@@ -194,6 +212,14 @@ public partial class ScriptCanvas : Control
             _lastMouseGlobal = mm.GlobalPosition;
             UpdateTrashHighlight(mm.GlobalPosition);
 
+            if (_panning)
+            {
+                _canvasPan = _panOrigin + (mm.GlobalPosition - _panStart);
+                ApplyCanvasTransform();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
             if (_dragging != null)
             {
                 _dragging.GlobalPosition = mm.GlobalPosition + _dragOffset;
@@ -209,6 +235,35 @@ public partial class ScriptCanvas : Control
                 UpdateTotemZoneHighlight(mm.GlobalPosition);
             else
                 ClearTotemZoneHighlights();
+            return;
+        }
+
+        // 滾輪縮放 + 中鍵平移開始
+        if (@event is InputEventMouseButton mbe && mbe.Pressed)
+        {
+            if ((mbe.ButtonIndex == MouseButton.WheelUp || mbe.ButtonIndex == MouseButton.WheelDown)
+                && GetGlobalRect().HasPoint(mbe.GlobalPosition))
+            {
+                ZoomAt(mbe.GlobalPosition, mbe.ButtonIndex == MouseButton.WheelUp ? ZoomStep : -ZoomStep);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if (mbe.ButtonIndex == MouseButton.Middle && GetGlobalRect().HasPoint(mbe.GlobalPosition))
+            {
+                _panning   = true;
+                _panStart  = mbe.GlobalPosition;
+                _panOrigin = _canvasPan;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            return;
+        }
+
+        // 中鍵釋放 → 結束平移
+        if (@event is InputEventMouseButton mbm && !mbm.Pressed && mbm.ButtonIndex == MouseButton.Middle)
+        {
+            _panning = false;
+            GetViewport().SetInputAsHandled();
             return;
         }
 
@@ -255,7 +310,7 @@ public partial class ScriptCanvas : Control
                 if (GetGlobalRect().HasPoint(mb.GlobalPosition)
                     && !_trashZone.GetGlobalRect().HasPoint(mb.GlobalPosition))
                 {
-                    var localPos = mb.GlobalPosition - GlobalPosition;
+                    var localPos = ToCanvasLocal(mb.GlobalPosition);
                     if (PaletteBlockDropped != null)
                         PaletteBlockDropped(BlockDrag.Block, localPos);
                     else
@@ -346,6 +401,30 @@ public partial class ScriptCanvas : Control
     {
         _palPreview.Visible = false;
     }
+
+    // ── 視角變換輔助 ──────────────────────────────────────────────────
+
+    // 套用目前 pan / zoom 到 _freeCanvas
+    private void ApplyCanvasTransform()
+    {
+        _freeCanvas.Position = _canvasPan;
+        _freeCanvas.Scale    = new Vector2(_canvasZoom, _canvasZoom);
+    }
+
+    // 以滑鼠位置為圓心縮放
+    private void ZoomAt(Vector2 mouseGlobal, float delta)
+    {
+        float newZoom = Mathf.Clamp(_canvasZoom + delta, ZoomMin, ZoomMax);
+        if (Mathf.IsEqualApprox(newZoom, _canvasZoom)) return;
+        var pivot  = mouseGlobal - GlobalPosition;
+        _canvasPan = pivot - (pivot - _canvasPan) * (newZoom / _canvasZoom);
+        _canvasZoom = newZoom;
+        ApplyCanvasTransform();
+    }
+
+    // 全域座標 → _freeCanvas 本機座標
+    private Vector2 ToCanvasLocal(Vector2 globalPos)
+        => (globalPos - GlobalPosition - _canvasPan) / _canvasZoom;
 
     private void UpdateTrashHighlight(Vector2 mouseGlobal)
     {

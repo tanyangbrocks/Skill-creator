@@ -725,10 +725,10 @@ public partial class AbilityEditorUI : Control
                 }
                 if (_spell.Blocks.Count == 0)
                 {
-                    // 空白技能無主腳本可 snap → 直接加入，SyncCanvas 建立主腳本
+                    // 空白技能無主腳本可 snap → 直接加入，主腳本建在落點位置
                     foreach (var b in blocks) _spell.Blocks.Add(b);
                     SyncSlotsFromBlocks();
-                    SyncCanvas();
+                    _canvas.SyncFrom(_spell.Blocks, GetSlotOptions, localPos);
                     RefreshCost();
                     RefreshDescription();
                 }
