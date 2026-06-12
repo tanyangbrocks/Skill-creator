@@ -159,10 +159,7 @@ public partial class Main : Node
     private static readonly float ZoomMax  = 80f * TileWorldConstants.TileSize;
     private const float ZoomStep = 1.2f;
 
-    // 世界尺寸（3D）：Z 軸與 X 軸等寬；懶加載生成，不會拖慢啟動。
-    private const int WorldW = 600;
-    private const int WorldH = 200;
-    private const int WorldD = WorldW; // 600×200×600 真 3D 世界
+    // 世界尺寸由 WorldScale 統一驅動（W-1）
 
     private bool _editorOpen = false;
 
@@ -190,8 +187,8 @@ public partial class Main : Node
     private void StartGameplay(CharacterSaveData _charData, WorldSaveData _worldData)
     {
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
-        _world3d = new TileWorld3D(WorldW, WorldH, WorldD);
-        _world3d.InitGpu(64, WorldH, 64); // Phase 3 #2：GPU Compute Shader CA
+        _world3d = new TileWorld3D(WorldScale.WorldW, WorldScale.WorldH, WorldScale.WorldD);
+        _world3d.InitGpu(WorldScale.GpuZoneW, WorldScale.GpuZoneH, WorldScale.GpuZoneD);
         _mapGen   = new MapGenerator3D();
         var spawnData = _mapGen.Generate(_world3d);
 
