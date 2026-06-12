@@ -32,6 +32,7 @@ public partial class Main : Node
     private Node3D         _entitiesRoot = null!;         // 統一開關用父節點
     private MeshInstance3D _playerMesh   = null!;
     private readonly Dictionary<int, MeshInstance3D> _enemyMeshes = new();
+    private readonly Dictionary<DroppedItem, MeshInstance3D> _itemMeshes = new();
     private readonly List<SpellProjectile> _projectiles = new();
     private readonly SpellRunner     _runner     = new();
     private readonly DroppedItemManager _droppedItems = new();
@@ -54,7 +55,7 @@ public partial class Main : Node
     private PanelContainer   _devToolsPanel   = null!;
 
     // R-4: 放置形狀
-    private PlacementShape  _activeShape    = PlacementShape.Single;
+    private PlacementShape  _activeShape    = PlacementShape.Cube; // 預設：1 material unit ≈ 1000 tiles
     private int             _shapeRadius    = WorldScale.PlayerH / 6 > 0 ? WorldScale.PlayerH / 6 : 1;
     private PanelContainer  _shapePanel     = null!;
     private Label           _shapeIndicator = null!;
@@ -533,7 +534,7 @@ public partial class Main : Node
                 if (!on) return;
                 _activeShape = capturedSh;
                 _shapeIndicator.Text = $"形狀：{ShapeName(_activeShape)}（r={_shapeRadius}）";
-                _shapePanel.Visible  = false;
+                SetShapePanelVisible(false);
             };
             shapeGrid.AddChild(btn);
         }
@@ -940,7 +941,7 @@ public partial class Main : Node
             int pCZ = _player.Position.Z / Chunk3D.Size;
 
             // 懶加載：生成玩家附近尚未生成的 chunk（磁碟優先）
-            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 16);
+            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 32);
 
             // G-4: 每 300 幀卸載遠端 chunk（存磁碟 + 移出記憶體）
             if (++_evictFrame % 300 == 0)
@@ -989,6 +990,7 @@ public partial class Main : Node
 
         // 掉落物（重力 + 壽命 + 自動拾取）
         _droppedItems.Update(_world3d, _player, dt);
+        SyncDroppedItemMeshes();
 
         // 傷害數字動畫更新
         if (ShowDamageNumbers && _dmgPool != null)
@@ -1043,11 +1045,26 @@ public partial class Main : Node
         }
 
         // 採掘（按住左鍵，距離 ≤ MiningRange；滑鼠在 HUD/面板上時不觸發）
-        if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
+        if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen)
         {
             var target = _player.MouseGridPos;
             if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
-                _player.TickMining(_world3d, target, dt);
+            {
+                var minedMat = _player.TickMining(_world3d, target, dt);
+                if (minedMat.HasValue)
+                {
+                    // 形狀採掘：靜默破壞形狀內其餘格（中心格已由 TickMining 摧毀）
+                    foreach (var (dx, dy, dz) in ShapeVoxels.GetOffsets(_activeShape))
+                    {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        var p = target + new GridPos(dx, dy, dz);
+                        if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                            _world3d.DestroyTile(p, DestroyReason.ShapeMining);
+                    }
+                    // 整個形狀只 spawn 1 個掉落物（依中心格材質）
+                    _droppedItems.Spawn(target, minedMat.Value, DestroyReason.Mining);
+                }
+            }
             else
                 _player.CancelMining();
         }
@@ -1060,7 +1077,7 @@ public partial class Main : Node
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
         // 放置（右鍵，face-aligned；形狀由 _activeShape 決定，消耗 1 個物品/次）
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
+        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen)
         {
             var active = _player.Inventory.ActiveItem;
             if (!active.IsEmpty)
@@ -1186,7 +1203,7 @@ public partial class Main : Node
         }
         else if (k.IsAction(InputBindings.ShapeMenu) && !_editorOpen)
         {
-            _shapePanel.Visible = !_shapePanel.Visible;
+            SetShapePanelVisible(!_shapePanel.Visible);
         }
         else if (k.IsAction(InputBindings.DebugCoord))
         {
@@ -1491,6 +1508,40 @@ public partial class Main : Node
         };
     }
 
+    private void SyncDroppedItemMeshes()
+    {
+        float T = TileWorldConstants.TileSize;
+        float sz = 4 * T; // 4 tile 邊長的小立方體
+        // 移除已消失的掉落物 mesh
+        foreach (var key in _itemMeshes.Keys.Where(k => !_droppedItems.Items.Contains(k)).ToList())
+        {
+            _itemMeshes[key].QueueFree();
+            _itemMeshes.Remove(key);
+        }
+        // 新增或更新 mesh 位置
+        foreach (var item in _droppedItems.Items)
+        {
+            if (!_itemMeshes.TryGetValue(item, out var mesh))
+            {
+                mesh = new MeshInstance3D
+                {
+                    Mesh = new BoxMesh { Size = new Vector3(sz, sz, sz) },
+                    MaterialOverride = new StandardMaterial3D
+                    {
+                        AlbedoColor = new Color(1.0f, 0.85f, 0.1f), // 金黃色
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                    },
+                };
+                _entitiesRoot.AddChild(mesh);
+                _itemMeshes[item] = mesh;
+            }
+            mesh.Position = new Vector3(
+                item.Position.X * T + T * 0.5f - WorldScale.OriginX,
+                item.Position.Y * T + sz * 0.5f,
+                item.Position.Z * T + T * 0.5f - WorldScale.OriginZ);
+        }
+    }
+
     private void ToggleEditor()
     {
         _editorOpen = !_editorOpen;
@@ -1580,6 +1631,15 @@ public partial class Main : Node
         l.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.65f));
         l.AddThemeFontSizeOverride("font_size", 11);
         return l;
+    }
+
+    private void SetShapePanelVisible(bool visible)
+    {
+        _shapePanel.Visible = visible;
+        if (visible)
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+        else
+            _camera3d.ApplyMouseCapture(); // 恢復原本的 Captured/Visible 模式
     }
 
     private static string ShapeName(PlacementShape s) => s switch

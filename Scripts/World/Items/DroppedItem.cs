@@ -28,9 +28,8 @@ public class DroppedItem
         if (_fallTimer <= 0f)
         {
             _fallTimer = FallInterval;
-            var below = new GridPos(Position.X, Position.Y + 1);
-            // TypeAt 對越界座標回傳 Stone，不需額外邊界判斷
-            if (world.TypeAt(below.X, below.Y) == MaterialType.Air)
+            var below = new GridPos(Position.X, Position.Y + 1, Position.Z);
+            if (world.GetTile(below.X, below.Y, below.Z) == MaterialType.Air)
                 Position = below;
         }
     }
