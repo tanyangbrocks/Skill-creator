@@ -97,6 +97,9 @@ public partial class Main : Node
     private Label[]          _eqNameLabels     = new Label[3];
     private bool             _equipPanelOpen   = false;
 
+    // 放置物件 Registry（R-6）
+    private readonly PlacedObjectRegistry _placedRegistry = new();
+
     // 設定面板（B 鍵 / 右下按鈕）
     private Panel            _settingsPanel    = null!;
     private bool             _settingsPanelOpen = false;
@@ -235,6 +238,9 @@ public partial class Main : Node
             };
         }
 
+        // R-6d：載入放置物件 Registry
+        _placedRegistry.Load(_worldData.WorldDir);
+
         // 天空背景（在渲染器前加入，確保深度緩衝正確排序）
         _sky = new SkyController();
         AddChild(_sky);
@@ -305,8 +311,12 @@ public partial class Main : Node
         _world3d.OnExplosion += (center, radius) =>
             _enemies.ApplyExplosionDamage(center, radius, 40f);
 
-        // 方塊被摧毀時產生掉落物
-        _world3d.OnTileDestroyed += (pos, mat, reason) => _droppedItems.Spawn(pos, mat, reason);
+        // 方塊被摧毀時：通知 Registry + 產生掉落物
+        _world3d.OnTileDestroyed += (pos, mat, reason) =>
+        {
+            _placedRegistry.NotifyDestroyed(pos);
+            _droppedItems.Spawn(pos, mat, reason);
+        };
 
         SpawnEnemies(spawnData.EnemySpawns);
 
@@ -952,7 +962,10 @@ public partial class Main : Node
 
             // G-4: 每 300 幀卸載遠端 chunk（存磁碟 + 移出記憶體）
             if (++_evictFrame % 300 == 0)
+            {
                 _mapGen.EvictFarChunks(_world3d, pCX, pCY, pCZ, WorldScale.MeshRadiusChunks + 2);
+                if (_worldData != null) _placedRegistry.Save(_worldData.WorldDir);  // R-6d
+            }
 
             for (int _s = 0; _s < _simStepsPerFrame; _s++)
                 _world3d.Tick(centerCX: pCX, centerCY: pCY, centerCZ: pCZ, simRadius: 6);
@@ -1097,7 +1110,7 @@ public partial class Main : Node
                 if (itemData.IsPlaceable && itemData.PlaceAs.HasValue)
                 {
                     var mat    = itemData.PlaceAs.Value;
-                    int placed = 0;
+                    var placedTiles = new List<GridPos>();
                     foreach (var (ddx, ddy, ddz) in ShapeVoxels.GetOffsets(_activeShape, _shapeRadius))
                     {
                         var p = placeTarget + new GridPos(ddx, ddy, ddz);
@@ -1106,11 +1119,12 @@ public partial class Main : Node
                             && PlacementValidator.CanPlace(_world3d, p, mat))
                         {
                             _world3d.SetTile(p.X, p.Y, p.Z, mat);
-                            placed++;
+                            placedTiles.Add(p);
                         }
                     }
-                    if (placed > 0)
+                    if (placedTiles.Count > 0)
                     {
+                        _placedRegistry.Register(placedTiles, mat);
                         _player.Inventory.Consume(_player.Inventory.ActiveHotbarIndex);
                         _placeCooldown = 0.12f;
                     }
