@@ -469,6 +469,53 @@ V-3（粒子沉積）    → R 系列完成後，Grain 穩定後
 
 ---
 
+## 自動迴歸保護：Preflight Check 7
+
+`preflight-check.ps1` Check 7 掃描渲染層檔案，確保 `Vector3`/`Vector2` 建構式不含「裸 Godot-unit float」——即未乘 TileSize 的絕對單位值。
+
+### 涵蓋範圍
+
+掃描下列三個「tile → Godot 座標轉換層」檔案：
+- `Scripts/Main.cs`
+- `Scripts/World/TileWorldRenderer3D.cs`
+- `Scripts/World/CameraController.cs`
+
+### 安全豁免規則（`$tsSafe` 模式）
+
+符合以下任一條件的行**不會**觸發警告：
+| 條件 | 說明 |
+|------|------|
+| 含 `TileSize` | 已乘縮放係數，正確 |
+| 含 `WorldScale.` | 從 WorldScale 派生，正確 |
+| `new Vector` 的 float 前面/後面有 `* T` 或 `T *` | 臨時局部變數 `T = TileSize`，正確 |
+| 含 `Fov|MouseSens|FpEye|IsoYaw|IsoPitch|PerspFov` | 相機角度參數，不是 tile 座標 |
+| 含 `ProjectRay|UnprojectPos|ProjectPos|GetCenter|Relative` | 視口 API，已是 Godot-unit，不需換算 |
+
+### 閾值設計（WW 而非 NG）
+
+Check 7 輸出 **WW（警告）** 而非 **NG（失敗）**，原因：
+- `Main.cs` 中大量 UI/HUD 的 `Vector2`（按鈕位置、面板尺寸）用螢幕像素，**不需要** TileSize
+- 這些 UI 元素應繼續使用像素值；只有 3D 世界渲染的座標需要乘 TileSize
+- 警告提供人工審查機會，不阻斷 CI
+
+### 如何使用
+
+```powershell
+# 一般執行
+powershell -ExecutionPolicy Bypass -File preflight-check.ps1
+
+# 看到 WW 後，審查輸出的每一行：
+# - UI/Control 節點的 Vector2 → 正常，忽略
+# - MeshInstance3D / Node3D 的 Vector3 → 必須確認有 * TileSize
+```
+
+### 未來維護
+
+實作 S-2 ~ S-6（TileWorldRenderer3D、Main.cs 3D 座標）後，
+若某個 Check 7 hit 確認已加 TileSize，可將其對應的識別字加入 `$tsSafe`，或直接確認程式碼含有 `TileSize`/`WorldScale.` 即可消除警告。
+
+---
+
 ## 完整實作順序（含 V 系列）
 
 ```

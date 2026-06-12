@@ -169,6 +169,41 @@ if ($debtItems.Count -gt 0) {
 }
 
 # ----------------------------------------------------------------
+Head "7. WorldScale - renderer bare float (should use TileSize)"
+
+# Scan only the tile-to-Godot conversion layer files
+$renderFiles = @(
+    "$src\Main.cs",
+    "$src\World\TileWorldRenderer3D.cs",
+    "$src\World\CameraController.cs"
+) | Where-Object { Test-Path $_ }
+
+# Lines containing these are considered safe (already reference TileSize, or are non-tile-unit camera params)
+$tsSafe = 'TileSize|WorldScale\.|[^A-Za-z]T[^A-Za-z]|\bT\s*\*|\*\s*T\b|Fov|MouseSens|FpEye|IsoYaw|IsoPitch|PerspFov|ProjectRay|UnprojectPos|ProjectPos|GetCenter|Relative'
+
+$v7 = @()
+foreach ($fp in $renderFiles) {
+    $fname   = [System.IO.Path]::GetFileName($fp)
+    $content = [System.IO.File]::ReadAllLines($fp, [System.Text.Encoding]::UTF8)
+    $lineNum  = 0
+    foreach ($ln in $content) {
+        $lineNum++
+        if ($ln -match '^\s*//') { continue }
+        if ($ln -match $tsSafe)  { continue }
+        if ($ln -match 'new\s+Vector[23]\s*\(' -and $ln -match '\b[1-9]\d*\.?\d*f\b') {
+            $v7 += ($fname + ':' + $lineNum + '  ' + $ln.Trim())
+        }
+    }
+}
+$v7cnt = $v7.Count
+if ($v7cnt -gt 0) {
+    Warn ('Renderer Vector3/2 bare float (needs TileSize): ' + $v7cnt + ' hit(s)')
+    $v7 | ForEach-Object { Write-Host ('      ' + $_) -ForegroundColor Yellow }
+} else {
+    Pass 'Renderer Vector3/2 - no bare Godot-unit floats'
+}
+
+# ----------------------------------------------------------------
 Write-Host ""
 Write-Host "=============================="
 if ($fail -eq 0) {
