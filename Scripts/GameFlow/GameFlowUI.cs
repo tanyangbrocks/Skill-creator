@@ -355,11 +355,16 @@ public sealed partial class GameFlowUI : CanvasLayer
         {
             var name = worldNameInput.Text.Trim();
             if (name.Length == 0) name = "新世界";
-            _worlds.Add(new WorldSaveData
+            var newWorld = new WorldSaveData
             {
                 Name = name,
                 Seed = (int)Godot.Time.GetTicksMsec(),
-            });
+                IsFirstEnter = true,
+            };
+            // G-5: 建立世界目錄（chunks/ 在進入世界後才由 TileWorld3D 建立）
+            newWorld.WorldDir = FlowSaveSystem.MakeWorldDir(newWorld);
+            System.IO.Directory.CreateDirectory(newWorld.WorldDir);
+            _worlds.Add(newWorld);
             FlowSaveSystem.Save(_chars, _worlds);
             worldNameInput.Text = "";
             RebuildWorldList();

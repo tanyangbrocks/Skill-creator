@@ -46,4 +46,33 @@ public static class FlowSaveSystem
             GD.PrintErr($"[FlowSave] Save failed: {e.Message}");
         }
     }
+
+    // G-5: 更新單一世界資料（load-update-save）
+    public static void SaveWorld(WorldSaveData world)
+    {
+        var (chars, worlds) = Load();
+        int idx = worlds.FindIndex(w => w.Id == world.Id);
+        if (idx >= 0) worlds[idx] = world;
+        else worlds.Add(world);
+        Save(chars, worlds);
+    }
+
+    // G-5: 計算世界存檔目錄（OS 絕對路徑）
+    public static string MakeWorldDir(WorldSaveData world)
+    {
+        var safeName = System.Text.RegularExpressions.Regex.Replace(world.Name, @"[^\w\-]", "_");
+        return ProjectSettings.GlobalizePath($"user://worlds/{safeName}_{world.Id}/");
+    }
+
+    // G-6: 刪除世界（chunks/ 目錄 + 清 IsFirstEnter + 從清單移除後由呼叫端存檔）
+    public static void DeleteWorld(WorldSaveData world, List<WorldSaveData> worlds)
+    {
+        if (world.WorldDir.Length > 0 && System.IO.Directory.Exists(world.WorldDir))
+            System.IO.Directory.Delete(world.WorldDir, recursive: true);
+        worlds.Remove(world);
+    }
+
+    // G-6: 刪除角色（從清單移除後由呼叫端存檔）
+    public static void DeleteCharacter(CharacterSaveData character, List<CharacterSaveData> chars)
+        => chars.Remove(character);
 }

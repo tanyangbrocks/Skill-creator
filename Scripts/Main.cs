@@ -18,6 +18,8 @@ public partial class Main : Node
     private TileWorld3D              _world3d     = null!;
     private CameraController         _camera3d    = null!;
     private MapGenerator3D           _mapGen      = null!;
+    private WorldSaveData?           _worldData;            // G-5: 當前世界存檔
+    private int                      _evictFrame;           // G-4: 幀計數（LRU 卸載用）
     private int                      _simStepsPerFrame = 1;
     private bool                     _simPaused        = false;
     private AbilityEditorUI          _editor     = null!;
@@ -184,13 +186,37 @@ public partial class Main : Node
         flowUI.GameStarted += StartGameplay;
     }
 
-    private void StartGameplay(CharacterSaveData _charData, WorldSaveData _worldData)
+    private void StartGameplay(CharacterSaveData _charData, WorldSaveData worldData)
     {
+        _worldData = worldData;  // G-5: 儲存到欄位，供 _Process 使用
+
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
         _world3d = new TileWorld3D(WorldScale.WorldW, WorldScale.WorldH, WorldScale.WorldD);
         _world3d.InitGpu(WorldScale.GpuZoneW, WorldScale.GpuZoneH, WorldScale.GpuZoneD);
-        _mapGen   = new MapGenerator3D();
-        var spawnData = _mapGen.Generate(_world3d);
+        _mapGen = new MapGenerator3D();
+        _mapGen.WorldDir = _worldData.WorldDir;  // G-5: 設定磁碟路徑
+
+        MapGenerator3D.SpawnData spawnData;
+        if (_worldData.IsFirstEnter)
+        {
+            // 首次進入：程序生成出生區，儲存出生點
+            spawnData = _mapGen.Generate(_world3d, _worldData.Seed);
+            _worldData.SpawnX       = spawnData.PlayerSpawn.X;
+            _worldData.SpawnY       = spawnData.PlayerSpawn.Y;
+            _worldData.SpawnZ       = spawnData.PlayerSpawn.Z;
+            _worldData.IsFirstEnter = false;
+            FlowSaveSystem.SaveWorld(_worldData);
+        }
+        else
+        {
+            // 再次進入：從存檔讀取出生點，不重新生成地形
+            _mapGen.Generate(_world3d, _worldData.Seed);  // 初始化地形參數供 GetHeightAt
+            spawnData = new MapGenerator3D.SpawnData
+            {
+                PlayerSpawn = new GridPos(_worldData.SpawnX, _worldData.SpawnY, _worldData.SpawnZ),
+                EnemySpawns = [],
+            };
+        }
 
         _renderer3d = new TileWorldRenderer3D();
         _renderer3d.Initialize(_world3d);
@@ -815,8 +841,12 @@ public partial class Main : Node
             int pCY = _player.Position.Y / Chunk3D.Size;
             int pCZ = _player.Position.Z / Chunk3D.Size;
 
-            // 懶加載：生成玩家附近尚未生成的 chunk
+            // 懶加載：生成玩家附近尚未生成的 chunk（磁碟優先）
             _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 4);
+
+            // G-4: 每 300 幀卸載遠端 chunk（存磁碟 + 移出記憶體）
+            if (++_evictFrame % 300 == 0)
+                _mapGen.EvictFarChunks(_world3d, pCX, pCY, pCZ, WorldScale.MeshRadiusChunks + 2);
 
             for (int _s = 0; _s < _simStepsPerFrame; _s++)
                 _world3d.Tick(centerCX: pCX, centerCY: pCY, centerCZ: pCZ, simRadius: 6);
