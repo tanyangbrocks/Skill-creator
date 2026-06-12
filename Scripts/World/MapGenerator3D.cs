@@ -24,7 +24,9 @@ public class MapGenerator3D
     };
 
     // ── 懶加載狀態（Generate 後有效）──────────────────────────────────────
-    private int[,]? _heights;                              // 完整高度圖 [W, D]
+    private int[,]? _heights;                              // 出生區高度圖 [initW, initD]
+    private int _heightsW;                                 // _heights 實際寬度
+    private int _heightsD;                                 // _heights 實際深度
     private readonly HashSet<Vector3I> _generatedChunks = new();
 
     // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
@@ -33,31 +35,34 @@ public class MapGenerator3D
     {
         var rng  = new Random(seed);
         int W = world.Width, H = world.Height, D = world.Depth;
-        // 初始只生成 Z=0 的一個 chunk 深度，其餘由 EnsureChunksGenerated 懶加載
-        int initD = Math.Min(D, Chunk3D.Size);
+        // G-0: 初始只生成出生區 3 chunks 寬 × 1 chunk 深，其餘懶加載
+        int initW = Math.Min(W, Chunk3D.Size * 3);  // 48 tiles
+        int initD = Math.Min(D, Chunk3D.Size);       // 16 tiles
 
-        // 完整高度圖（W×D），供懶加載計算任意 (x,z) 地表高度
-        _heights = GenerateHeightmap(W, D, H, rng);
+        // 出生區高度圖（initW×initD），懶加載區域用固定高度代替
+        _heights  = GenerateHeightmap(initW, initD, H, rng);
+        _heightsW = initW;
+        _heightsD = initD;
 
-        FillAll(world, W, H, initD, MaterialType.Stone);
-        ApplyHeightmap(world, _heights, W, H, initD);
+        FillAll(world, initW, H, initD, MaterialType.Stone);
+        ApplyHeightmap(world, _heights, initW, H, initD);
 
-        var caves = GenerateCaCaves(W, H, initD, _heights, rng);
-        ApplyCaves(world, caves, _heights, W, H, initD);
-        EnsureWalkableCaves(world, _heights, W, H, initD);
+        var caves = GenerateCaCaves(initW, H, initD, _heights, rng);
+        ApplyCaves(world, caves, _heights, initW, H, initD);
+        EnsureWalkableCaves(world, _heights, initW, H, initD);
 
-        var surfaceEntry = EnsureConnectivity(world, _heights, W, H, initD, rng);
-        SealBedrock(world, W, H, initD);
-        PlaceOreVeins(world, _heights, W, H, initD, rng);
-        AddDecor(world, _heights, W, H, initD, rng);
+        var surfaceEntry = EnsureConnectivity(world, _heights, initW, H, initD, rng);
+        SealBedrock(world, initW, H, initD);
+        PlaceOreVeins(world, _heights, initW, H, initD, rng);
+        AddDecor(world, _heights, initW, H, initD, rng);
 
-        // 標記初始已生成的 chunks
+        // 標記初始已生成的 chunks（僅出生區 3×all×1）
         for (int cz = 0; cz < CeilDiv(initD, Chunk3D.Size); cz++)
         for (int cy = 0; cy < CeilDiv(H,     Chunk3D.Size); cy++)
-        for (int cx = 0; cx < CeilDiv(W,     Chunk3D.Size); cx++)
+        for (int cx = 0; cx < CeilDiv(initW, Chunk3D.Size); cx++)
             _generatedChunks.Add(new Vector3I(cx, cy, cz));
 
-        return BuildSpawns(world, _heights, surfaceEntry, W, H, initD, rng);
+        return BuildSpawns(world, _heights, surfaceEntry, initW, H, initD, rng);
     }
 
     // ── 懶加載：每幀由 Main._Process 呼叫 ──────────────────────────────────
@@ -104,7 +109,10 @@ public class MapGenerator3D
         {
             int wx = wx0 + lx, wz = wz0 + lz;
             if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
-            int h = _heights![wx, wz];
+            // 出生區外用固定高度（~32% of world height）
+            int h = (_heights != null && wx < _heightsW && wz < _heightsD)
+                ? _heights[wx, wz]
+                : (int)(H * 0.32f);
 
             for (int ly = 0; ly < S; ly++)
             {
