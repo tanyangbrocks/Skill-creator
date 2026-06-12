@@ -53,6 +53,12 @@ public partial class Main : Node
     private PanelContainer   _paintToolPanel  = null!;
     private PanelContainer   _devToolsPanel   = null!;
 
+    // R-4: 放置形狀
+    private PlacementShape  _activeShape    = PlacementShape.Single;
+    private int             _shapeRadius    = WorldScale.PlayerH / 6 > 0 ? WorldScale.PlayerH / 6 : 1;
+    private PanelContainer  _shapePanel     = null!;
+    private Label           _shapeIndicator = null!;
+
     // 等級 / XP / 境界 / 裝備 HUD
     private Label         _lvLabel           = null!;
     private Label         _tierLabel         = null!;
@@ -475,6 +481,73 @@ public partial class Main : Node
         }
         paintVBox.AddChild(brushRow);
         hud.AddChild(_paintToolPanel);
+
+        // ── 放置形狀選單（N 鍵切換，螢幕中央） ─────────────────────────
+        var shapeBgStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.08f, 0.10f, 0.18f, 0.96f),
+            CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6,
+            CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6,
+            BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor = new Color(0.30f, 0.45f, 0.70f),
+            ContentMarginLeft = 10f, ContentMarginRight = 10f,
+            ContentMarginTop = 8f, ContentMarginBottom = 8f,
+        };
+        _shapePanel = new PanelContainer();
+        _shapePanel.AnchorLeft = _shapePanel.AnchorRight  = 0.5f;
+        _shapePanel.AnchorTop  = _shapePanel.AnchorBottom = 0.5f;
+        _shapePanel.GrowHorizontal = Control.GrowDirection.Both;
+        _shapePanel.GrowVertical   = Control.GrowDirection.Both;
+        _shapePanel.CustomMinimumSize = new Vector2(210, 0);
+        _shapePanel.AddThemeStyleboxOverride("panel", shapeBgStyle);
+        _shapePanel.Visible = false;
+        var shapeVBox = new VBoxContainer();
+        shapeVBox.AddThemeConstantOverride("separation", 4);
+        _shapePanel.AddChild(shapeVBox);
+        var shapeTitleLbl = MakeLbl("放置形狀（N 關閉）");
+        shapeTitleLbl.HorizontalAlignment = HorizontalAlignment.Center;
+        shapeVBox.AddChild(shapeTitleLbl);
+        shapeVBox.AddChild(new HSeparator());
+        var shapeGrid = new GridContainer { Columns = 2 };
+        shapeGrid.AddThemeConstantOverride("h_separation", 4);
+        shapeGrid.AddThemeConstantOverride("v_separation", 4);
+        var shapeButtonGroup = new ButtonGroup();
+        var shapeEntries = new (PlacementShape, string)[]
+        {
+            (PlacementShape.Single,    "單格"),
+            (PlacementShape.Cube,      "立方"),
+            (PlacementShape.Sphere,    "球形"),
+            (PlacementShape.Cylinder,  "圓柱"),
+            (PlacementShape.Cone,      "錐形"),
+            (PlacementShape.TriPyramid,"三角錐"),
+        };
+        foreach (var (sh, shName) in shapeEntries)
+        {
+            var btn = MakeBtn(shName, new Color(0.16f, 0.20f, 0.32f));
+            btn.ToggleMode = true;
+            btn.ButtonGroup = shapeButtonGroup;
+            btn.ButtonPressed = (sh == _activeShape);
+            var capturedSh = sh;
+            btn.Toggled += on =>
+            {
+                if (!on) return;
+                _activeShape = capturedSh;
+                _shapeIndicator.Text = $"形狀：{ShapeName(_activeShape)}（r={_shapeRadius}）";
+                _shapePanel.Visible  = false;
+            };
+            shapeGrid.AddChild(btn);
+        }
+        shapeVBox.AddChild(shapeGrid);
+        hud.AddChild(_shapePanel);
+
+        // ── 左下角：形狀指示器（HP 上方）──────────────────────────
+        _shapeIndicator = new Label();
+        _shapeIndicator.AnchorTop = _shapeIndicator.AnchorBottom = 1f;
+        _shapeIndicator.Position = new Vector2(10, -100);
+        _shapeIndicator.AddThemeColorOverride("font_color", new Color(0.55f, 0.80f, 1.0f));
+        _shapeIndicator.AddThemeFontSizeOverride("font_size", 12);
+        _shapeIndicator.Text = $"形狀：{ShapeName(_activeShape)}（r={_shapeRadius}）";
+        hud.AddChild(_shapeIndicator);
 
         // ── 左下角：HP / MP ──────────────────────────────────────
         _hpLabel = new Label();
@@ -986,7 +1059,7 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        // 放置（右鍵，face-aligned：目標 = MouseGridPos + MouseFaceNormal）
+        // 放置（右鍵，face-aligned；形狀由 _activeShape 決定，消耗 1 個物品/次）
         if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
             var active = _player.Inventory.ActiveItem;
@@ -994,14 +1067,26 @@ public partial class Main : Node
             {
                 var itemData    = ItemRegistry.Get(active.ItemId);
                 var placeTarget = _player.MouseGridPos + _player.MouseFaceNormal;
-                if (itemData.IsPlaceable && itemData.PlaceAs.HasValue
-                    && placeTarget != _player.Position
-                    && _player.Position.DistanceTo(placeTarget) <= PlayerController.MiningRange
-                    && PlacementValidator.CanPlace(_world3d, placeTarget, itemData.PlaceAs.Value))
+                if (itemData.IsPlaceable && itemData.PlaceAs.HasValue)
                 {
-                    _world3d.SetTile(placeTarget.X, placeTarget.Y, placeTarget.Z, itemData.PlaceAs.Value);
-                    _player.Inventory.Consume(_player.Inventory.ActiveHotbarIndex);
-                    _placeCooldown = 0.12f;
+                    var mat    = itemData.PlaceAs.Value;
+                    int placed = 0;
+                    foreach (var (ddx, ddy, ddz) in ShapeVoxels.GetOffsets(_activeShape, _shapeRadius))
+                    {
+                        var p = placeTarget + new GridPos(ddx, ddy, ddz);
+                        if (p != _player.Position
+                            && _player.Position.DistanceTo(p) <= PlayerController.MiningRange
+                            && PlacementValidator.CanPlace(_world3d, p, mat))
+                        {
+                            _world3d.SetTile(p.X, p.Y, p.Z, mat);
+                            placed++;
+                        }
+                    }
+                    if (placed > 0)
+                    {
+                        _player.Inventory.Consume(_player.Inventory.ActiveHotbarIndex);
+                        _placeCooldown = 0.12f;
+                    }
                 }
             }
         }
@@ -1098,6 +1183,10 @@ public partial class Main : Node
         else if (k.IsAction(InputBindings.TogglePaint))
         {
             _paintToolPanel.Visible  = !_paintToolPanel.Visible; // 3D 模式：只切換面板顯示
+        }
+        else if (k.IsAction(InputBindings.ShapeMenu) && !_editorOpen)
+        {
+            _shapePanel.Visible = !_shapePanel.Visible;
         }
         else if (k.IsAction(InputBindings.DebugCoord))
         {
@@ -1492,6 +1581,17 @@ public partial class Main : Node
         l.AddThemeFontSizeOverride("font_size", 11);
         return l;
     }
+
+    private static string ShapeName(PlacementShape s) => s switch
+    {
+        PlacementShape.Single     => "單格",
+        PlacementShape.Cube       => "立方",
+        PlacementShape.Sphere     => "球形",
+        PlacementShape.Cylinder   => "圓柱",
+        PlacementShape.Cone       => "錐形",
+        PlacementShape.TriPyramid => "三角錐",
+        _ => s.ToString(),
+    };
 
     // ── 偵錯 Overlay（F2 座標驗證）────────────────────────────────────
     private void BuildDebugOverlay(CanvasLayer hud)

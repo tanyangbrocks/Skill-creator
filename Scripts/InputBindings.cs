@@ -30,6 +30,7 @@ public static class InputBindings
     public const string OpenEditor     = "open_editor";
     public const string OpenStats      = "open_stats";
     public const string TogglePaint    = "toggle_paint";
+    public const string ShapeMenu      = "shape_menu";
 
     // 熱鍵欄 1–5
     public const string Hotbar1 = "hotbar_1";
@@ -59,6 +60,7 @@ public static class InputBindings
         [OpenEditor]     = new[] { Key.E },
         [OpenStats]      = new[] { Key.C },
         [TogglePaint]    = new[] { Key.F1 },
+        [ShapeMenu]      = new[] { Key.N },
         [Hotbar1]        = new[] { Key.Key1 },
         [Hotbar2]        = new[] { Key.Key2 },
         [Hotbar3]        = new[] { Key.Key3 },
