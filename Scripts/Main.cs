@@ -104,6 +104,7 @@ public partial class Main : Node
     private Panel            _settingsPanel    = null!;
     private bool             _settingsPanelOpen = false;
     private bool             _holdToPlace       = true;  // 長按連放（預設開啟）
+    private bool             _perfectRemove     = true;  // 完美移除放置物件（預設開啟）
     private bool             _rightWasPressed   = false; // rising-edge 追蹤（單擊模式用）
 
     // 通用懸浮 Tooltip（跟隨游標，物品欄/裝備欄/熱鍵欄共用）
@@ -1070,18 +1071,38 @@ public partial class Main : Node
             var target = _player.MouseGridPos;
             if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
             {
+                // R-6b：TickMining 前先查 Registry（完成後中心格已被摧毀，查不到）
+                _placedRegistry.TryGetUnit(target, out var pendingUnit);
+
                 var minedMat = _player.TickMining(_world3d, target, dt);
                 if (minedMat.HasValue)
                 {
-                    // 形狀採掘：靜默破壞形狀內其餘格（中心格已由 TickMining 摧毀）
-                    foreach (var (dx, dy, dz) in ShapeVoxels.GetOffsets(_activeShape))
+                    // 分流：完美移除 vs 形狀採掘
+                    bool doPerformRemove = _perfectRemove
+                        && pendingUnit != null
+                        && pendingUnit.Tiles.Count > 0;  // Tiles=0 代表已解體
+
+                    if (doPerformRemove)
                     {
-                        if (dx == 0 && dy == 0 && dz == 0) continue;
-                        var p = target + new GridPos(dx, dy, dz);
-                        if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
-                            _world3d.DestroyTile(p, DestroyReason.ShapeMining);
+                        // 完美移除路線：移除 Unit 剩餘所有 tiles，返還 1 物品
+                        var remaining = pendingUnit!.Tiles.ToList();
+                        _placedRegistry.RemoveUnit(pendingUnit);
+                        foreach (var p in remaining)
+                            if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                                _world3d.DestroyTile(p, DestroyReason.ShapeMining);
                     }
-                    // 整個形狀只 spawn 1 個掉落物（依中心格材質）
+                    else
+                    {
+                        // 形狀採掘路線：靜默破壞形狀內其餘格（中心格已由 TickMining 摧毀）
+                        foreach (var (dx, dy, dz) in ShapeVoxels.GetOffsets(_activeShape))
+                        {
+                            if (dx == 0 && dy == 0 && dz == 0) continue;
+                            var p = target + new GridPos(dx, dy, dz);
+                            if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                                _world3d.DestroyTile(p, DestroyReason.ShapeMining);
+                        }
+                    }
+                    // 兩條路線都 spawn 1 個掉落物
                     _droppedItems.Spawn(target, minedMat.Value, DestroyReason.Mining);
                 }
             }
@@ -2389,6 +2410,21 @@ public partial class Main : Node
         holdHint.AddThemeColorOverride("font_color", new Color(0.50f, 0.50f, 0.55f));
         holdRow.AddChild(holdHint);
         vbox.AddChild(holdRow);
+
+        // ── 完美移除放置物件 toggle ─────────────────────────────────────
+        var perfRow = new HBoxContainer();
+        perfRow.AddThemeConstantOverride("separation", 10);
+        var perfCheck = new CheckBox { Text = "完美移除放置物件", ButtonPressed = _perfectRemove };
+        perfCheck.AddThemeFontSizeOverride("font_size", 14);
+        perfCheck.AddThemeColorOverride("font_color", new Color(0.85f, 0.85f, 0.85f));
+        perfCheck.Toggled += (on) => _perfectRemove = on;
+        perfRow.AddChild(perfCheck);
+
+        var perfHint = new Label { Text = "（挖到自己放的物件時，整組移除）" };
+        perfHint.AddThemeFontSizeOverride("font_size", 11);
+        perfHint.AddThemeColorOverride("font_color", new Color(0.50f, 0.50f, 0.55f));
+        perfRow.AddChild(perfHint);
+        vbox.AddChild(perfRow);
 
         // 關閉按鈕
         var spacer = new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
