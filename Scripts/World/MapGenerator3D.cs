@@ -44,6 +44,7 @@ public class MapGenerator3D
 
         var caves = GenerateCaCaves(W, H, initD, _heights, rng);
         ApplyCaves(world, caves, _heights, W, H, initD);
+        EnsureWalkableCaves(world, _heights, W, H, initD);
 
         var surfaceEntry = EnsureConnectivity(world, _heights, W, H, initD, rng);
         SealBedrock(world, W, H, initD);
@@ -198,15 +199,15 @@ public class MapGenerator3D
         for (int y = caveTop; y < H - 8; y++)
         for (int z = 0; z < D; z++)
         for (int x = 0; x < W; x++)
-            cells[x, y, z] = rng.NextSingle() < 0.45f;
+            cells[x, y, z] = rng.NextSingle() < 0.55f;
 
         var buf = new bool[W, H, D];
         for (int step = 0; step < 4; step++)
         {
-            SmoothCa3D(cells, buf, W, H, D, caveTop, threshold: 14);
+            SmoothCa3D(cells, buf, W, H, D, caveTop, threshold: 18);
             (cells, buf) = (buf, cells);
         }
-        SmoothCa3D(cells, buf, W, H, D, caveTop, threshold: 12);
+        SmoothCa3D(cells, buf, W, H, D, caveTop, threshold: 15);
         return buf;
     }
 
@@ -241,6 +242,41 @@ public class MapGenerator3D
                 world.SetTile(x, y, z, MaterialType.Air);
     }
 
+    // 保證每個洞穴地板（air above solid）有 PlayerH+4 格垂直淨空，讓玩家能站立行走
+    private static void EnsureWalkableCaves(TileWorld3D world, int[,] heights, int W, int H, int D)
+    {
+        const int minClear = WorldScale.PlayerH + 4;
+        int bedrock = H - 8;
+
+        for (int z = 0; z < D; z++)
+        for (int x = 0; x < W; x++)
+        {
+            int caveBase = heights[x, z] + 3;
+            for (int y = caveBase; y < bedrock - 1; y++)
+            {
+                if (world.GetTile(x, y, z) != MaterialType.Air) continue;
+                if (world.GetTile(x, y + 1, z) == MaterialType.Air) continue; // not a floor
+
+                // Count air running upward from floor tile y
+                int clear = 1;
+                for (int up = y - 1; up >= caveBase && world.GetTile(x, up, z) == MaterialType.Air; up--)
+                    clear++;
+
+                if (clear < minClear)
+                {
+                    int topAir = y - (clear - 1); // smallest-Y air tile in segment
+                    int toCarve = minClear - clear;
+                    for (int i = 1; i <= toCarve; i++)
+                    {
+                        int ty = topAir - i;
+                        if (ty < caveBase) break;
+                        world.SetTile(x, ty, z, MaterialType.Air);
+                    }
+                }
+            }
+        }
+    }
+
     // ════════════════════════════════════════════════════════════
     //  Step 4 — 連通性保證（6-鄰接 FloodFill，以 initD 為 Z 邊界）
     // ════════════════════════════════════════════════════════════
@@ -249,7 +285,7 @@ public class MapGenerator3D
         TileWorld3D world, int[,] heights, int W, int H, int D, Random rng)
     {
         int midX = W / 2, midZ = 0;
-        int spawnY   = Math.Max(0, heights[midX, midZ] - 1);
+        int spawnY   = Math.Max(0, heights[midX, midZ] - WorldScale.PlayerH);
         var start    = new GridPos(midX, spawnY, midZ);
         var visited  = FloodFill3D(world, start, W, H, D); // D = initD，邊界安全
         int caveDeep = MaxHeight(heights, W, D) + 8;
@@ -265,7 +301,7 @@ public class MapGenerator3D
                     !visited.Contains(new GridPos(x, y, z)))
                 {
                     for (int sy = heights[x, z]; sy <= y; sy++)
-                    for (int dx = -1; dx <= 1; dx++)
+                    for (int dx = -2; dx <= 2; dx++)
                         world.SetTile(x + dx, sy, z, MaterialType.Air);
                     break;
                 }
