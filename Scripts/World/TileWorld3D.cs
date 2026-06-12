@@ -38,7 +38,7 @@ public sealed class TileWorld3D : IWorldInterface
 
     // ── IWorldInterface 事件 ─────────────────────────────────────────────
     public event Action<WorldEntity, WorldEntity, float>? OnEntityHit;
-    public event Action<GridPos, MaterialType>?          OnTileDestroyed;
+    public event Action<GridPos, MaterialType, DestroyReason>? OnTileDestroyed;
     public event Action<WorldEntity>?                    OnEntityDied;
 #pragma warning disable CS0067
     public event Action<string, object?>?                OnPlayerAction;
@@ -735,12 +735,12 @@ public sealed class TileWorld3D : IWorldInterface
         _          => null,
     };
 
-    public void DestroyTile(GridPos pos)
+    public void DestroyTile(GridPos pos, DestroyReason reason = DestroyReason.Mining)
     {
         if (!InBounds(pos.X, pos.Y, pos.Z)) return;
         var mat = GetTile(pos.X, pos.Y, pos.Z);
         SetTile(pos.X, pos.Y, pos.Z, MaterialType.Air);
-        OnTileDestroyed?.Invoke(pos, mat);
+        OnTileDestroyed?.Invoke(pos, mat, reason);
     }
 
     public void ApplyForce(WorldEntity entity, float dx, float dy)

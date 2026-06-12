@@ -9,9 +9,12 @@ public class DroppedItemManager
 
     public IReadOnlyList<DroppedItem> Items => _items;
 
-    // 由 TileWorld.OnTileDestroyed 事件觸發（爆炸使用 Set 直接清格，不觸發此事件，故不掉落）
-    public void Spawn(GridPos pos, MaterialType mat)
+    // 由 TileWorld.OnTileDestroyed 事件觸發，依 DestroyReason 分流
+    public void Spawn(GridPos pos, MaterialType mat, DestroyReason reason)
     {
+        if (reason == DestroyReason.Explosion)
+            return; // 爆炸碎片由爆炸端批次計算，呼叫 SpawnFragments
+
         var data = MaterialRegistry.Get(mat);
         if (!data.IsMineable || data.DefaultDrops.Length == 0) return;
 
@@ -22,6 +25,24 @@ public class DroppedItemManager
             if (count <= 0) continue;
             _items.Add(new DroppedItem(pos, new ItemStack(drop.ItemId, count)));
         }
+    }
+
+    /// <summary>
+    /// 爆炸/採掘結束後批次呼叫：依 tileCount 換算 material unit，產生對應碎片數量。
+    /// 1 unit ≈ 1000 tiles；Mining=100 碎片/unit（全回收），Explosion=20~80 碎片/unit。
+    /// </summary>
+    public void SpawnFragments(GridPos center, MaterialType mat, int tileCount, DestroyReason reason)
+    {
+        var data = MaterialRegistry.Get(mat);
+        if (data.FragmentItem == ItemId.None) return;
+
+        float units = tileCount / 1000f;
+        int fragments = reason == DestroyReason.Mining
+            ? (int)(units * 100)
+            : (int)(units * _rng.Next(20, 81));
+        if (fragments <= 0) return;
+
+        _items.Add(new DroppedItem(center, new ItemStack(data.FragmentItem, fragments)));
     }
 
     public void Update(TileWorld3D world, PlayerController player, float delta)

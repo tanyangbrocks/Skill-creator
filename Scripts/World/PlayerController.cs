@@ -434,7 +434,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
 
         if (MiningProgress >= data.Hardness)
         {
-            world.DestroyTile(target);
+            world.DestroyTile(target, DestroyReason.Mining);
             CancelMining();
             return true;
         }

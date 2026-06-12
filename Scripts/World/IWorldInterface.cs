@@ -12,7 +12,7 @@ public interface IWorldInterface
     object? GetEntityProperty(WorldEntity entity, string property);
 
     // 指令
-    void DestroyTile(GridPos position);
+    void DestroyTile(GridPos position, DestroyReason reason = DestroyReason.Mining);
     void ApplyForce(WorldEntity entity, float dx, float dy);
     void SpawnEffect(string type, GridPos position, Dictionary<string, object?> parameters);
     void SetEntityProperty(WorldEntity entity, string property, object? value);
@@ -20,7 +20,7 @@ public interface IWorldInterface
 
     // 事件通知
     event Action<WorldEntity, WorldEntity, float>? OnEntityHit;
-    event Action<GridPos, MaterialType>? OnTileDestroyed;
+    event Action<GridPos, MaterialType, DestroyReason>? OnTileDestroyed;
     event Action<WorldEntity>? OnEntityDied;
     event Action<string, object?>? OnPlayerAction;
 }

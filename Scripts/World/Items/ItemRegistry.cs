@@ -42,6 +42,18 @@ public static class ItemRegistry
         Reg(new ItemData(ItemId.OreCopperRaw,    "生銅礦", true, MaterialType.CopperOre,       false, 0, 1f, 99999));
         Reg(new ItemData(ItemId.OreIronRaw,      "生鐵礦", true, MaterialType.IronOre,         false, 0, 1f, 99999));
         Reg(new ItemData(ItemId.OreMagicCrystal, "魔晶石", true, MaterialType.MagicCrystalOre, false, 0, 1f, 99999));
+
+        // ── 材質碎片（R-5，不可放置，合成原料）──────────────────────────
+        //        Id                             名稱         放    放為   工     Tier 速  疊
+        Reg(new ItemData(ItemId.FragmentDirt,         "土塊碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentStone,        "石塊碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentSand,         "沙礫碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentWood,         "木屑碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentAsh,          "灰燼碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentCoal,         "煤炭碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentCopper,       "銅礦碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentIron,         "鐵礦碎片", false, null, false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.FragmentMagicCrystal, "魔晶碎片", false, null, false, 0, 1f, 99999));
     }
 
     private static void Reg(ItemData d) => _data[(int)d.Id] = d;

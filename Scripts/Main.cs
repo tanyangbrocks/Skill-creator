@@ -299,7 +299,7 @@ public partial class Main : Node
             _enemies.ApplyExplosionDamage(center, radius, 40f);
 
         // 方塊被摧毀時產生掉落物
-        _world3d.OnTileDestroyed += (pos, mat) => _droppedItems.Spawn(pos, mat);
+        _world3d.OnTileDestroyed += (pos, mat, reason) => _droppedItems.Spawn(pos, mat, reason);
 
         SpawnEnemies(spawnData.EnemySpawns);
 

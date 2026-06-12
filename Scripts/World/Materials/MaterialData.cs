@@ -27,6 +27,9 @@ public record MaterialData(
     // ── 採掘掉落表 ─────────────────────────────────────────────
     public ItemDrop[] DefaultDrops { get; init; } = Array.Empty<ItemDrop>();
 
+    // ── 碎片掉落（R-5：外力摧毀時的碎片物品類型，None = 不掉碎片）─
+    public ItemId FragmentItem { get; init; } = ItemId.None;
+
     // ── 元素屬性（W-3 元素碰撞系統）───────────────────────────
     /// <summary>
     /// 材質格天生帶有的元素屬性（永久，不被消耗）。
