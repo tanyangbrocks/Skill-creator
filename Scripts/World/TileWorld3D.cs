@@ -101,7 +101,7 @@ public sealed class TileWorld3D : IWorldInterface
         bool xFirst = (_frame % 2 == 0);
         bool zFirst = (_frame % 4 < 2);
 
-        // ── GPU Pass：Powder + Liquid 重力（主動區域，整體批次）──────────
+        // ── GPU Pass：Powder + Liquid 重力（主動區域）──────────────────
         bool gpuActive = false;
         if (_gpuSim != null && _gpuSim.IsAvailable && centerCX >= 0)
         {
@@ -123,12 +123,17 @@ public sealed class TileWorld3D : IWorldInterface
             _gpuOriginY = wy0;
             _gpuOriginZ = wz0;
 
-            // E-2：chunk-based Upload；若區域內無 Powder/Liquid 直接跳過 GPU CA
+            // E-3：每幀只模擬 1/4 Z 子區間（旋轉），降低 GPU Simulate+Download 工作量 4×
+            // 物理更新頻率 = 60/4 = 15fps/tile（視覺仍 60fps 渲染）
+            int subD  = Math.Max(Chunk3D.Size, _gpuSim.AD / 4);  // AD=128 → subD=32
+            int zFrom = (_frame % 4) * subD;
+
+            // E-2：chunk-based Upload（全域）；若區域內無 Powder/Liquid 直接跳過 GPU CA
             bool hasPhysics = _gpuSim.Upload(this, wx0, wy0, wz0);
             if (hasPhysics)
             {
-                _gpuSim.Simulate((uint)_frame);
-                _gpuSim.Download(this, wx0, wy0, wz0);
+                _gpuSim.Simulate((uint)_frame, zFrom, subD);   // 只 dispatch 子區間
+                _gpuSim.Download(this, wx0, wy0, wz0, zFrom, subD); // 只讀子區間臟格
             }
             gpuActive = hasPhysics;
         }

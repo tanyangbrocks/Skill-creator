@@ -192,27 +192,32 @@ public sealed class CaGpuSimulator : IDisposable
     // ════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 執行 2 Phase Margolus Block CA。rngSeed 供 shader 做方向亂數。
+    /// 執行 2 Phase Margolus Block CA。
+    /// E-3：zFrom/zCount 指定本幀要模擬的 Z 子區間（zCount=-1 = 全域）。
+    /// 僅 dispatch 子區間對應的 workgroup，降低 GPU 工作量 4×。
     /// </summary>
-    public void Simulate(uint rngSeed)
+    public void Simulate(uint rngSeed, int zFrom = 0, int zCount = -1)
     {
         if (_rd == null) return;
+        if (zCount < 0) { zFrom = 0; zCount = AD; }
 
-        // dispatch groups = ceil( ceil(A/2) / 4 )
-        uint gx = ((uint)((AW + 1) / 2) + 3) / 4;
-        uint gy = ((uint)((AH + 1) / 2) + 3) / 4;
-        uint gz = ((uint)((AD + 1) / 2) + 3) / 4;
+        // dispatch groups = ceil( ceil(subzoneCount/2) / 4 )
+        uint gx = ((uint)((AW     + 1) / 2) + 3) / 4;
+        uint gy = ((uint)((AH     + 1) / 2) + 3) / 4;
+        uint gz = ((uint)((zCount + 1) / 2) + 3) / 4;  // 子區間 Z
 
         var pushData = new byte[PushSize];
-        BitConverter.GetBytes(AW).CopyTo(pushData,  0);
-        BitConverter.GetBytes(AH).CopyTo(pushData,  4);
-        BitConverter.GetBytes(AD).CopyTo(pushData,  8);
+        BitConverter.GetBytes(AW).CopyTo(pushData, 0);
+        BitConverter.GetBytes(AH).CopyTo(pushData, 4);
+        BitConverter.GetBytes(AD).CopyTo(pushData, 8);
+        // p0 = zFrom，p1 = zCount（shader 用於 block Z 偏移與上界裁切）
+        BitConverter.GetBytes(zFrom ).CopyTo(pushData, 20);
+        BitConverter.GetBytes(zCount).CopyTo(pushData, 24);
 
         for (int phase = 0; phase < 2; phase++)
         {
             BitConverter.GetBytes(phase).CopyTo(pushData, 12);
             BitConverter.GetBytes(rngSeed ^ (uint)(phase * 0xDEAD_BEEF)).CopyTo(pushData, 16);
-            // bytes 20-31 = 0 (padding)
 
             var list = _rd.ComputeListBegin();
             _rd.ComputeListBindComputePipeline(list, _pipeline);
@@ -231,23 +236,31 @@ public sealed class CaGpuSimulator : IDisposable
 
     /// <summary>
     /// 讀回 GPU 結果，把有 dirty flag 的格子寫回 TileWorld3D。
+    /// E-3：zFrom/zCount 指定子區間，使用 partial BufferGetData（4× 少讀資料）。
     /// 回傳變動格數。
     /// </summary>
-    public int Download(TileWorld3D world, int ox, int oy, int oz)
+    public int Download(TileWorld3D world, int ox, int oy, int oz, int zFrom = 0, int zCount = -1)
     {
         if (_rd == null || _staging == null) return 0;
+        if (zCount < 0) { zFrom = 0; zCount = AD; }
 
-        var rawBytes = _rd.BufferGetData(_buffer);
-        MemoryMarshal.Cast<byte, uint>(rawBytes).CopyTo(_staging);
+        // 只讀取子區間位元組（GPU buffer 佈局：z 為最外層索引，連續分布）
+        uint byteOffset = (uint)(zFrom  * AH * AW * sizeof(uint));
+        uint byteCount  = (uint)(zCount * AH * AW * sizeof(uint));
+        var rawBytes = _rd.BufferGetData(_buffer, byteOffset, byteCount);
 
-        int changed = 0;
-        for (int z = 0; z < AD; z++)
-        for (int y = 0; y < AH; y++)
-        for (int x = 0; x < AW; x++)
+        // 將子區間原始位元組解析為 uint span
+        ReadOnlySpan<uint> span = MemoryMarshal.Cast<byte, uint>((byte[])rawBytes);
+
+        int changed   = 0;
+        int subStride = AH * AW;
+        for (int lz = 0; lz < zCount; lz++)
+        for (int y  = 0; y  < AH;     y++)
+        for (int x  = 0; x  < AW;     x++)
         {
-            uint packed = _staging[z * AH * AW + y * AW + x];
+            uint packed = span[lz * subStride + y * AW + x];
             if ((packed & DirtyBit) == 0) continue;
-            world.SetCellFromGpu(ox + x, oy + y, oz + z, Unpack(packed));
+            world.SetCellFromGpu(ox + x, oy + y, oz + lz + zFrom, Unpack(packed));
             changed++;
         }
         return changed;
@@ -283,10 +296,12 @@ layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
 // ── Push constants ─────────────────────────────────────────────────────────
 layout(push_constant) uniform Params {
-    int W, H, D;   // 主動區域尺寸（格）
-    int phase;     // 0 或 1（Margolus 偏移）
-    uint rng;      // per-frame 亂數種子
-    int p0, p1, p2; // padding
+    int W, H, D;       // 主動區域尺寸（格）
+    int phase;         // 0 或 1（Margolus 偏移）
+    uint rng;          // per-frame 亂數種子
+    int zFrom;         // E-3 子區間起點（GPU-local Z，0 = 從頭）
+    int zCount;        // E-3 子區間大小（= D 時等同全域）
+    int pad;
 } pc;
 
 // ── World buffer ───────────────────────────────────────────────────────────
@@ -338,12 +353,13 @@ uint readCell(int x, int y, int z) {
 void main() {
     ivec3 gid = ivec3(gl_GlobalInvocationID);
 
-    // Block 起點（世界格座標）
+    // Block 起點（GPU-local Z，加 zFrom 偏移到子區間起點）
     int bx = gid.x * 2 + pc.phase;
     int by = gid.y * 2 + pc.phase;
-    int bz = gid.z * 2 + pc.phase;
+    int bz = gid.z * 2 + pc.phase + pc.zFrom;  // E-3 子區間 Z 偏移
 
     if (bx >= pc.W || by >= pc.H || bz >= pc.D) return;
+    if (bz >= pc.zFrom + pc.zCount) return;     // E-3 子區間上界裁切
 
     // 讀取 2×2×2 block 的 8 個格子到本地陣列
     // 索引: c[lx][ly][lz]，ly=0=頂（低 Y 索引），ly=1=底（高 Y，重力方向 Y+）
