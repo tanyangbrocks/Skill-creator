@@ -97,6 +97,12 @@ public partial class Main : Node
     private Label[]          _eqNameLabels     = new Label[3];
     private bool             _equipPanelOpen   = false;
 
+    // 設定面板（B 鍵 / 右下按鈕）
+    private Panel            _settingsPanel    = null!;
+    private bool             _settingsPanelOpen = false;
+    private bool             _holdToPlace       = true;  // 長按連放（預設開啟）
+    private bool             _rightWasPressed   = false; // rising-edge 追蹤（單擊模式用）
+
     // 通用懸浮 Tooltip（跟隨游標，物品欄/裝備欄/熱鍵欄共用）
     private PanelContainer   _floatTooltip      = null!;
     private Label            _floatTooltipLabel = null!;
@@ -603,6 +609,7 @@ public partial class Main : Node
         BuildSurvivalDebugOverlay(hud);
         BuildInventoryPanel(hud);
         BuildEquipPanel(hud);
+        BuildSettingsPanel(hud);
         BuildFloatTooltip(hud);
         BuildDragIcon(hud);
         BuildCrosshair(hud);
@@ -1073,11 +1080,14 @@ public partial class Main : Node
             _player.CancelMining();
         }
 
-        // 放置（右鍵，含冷卻避免過快連放）
+        // 放置（右鍵；長按連放由 _holdToPlace 決定，否則 rising-edge）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
-
-        // 放置（右鍵，face-aligned；形狀由 _activeShape 決定，消耗 1 個物品/次）
-        if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen)
+        bool rightNow = Input.IsMouseButtonPressed(MouseButton.Right);
+        bool placeTriggered = _holdToPlace
+            ? rightNow && _placeCooldown <= 0f
+            : rightNow && !_rightWasPressed;
+        _rightWasPressed = rightNow;
+        if (placeTriggered && !_mouseOverHotbar && !_inventoryOpen)
         {
             var active = _player.Inventory.ActiveItem;
             if (!active.IsEmpty)
@@ -1239,6 +1249,10 @@ public partial class Main : Node
         else if (k.IsAction(InputBindings.OpenEquipment) && !_editorOpen)
         {
             ToggleEquipPanel();
+        }
+        else if (k.IsAction(InputBindings.OpenSettings) && !_editorOpen)
+        {
+            ToggleSettingsPanel();
         }
         else if (k.IsAction(InputBindings.OpenEditor))
         {
@@ -2274,6 +2288,114 @@ public partial class Main : Node
         _equipPanelOpen     = !_equipPanelOpen;
         _equipPanel.Visible = _equipPanelOpen;
         if (_equipPanelOpen) RefreshEquipPanel();
+    }
+
+    // ── 設定面板 ──────────────────────────────────────────────────────
+    private void BuildSettingsPanel(CanvasLayer hud)
+    {
+        float T = TileWorldConstants.TileSize;
+
+        // ── 右下角設定按鈕 ──────────────────────────────────────────
+        var settingsBtn = new Button { Text = "⚙" };
+        settingsBtn.AnchorLeft  = settingsBtn.AnchorRight  = 1f;
+        settingsBtn.AnchorTop   = settingsBtn.AnchorBottom = 1f;
+        settingsBtn.OffsetLeft  = -44f;  settingsBtn.OffsetRight  = -8f;
+        settingsBtn.OffsetTop   = -44f;  settingsBtn.OffsetBottom = -8f;
+        var btnStyle = new StyleBoxFlat
+        {
+            BgColor                 = new Color(0.15f, 0.15f, 0.20f, 0.85f),
+            CornerRadiusTopLeft     = 6, CornerRadiusTopRight    = 6,
+            CornerRadiusBottomLeft  = 6, CornerRadiusBottomRight = 6,
+            BorderWidthTop = 1, BorderWidthBottom = 1,
+            BorderWidthLeft = 1, BorderWidthRight  = 1,
+            BorderColor = new Color(0.45f, 0.45f, 0.55f),
+        };
+        settingsBtn.AddThemeStyleboxOverride("normal",   btnStyle);
+        settingsBtn.AddThemeStyleboxOverride("hover",    new StyleBoxFlat
+        {
+            BgColor                 = new Color(0.25f, 0.25f, 0.35f, 0.90f),
+            CornerRadiusTopLeft     = 6, CornerRadiusTopRight    = 6,
+            CornerRadiusBottomLeft  = 6, CornerRadiusBottomRight = 6,
+            BorderWidthTop = 1, BorderWidthBottom = 1,
+            BorderWidthLeft = 1, BorderWidthRight  = 1,
+            BorderColor = new Color(0.65f, 0.65f, 0.75f),
+        });
+        settingsBtn.AddThemeFontSizeOverride("font_size", 18);
+        settingsBtn.Pressed += ToggleSettingsPanel;
+        settingsBtn.MouseEntered += () => _mouseOverHotbar = true;
+        settingsBtn.MouseExited  += () => _mouseOverHotbar = false;
+        hud.AddChild(settingsBtn);
+
+        // ── 設定面板（螢幕中央） ─────────────────────────────────────
+        var panelStyle = new StyleBoxFlat
+        {
+            BgColor                 = new Color(0.10f, 0.10f, 0.14f, 0.95f),
+            CornerRadiusTopLeft     = 8, CornerRadiusTopRight    = 8,
+            CornerRadiusBottomLeft  = 8, CornerRadiusBottomRight = 8,
+            BorderWidthTop = 1, BorderWidthBottom = 1,
+            BorderWidthLeft = 1, BorderWidthRight  = 1,
+            BorderColor          = new Color(0.40f, 0.40f, 0.50f),
+            ContentMarginLeft    = 20f, ContentMarginRight  = 20f,
+            ContentMarginTop     = 16f, ContentMarginBottom = 16f,
+        };
+        _settingsPanel = new Panel();
+        _settingsPanel.AnchorLeft  = _settingsPanel.AnchorRight  = 0.5f;
+        _settingsPanel.AnchorTop   = _settingsPanel.AnchorBottom = 0.5f;
+        _settingsPanel.OffsetLeft  = -160f; _settingsPanel.OffsetRight  = 160f;
+        _settingsPanel.OffsetTop   = -120f; _settingsPanel.OffsetBottom = 120f;
+        _settingsPanel.AddThemeStyleboxOverride("panel", panelStyle);
+        _settingsPanel.Visible = false;
+
+        var vbox = new VBoxContainer { LayoutMode = 1 };
+        vbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        vbox.AddThemeConstantOverride("separation", 14);
+
+        // 標題
+        var title = new Label { Text = "設定", HorizontalAlignment = HorizontalAlignment.Center };
+        title.AddThemeFontSizeOverride("font_size", 16);
+        title.AddThemeColorOverride("font_color", new Color(0.90f, 0.90f, 1.0f));
+        vbox.AddChild(title);
+
+        // 分隔線
+        var sep = new HSeparator();
+        sep.AddThemeColorOverride("color", new Color(0.40f, 0.40f, 0.50f));
+        vbox.AddChild(sep);
+
+        // ── 長按連放 toggle ─────────────────────────────────────────
+        var holdRow = new HBoxContainer();
+        holdRow.AddThemeConstantOverride("separation", 10);
+        var holdCheck = new CheckBox { Text = "長按連放", ButtonPressed = _holdToPlace };
+        holdCheck.AddThemeFontSizeOverride("font_size", 14);
+        holdCheck.AddThemeColorOverride("font_color", new Color(0.85f, 0.85f, 0.85f));
+        holdCheck.Toggled += (on) => _holdToPlace = on;
+        holdRow.AddChild(holdCheck);
+
+        var holdHint = new Label { Text = "（長按右鍵持續放置）" };
+        holdHint.AddThemeFontSizeOverride("font_size", 11);
+        holdHint.AddThemeColorOverride("font_color", new Color(0.50f, 0.50f, 0.55f));
+        holdRow.AddChild(holdHint);
+        vbox.AddChild(holdRow);
+
+        // 關閉按鈕
+        var spacer = new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        vbox.AddChild(spacer);
+        var closeBtn = new Button { Text = "關閉（B）" };
+        closeBtn.AddThemeFontSizeOverride("font_size", 13);
+        closeBtn.Pressed += ToggleSettingsPanel;
+        vbox.AddChild(closeBtn);
+
+        _settingsPanel.AddChild(vbox);
+        hud.AddChild(_settingsPanel);
+    }
+
+    private void ToggleSettingsPanel()
+    {
+        _settingsPanelOpen     = !_settingsPanelOpen;
+        _settingsPanel.Visible = _settingsPanelOpen;
+        if (_settingsPanelOpen)
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+        else
+            _camera3d.ApplyMouseCapture();
     }
 
     // ── 傷害數字 ──────────────────────────────────────────────────────
