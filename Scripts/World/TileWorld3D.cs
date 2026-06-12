@@ -105,26 +105,32 @@ public sealed class TileWorld3D : IWorldInterface
         bool gpuActive = false;
         if (_gpuSim != null && _gpuSim.IsAvailable && centerCX >= 0)
         {
-            // 主動區域起點（以玩家所在 chunk 中心對齊）
+            // 主動區域起點（以玩家所在 chunk 中心對齊，Y 軸也跟隨玩家）
             int wx0 = centerCX * Chunk3D.Size - _gpuSim.AW / 2;
-            int wy0 = 0;                                            // 全高度
+            int wy0 = centerCY >= 0
+                ? centerCY * Chunk3D.Size - _gpuSim.AH / 2
+                : 0;
             int wz0 = centerCZ >= 0
                 ? centerCZ * Chunk3D.Size - _gpuSim.AD / 2
                 : Depth / 2 - _gpuSim.AD / 2;
 
             // 夾到世界邊界
             wx0 = Math.Clamp(wx0, 0, Math.Max(0, Width  - _gpuSim.AW));
-            wz0 = Math.Clamp(wz0, 0, Math.Max(0, Depth  - _gpuSim.AD));
             wy0 = Math.Clamp(wy0, 0, Math.Max(0, Height - _gpuSim.AH));
+            wz0 = Math.Clamp(wz0, 0, Math.Max(0, Depth  - _gpuSim.AD));
 
             _gpuOriginX = wx0;
             _gpuOriginY = wy0;
             _gpuOriginZ = wz0;
 
-            _gpuSim.Upload(this, wx0, wy0, wz0);
-            _gpuSim.Simulate((uint)_frame);
-            _gpuSim.Download(this, wx0, wy0, wz0);
-            gpuActive = true;
+            // E-2：chunk-based Upload；若區域內無 Powder/Liquid 直接跳過 GPU CA
+            bool hasPhysics = _gpuSim.Upload(this, wx0, wy0, wz0);
+            if (hasPhysics)
+            {
+                _gpuSim.Simulate((uint)_frame);
+                _gpuSim.Download(this, wx0, wy0, wz0);
+            }
+            gpuActive = hasPhysics;
         }
 
         // ── CPU Pass：Gas + Static（全部）+ Powder/Liquid（GPU 區域外）──
@@ -481,6 +487,10 @@ public sealed class TileWorld3D : IWorldInterface
         var (lx, ly, lz) = WorldToLocal(x, y, z);
         return chunk.Cells[chunk.Idx(lx, ly, lz)];
     }
+
+    /// <summary>E-2：供 CaGpuSimulator 以 chunk 為單位存取，跳過不存在的 Air chunk。</summary>
+    public Chunk3D? TryGetChunkAt(int cx, int cy, int cz)
+        => _chunks.TryGetValue(new Vector3I(cx, cy, cz), out var c) ? c : null;
 
     public void SetTile(int x, int y, int z, MaterialType type, byte variant = 0)
     {

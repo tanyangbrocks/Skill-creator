@@ -196,21 +196,24 @@ public partial class Main : Node
         _mapGen = new MapGenerator3D();
         _mapGen.WorldDir = _worldData.WorldDir;  // G-5: 設定磁碟路徑
 
+        // 正常流程：世界在創建時就已由 GameFlowUI.PregenerateWorld 生成並存磁碟，
+        // IsFirstEnter 此時應為 false。保留 true 分支作為安全 fallback（例如舊存檔）。
         MapGenerator3D.SpawnData spawnData;
         if (_worldData.IsFirstEnter)
         {
-            // 首次進入：程序生成出生區，儲存出生點
+            // fallback：直接在此生成並儲存（不常發生）
             spawnData = _mapGen.Generate(_world3d, _worldData.Seed);
             _worldData.SpawnX       = spawnData.PlayerSpawn.X;
             _worldData.SpawnY       = spawnData.PlayerSpawn.Y;
             _worldData.SpawnZ       = spawnData.PlayerSpawn.Z;
             _worldData.IsFirstEnter = false;
+            _world3d.SaveAllLoadedChunks(_worldData.WorldDir);
             FlowSaveSystem.SaveWorld(_worldData);
         }
         else
         {
-            // 再次進入：從存檔讀取出生點，不重新生成地形
-            _mapGen.Generate(_world3d, _worldData.Seed);  // 初始化地形參數供 GetHeightAt
+            // 正常路徑：只初始化地形參數（供 GetHeightAt 確定性查詢），不重跑 FillAll/CA
+            _mapGen.InitTerrainParams(_world3d, _worldData.Seed);
             spawnData = new MapGenerator3D.SpawnData
             {
                 PlayerSpawn = new GridPos(_worldData.SpawnX, _worldData.SpawnY, _worldData.SpawnZ),
@@ -842,7 +845,7 @@ public partial class Main : Node
             int pCZ = _player.Position.Z / Chunk3D.Size;
 
             // 懶加載：生成玩家附近尚未生成的 chunk（磁碟優先）
-            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 4);
+            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 16);
 
             // G-4: 每 300 幀卸載遠端 chunk（存磁碟 + 移出記憶體）
             if (++_evictFrame % 300 == 0)

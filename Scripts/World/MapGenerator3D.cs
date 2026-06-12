@@ -23,16 +23,70 @@ public class MapGenerator3D
         ( 0, -1,  0), ( 0,  0, -1), ( 0,  0, +1),
     };
 
-    // ── 懶加載狀態（Generate 後有效）──────────────────────────────────────
+    // ── 懶加載狀態（Generate / InitTerrainParams 後有效）─────────────────
     private int[,]? _heights;                              // 出生區高度圖 [initW, initD]
-    // G-1: 地形參數（一次初始化，供 GetHeightAt 任意 (x,z) 確定性計算）
-    private float _hp1, _hp2, _hp3, _hp4;
+    // W-2: FastNoiseLite 取代 sin 週期函數
+    private Godot.FastNoiseLite? _heightNoise;             // 地形高度（2D）
+    private Godot.FastNoiseLite? _caveThin;                // 細蠕蟲隧道（3D，near-isosurface）
+    private Godot.FastNoiseLite? _caveWide;                // 大洞穴（3D，高值區域）
     private int _worldSeed, _worldW, _worldH, _worldD;
     private readonly HashSet<Vector3I> _generatedChunks = new();
     // G-3: 世界存檔目錄（空字串 = 不持久化，G-5 設值）
     public string WorldDir { get; set; } = "";
 
     // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
+
+    /// <summary>
+    /// W-2: 建立三個 FastNoiseLite 物件，所有地形/洞穴查詢都從這裡派生。
+    /// 由 InitTerrainParams 和 Generate 共同呼叫，確保兩條路徑行為一致。
+    /// </summary>
+    private void InitNoises(int seed)
+    {
+        _worldSeed = seed;
+
+        // 地形高度：FBm 5 octave，頻率 0.0015 → 一個地形起伏跨越約 667 tiles
+        _heightNoise = new Godot.FastNoiseLite
+        {
+            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+            Seed           = seed,
+            Frequency      = 0.0015f,
+            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+            FractalOctaves = 5,
+            FractalLacunarity = 2.0f,
+            FractalGain    = 0.5f,
+        };
+
+        // 細蠕蟲隧道：near-isosurface 偵測，頻率 0.022 → 隧道直徑約 20-30 tiles（≈ PlayerH）
+        _caveThin = new Godot.FastNoiseLite
+        {
+            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+            Seed           = seed + 1,
+            Frequency      = 0.022f,
+            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+            FractalOctaves = 2,
+        };
+
+        // 大洞穴：高值區域，頻率 0.008 → 洞穴直徑約 60-100 tiles
+        _caveWide = new Godot.FastNoiseLite
+        {
+            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+            Seed           = seed + 2,
+            Frequency      = 0.008f,
+            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+            FractalOctaves = 2,
+        };
+    }
+
+    /// <summary>
+    /// 只初始化地形參數，供 GetHeightAt / IsCaveAt 確定性查詢使用。
+    /// 不做任何 SetTile、CA、FloodFill 等重操作。
+    /// 再次進入已有世界時呼叫此方法，而非完整的 Generate。
+    /// </summary>
+    public void InitTerrainParams(TileWorld3D world, int seed)
+    {
+        _worldW = world.Width; _worldH = world.Height; _worldD = world.Depth;
+        InitNoises(seed);
+    }
 
     public SpawnData Generate(TileWorld3D world, int seed = 12345)
     {
@@ -42,12 +96,9 @@ public class MapGenerator3D
         int initW = Math.Min(W, Chunk3D.Size * 3);  // 48 tiles
         int initD = Math.Min(D, Chunk3D.Size);       // 16 tiles
 
-        // G-1: 儲存地形參數供 GetHeightAt 確定性查詢任意 (x,z)
-        _worldSeed = seed; _worldW = W; _worldH = H; _worldD = D;
-        _hp1 = rng.NextSingle() * MathF.Tau;
-        _hp2 = rng.NextSingle() * MathF.Tau;
-        _hp3 = rng.NextSingle() * MathF.Tau;
-        _hp4 = rng.NextSingle() * MathF.Tau;
+        // W-2: 建立 noise 物件（同時設定 _worldSeed）
+        _worldW = W; _worldH = H; _worldD = D;
+        InitNoises(seed);
 
         // 出生區高度圖（initW×initD）
         _heights = GenerateHeightmap(initW, initD);
@@ -82,7 +133,7 @@ public class MapGenerator3D
     public void EnsureChunksGenerated(
         TileWorld3D world, int cx, int cy, int cz, int radius, int maxPerCall = 4)
     {
-        if (_heights == null) return;
+        if (_worldW == 0) return;  // 地形參數尚未初始化（Generate 或 InitTerrainParams 都未呼叫）
         int W = world.Width, H = world.Height, D = world.Depth;
         int maxCX = CeilDiv(W, Chunk3D.Size) - 1;
         int maxCY = CeilDiv(H, Chunk3D.Size) - 1;
@@ -122,51 +173,36 @@ public class MapGenerator3D
     }
 
     /// <summary>
-    /// G-1: 確定性地形高度查詢，任意 (x,z) 皆可呼叫，不依賴預生成陣列。
-    /// 結果只取決於世界 seed 與座標，chunk 邊界天衣無縫。
+    /// W-2: 確定性地形高度查詢（FastNoiseLite FBm，無週期感）。
+    /// 任意 (x,z) 皆可呼叫，chunk 邊界天衣無縫。
     /// </summary>
     public int GetHeightAt(int x, int z)
     {
-        float fx = (float)x / _worldW, fz = (float)z / _worldD;
-        float n = (HeightHash(x, z, _worldSeed) / (float)0x7fff_ffff - 0.5f) * (_worldH * 0.012f);
-        float raw = _worldH * 0.32f
-            + MathF.Sin(fx * 2 * MathF.PI + _hp1) * (_worldH * 0.05f)
-            + MathF.Sin(fz * 3 * MathF.PI + _hp2) * (_worldH * 0.04f)
-            + MathF.Sin(fx * 7 * MathF.PI + _hp3) * (_worldH * 0.025f)
-            + MathF.Sin(fz * 5 * MathF.PI + _hp4) * (_worldH * 0.02f)
-            + n;
-        return Math.Clamp((int)raw, (int)(_worldH * 0.20f), (int)(_worldH * 0.45f));
-    }
-
-    private static int HeightHash(int x, int z, int seed)
-    {
-        int h = x * 1664525 + z * 1013904223 + seed * 22695477;
-        h ^= h >> 16;
-        h *= unchecked((int)0x45d9f3b);
-        h ^= h >> 16;
-        return h & 0x7fff_ffff;
+        float n = _heightNoise!.GetNoise2D(x, z);  // [-1, 1]
+        float raw = _worldH * 0.32f + n * (_worldH * 0.13f);
+        return Math.Clamp((int)raw, (int)(_worldH * 0.18f), (int)(_worldH * 0.46f));
     }
 
     /// <summary>
-    /// G-2: 確定性 3D 噪音洞穴判斷，per-tile，不依賴全域陣列。
-    /// 乘積型 sin*sin*cos 形成蠕蟲隧道形狀。
+    /// W-2: 確定性 3D 洞穴判斷（FastNoiseLite，取代 sin 乘積）。
+    /// 細蠕蟲隧道（near-isosurface）+ 大洞穴（高值區域）雙層結構。
     /// </summary>
     private bool IsCaveAt(int x, int y, int z, int surfaceH)
     {
-        if (y <= surfaceH + 2 || y >= _worldH - 8) return false;
+        // 地表以下 4 格才有洞穴，岩床保留
+        if (y <= surfaceH + 4 || y >= _worldH - 8) return false;
 
-        // 種子相位（取低 12 位避免大浮點數誤差）
-        float ps = (_worldSeed & 0xfff) * 0.001f;
-        float nx = x * 0.06f, ny = y * 0.09f, nz = z * 0.06f;
+        // 細蠕蟲隧道：兩個偏移 noise 場同時接近 0 → 形成隧道軸線
+        // a²+b² < 0.025 → 隧道截面約 20-30 tiles（適合 PlayerH=32）
+        float a = _caveThin!.GetNoise3D(x, y, z);
+        float b = _caveThin!.GetNoise3D(x + 317, y + 131, z + 247);
+        if (a * a + b * b < 0.025f) return true;
 
-        // 主頻（乘積型：三個 sin/cos 同時接近 1 才出現大值 → 蠕蟲隧道）
-        float v = MathF.Sin(nx + ps) * MathF.Sin(nz * 1.3f + ps * 1.7f)
-                * MathF.Cos(ny * 0.7f + ps * 2.3f);
-        // 次頻（細節）
-        v += MathF.Sin(nx * 2.5f + nz * 1.9f + ps * 3.1f)
-           * MathF.Cos(ny * 2.2f + ps * 1.3f) * 0.35f;
+        // 大洞穴：noise 高值區域，Y 方向壓縮 0.6× 讓洞穴橫向更寬
+        float c = _caveWide!.GetNoise3D(x, y * 0.6f, z);
+        if (c > 0.58f) return true;
 
-        return v > 0.40f;  // 地下約 10-15% 為 Air（洞穴）
+        return false;
     }
 
     private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)

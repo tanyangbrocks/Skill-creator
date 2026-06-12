@@ -3,6 +3,7 @@ namespace SkillCreator.GameFlow;
 using System;
 using System.Collections.Generic;
 using Godot;
+using SkillCreator.World;
 
 // 遊戲啟動流程 UI：標題 → 角色列表 → 創建角色 → 世界列表 → 創建世界 → 遊戲開始
 // 全部以程式碼構建，與 Main.cs 現有做法一致。
@@ -395,6 +396,10 @@ public sealed partial class GameFlowUI : CanvasLayer
 
     // ── 創建世界 ─────────────────────────────────────────────────────────
 
+    // 生成世界時的全螢幕 loading 遮罩（ZIndex=15，蓋住創建畫面）
+    private Panel _genLoadingOverlay = null!;
+    private Label _genLoadingLabel   = null!;
+
     private void BuildWorldCreateScreen()
     {
         _worldCreateScreen = MakeFullPanel(new Color(0.07f, 0.11f, 0.09f));
@@ -423,19 +428,31 @@ public sealed partial class GameFlowUI : CanvasLayer
 
         var confirmBtn = MakeBtn("確認創建世界", new Vector2(160, 44), new Color(0.18f, 0.35f, 0.18f));
         confirmBtn.Position = new Vector2(620, 536);
-        confirmBtn.Pressed += () =>
+        confirmBtn.Pressed += async () =>
         {
             var name = worldNameInput.Text.Trim();
             if (name.Length == 0) name = "新世界";
             var newWorld = new WorldSaveData
             {
-                Name = name,
-                Seed = (int)Godot.Time.GetTicksMsec(),
+                Name         = name,
+                Seed         = (int)Godot.Time.GetTicksMsec(),
                 IsFirstEnter = true,
             };
-            // G-5: 建立世界目錄（chunks/ 在進入世界後才由 TileWorld3D 建立）
             newWorld.WorldDir = FlowSaveSystem.MakeWorldDir(newWorld);
             System.IO.Directory.CreateDirectory(newWorld.WorldDir);
+
+            // 顯示 loading 遮罩並等一幀讓 Godot 渲染出來
+            confirmBtn.Disabled        = true;
+            _genLoadingLabel.Text      = $"正在生成世界「{name}」…";
+            _genLoadingOverlay.Visible = true;
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            // 程序生成出生區並把 chunks 存到磁碟（MC 式：創建時就算好）
+            PregenerateWorld(newWorld);
+
+            _genLoadingOverlay.Visible = false;
+            confirmBtn.Disabled        = false;
+
             _worlds.Add(newWorld);
             FlowSaveSystem.Save(_chars, _worlds);
             worldNameInput.Text = "";
@@ -443,5 +460,44 @@ public sealed partial class GameFlowUI : CanvasLayer
             ShowScreen(_worldSelectScreen);
         };
         _worldCreateScreen.AddChild(confirmBtn);
+
+        // Loading 遮罩（建在 CanvasLayer 根層級，覆蓋整個畫面）
+        _genLoadingOverlay = MakeFullPanel(new Color(0f, 0f, 0f, 0.82f));
+        _genLoadingOverlay.Visible = false;
+        _genLoadingOverlay.ZIndex  = 15;
+        AddChild(_genLoadingOverlay);
+
+        _genLoadingLabel = MakeLabel("正在生成世界…", 28, new Color(0.80f, 0.95f, 0.68f));
+        _genLoadingLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _genLoadingLabel.Position            = new Vector2(0, 260);
+        _genLoadingLabel.Size                = new Vector2(800, 60);
+        _genLoadingOverlay.AddChild(_genLoadingLabel);
+
+        var genSubLbl = MakeLabel("請稍候，正在為您的世界生成地形…", 16, new Color(0.60f, 0.60f, 0.60f));
+        genSubLbl.HorizontalAlignment = HorizontalAlignment.Center;
+        genSubLbl.Position            = new Vector2(0, 310);
+        genSubLbl.Size                = new Vector2(800, 40);
+        _genLoadingOverlay.AddChild(genSubLbl);
+    }
+
+    /// <summary>
+    /// 在世界創建時程序生成出生區 chunk 並存磁碟，設定出生點。
+    /// 之後進入世界永遠走「磁碟讀取 + InitTerrainParams」快速路徑。
+    /// </summary>
+    private static void PregenerateWorld(WorldSaveData world)
+    {
+        var world3d = new TileWorld3D(WorldScale.WorldW, WorldScale.WorldH, WorldScale.WorldD);
+        var gen     = new MapGenerator3D { WorldDir = world.WorldDir };
+        var spawn   = gen.Generate(world3d, world.Seed);
+
+        // 把剛生成的出生區 chunks 寫到磁碟
+        world3d.SaveAllLoadedChunks(world.WorldDir);
+
+        // 出生點寫入存檔，之後進入世界直接讀
+        world.SpawnX       = spawn.PlayerSpawn.X;
+        world.SpawnY       = spawn.PlayerSpawn.Y;
+        world.SpawnZ       = spawn.PlayerSpawn.Z;
+        world.IsFirstEnter = false;
+        FlowSaveSystem.SaveWorld(world);
     }
 }

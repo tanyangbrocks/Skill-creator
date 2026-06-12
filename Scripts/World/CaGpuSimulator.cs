@@ -137,20 +137,54 @@ public sealed class CaGpuSimulator : IDisposable
     // ════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 把 TileWorld3D 的主動區域上傳到 GPU buffer。
-    /// ox/oy/oz = 主動區域在世界座標的起點。
+    /// 把 TileWorld3D 的主動區域上傳到 GPU buffer（E-2：chunk-based，跳過 Air chunk）。
+    /// ox/oy/oz = 主動區域在世界座標的起點（需為 Chunk3D.Size 的倍數）。
+    /// 回傳 true = 區域內有 Powder/Liquid，需要執行 Simulate + Download。
+    /// 回傳 false = 全部靜態材質，可跳過整個 GPU CA。
     /// </summary>
-    public void Upload(TileWorld3D world, int ox, int oy, int oz)
+    public bool Upload(TileWorld3D world, int ox, int oy, int oz)
     {
-        if (_rd == null || _staging == null || _stagingBytes == null) return;
+        if (_rd == null || _staging == null || _stagingBytes == null) return false;
 
-        for (int z = 0; z < AD; z++)
-        for (int y = 0; y < AH; y++)
-        for (int x = 0; x < AW; x++)
-            _staging[z * AH * AW + y * AW + x] = Pack(world.GetCell(ox + x, oy + y, oz + z));
+        const int S = Chunk3D.Size;  // 16
+        // physBits 8-9 = Powder(1)/Liquid(2) → mask 0x300
+        const uint PhysMask = 0x300u;
+        bool hasPhysics = false;
+
+        for (int lcz = 0; lcz < AD; lcz += S)
+        for (int lcy = 0; lcy < AH; lcy += S)
+        for (int lcx = 0; lcx < AW; lcx += S)
+        {
+            int cx = (ox + lcx) / S, cy = (oy + lcy) / S, cz = (oz + lcz) / S;
+            var chunk = world.TryGetChunkAt(cx, cy, cz);
+
+            for (int dlz = 0; dlz < S; dlz++)
+            for (int dly = 0; dly < S; dly++)
+            {
+                int rowIdx = ((lcz + dlz) * AH + (lcy + dly)) * AW + lcx;
+                if (chunk == null)
+                {
+                    // Air chunk：快速清零（Pack(Air) = 0）
+                    _staging.AsSpan(rowIdx, S).Clear();
+                }
+                else
+                {
+                    for (int dlx = 0; dlx < S; dlx++)
+                    {
+                        ref var cell = ref chunk.Cells[chunk.Idx(dlx, dly, dlz)];
+                        uint packed = Pack(cell);
+                        _staging[rowIdx + dlx] = packed;
+                        if ((packed & PhysMask) != 0) hasPhysics = true;
+                    }
+                }
+            }
+        }
+
+        if (!hasPhysics) return false;  // 無 Powder/Liquid，呼叫端可跳過 Simulate/Download
 
         Buffer.BlockCopy(_staging, 0, _stagingBytes, 0, _stagingBytes.Length);
         _rd.BufferUpdate(_buffer, 0, _bufferByteSize, _stagingBytes);
+        return true;
     }
 
     // ════════════════════════════════════════════════════════════

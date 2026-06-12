@@ -28,9 +28,10 @@ public static class WorldScale
     public const int   CamTilesV         = PlayerH * 10;
     public const float OrthoSize         = CamTilesV * TileSize * 0.5f;
 
-    // GPU CA active zone (must be power-of-2; GpuZoneH = full world height)
+    // GPU CA active zone (must be power-of-2)
+    // GpuZoneH 以玩家 Y 為中心；256 tiles = 8 chunks 上下，足夠 Powder/Liquid 物理
     public const int   GpuZoneW          = 128;
-    public const int   GpuZoneH          = WorldH;
+    public const int   GpuZoneH          = 256;
     public const int   GpuZoneD          = 128;
 
     // Chunk radii
