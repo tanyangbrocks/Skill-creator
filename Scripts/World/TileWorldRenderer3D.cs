@@ -156,7 +156,7 @@ public partial class TileWorldRenderer3D : Node3D
         }
 
         float T = TileWorldConstants.TileSize;
-        var pos = new Vector3(r.Coord.X * S * T, r.Coord.Y * S * T, r.Coord.Z * S * T);
+        var pos = new Vector3(r.Coord.X * S * T - WorldScale.OriginX, r.Coord.Y * S * T, r.Coord.Z * S * T - WorldScale.OriginZ);
         pair.O.Position = pos;
         pair.T.Position = pos;
 

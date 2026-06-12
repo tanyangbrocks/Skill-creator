@@ -369,7 +369,7 @@ public class MapGenerator3D
     private GridPos ComputeWorldCenterSpawn(TileWorld3D world)
     {
         int spawnX = _worldW / 2;
-        const int spawnZ = 0;   // SideScroll2D 鎖 Z=0
+        int spawnZ = _worldD / 2;
 
         // 生成出生點所在的 chunk 全高 column（若尚未生成）
         int spawnCX = spawnX / Chunk3D.Size;

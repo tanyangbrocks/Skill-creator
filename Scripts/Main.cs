@@ -858,7 +858,7 @@ public partial class Main : Node
             if (_camera3d.Mode == CameraController.CameraMode.SideScroll2D)
             {
                 _player.MouseGridPos = new GridPos(
-                    Math.Clamp((int)(worldPos3.X / mT), 0, _world3d.Width  - 1),
+                    Math.Clamp((int)((worldPos3.X + WorldScale.OriginX) / mT), 0, _world3d.Width  - 1),
                     Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1));
                 _player.MouseFaceNormal = new GridPos(0, -1, 0);
             }
@@ -866,9 +866,9 @@ public partial class Main : Node
             {
                 var (ro, rd) = _camera3d.GetCenterRay();
                 var startGrid = new GridPos(
-                    Math.Clamp((int)(ro.X / mT), 0, _world3d.Width  - 1),
+                    Math.Clamp((int)((ro.X + WorldScale.OriginX) / mT), 0, _world3d.Width  - 1),
                     Math.Clamp((int)(ro.Y / mT), 0, _world3d.Height - 1),
-                    Math.Clamp((int)(ro.Z / mT), 0, _world3d.Depth  - 1));
+                    Math.Clamp((int)((ro.Z + WorldScale.OriginZ) / mT), 0, _world3d.Depth  - 1));
                 var (hit, _, norm, ok) = _world3d.Raycast(startGrid, rd.X, rd.Y, rd.Z,
                     PlayerController.MiningRange * 2f);
                 if (ok) { _player.MouseGridPos = hit; _player.MouseFaceNormal = norm; }
@@ -887,7 +887,7 @@ public partial class Main : Node
                     $"螢幕:  ({screenMouse.X:F0}, {screenMouse.Y:F0}) px\n" +
                     $"世界:  ({worldPos3.X:F2}, {worldPos3.Y:F2}, {worldPos3.Z:F2})\n" +
                     $"格:    ({mgp.X}, {mgp.Y})\n" +
-                    $"玩家:  ({pp.X}, {pp.Y}, {pp.Z})\n" +
+                    $"玩家:  ({pp.X - WorldScale.WorldW / 2}, {pp.Y}, {pp.Z - WorldScale.WorldD / 2})\n" +
                     $"方向:  ({ddx}, {ddy})\n" +
                     $"OrthoZoom: {_orthoZoom:F1}";
             }
@@ -972,9 +972,9 @@ public partial class Main : Node
         {
             float pT = TileWorldConstants.TileSize;
             _playerMesh.Position = new Vector3(
-                _player.Position.X * pT + pT * 0.5f,
+                _player.Position.X * pT + pT * 0.5f - WorldScale.OriginX,
                 _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
-                _player.Position.Z * pT + pT * 0.5f);
+                _player.Position.Z * pT + pT * 0.5f - WorldScale.OriginZ);
             // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
             _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
             SyncEnemyMeshes();
@@ -982,9 +982,9 @@ public partial class Main : Node
             // 鏡頭跟隨玩家；SideScroll2D 鎖 Z=0（只渲染 Z=0 層），其餘跟隨 player Z
             bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
             _camera3d.TargetPosition = new Vector3(
-                _player.Position.X * pT + pT * 0.5f,
+                _player.Position.X * pT + pT * 0.5f - WorldScale.OriginX,
                 _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
-                _cam2D ? 0f : _player.Position.Z * pT + pT * 0.5f);
+                _cam2D ? 0f : _player.Position.Z * pT + pT * 0.5f - WorldScale.OriginZ);
         }
 
         // 掉落物（重力 + 壽命 + 自動拾取）
@@ -1461,9 +1461,9 @@ public partial class Main : Node
             float eT = TileWorldConstants.TileSize;
             float mh = (e.Type is EnemyType.Heavy ? 1.8f : 0.9f) * eT;
             mesh.Position = new Vector3(
-                e.Position.X * eT + eT * 0.5f,
+                e.Position.X * eT + eT * 0.5f - WorldScale.OriginX,
                 e.Position.Y * eT + mh * 0.5f,
-                e.Position.Z * eT + eT * 0.5f);
+                e.Position.Z * eT + eT * 0.5f - WorldScale.OriginZ);
         }
     }
 
@@ -2230,7 +2230,7 @@ public partial class Main : Node
 
         ref var d = ref _dmgPool[slot];
         float dT = TileWorldConstants.TileSize;
-        d.WorldPx   = new Vector2(pos.X * dT + dT * 0.5f, pos.Y * dT + dT * 0.5f);
+        d.WorldPx   = new Vector2(pos.X * dT + dT * 0.5f - WorldScale.OriginX, pos.Y * dT + dT * 0.5f);
         d.Timer     = DmgNumDuration;
         d.RiseY     = 0f;
         d.Active    = true;

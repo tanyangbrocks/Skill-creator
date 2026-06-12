@@ -37,4 +37,9 @@ public static class WorldScale
     // Chunk radii
     public const int   SimRadiusChunks   = 8;
     public const int   MeshRadiusChunks  = 7;
+
+    // Grid → Godot3D: godotX = gridX * TileSize - OriginX  (centers grid at Godot origin)
+    // Godot3D → Grid: gridX  = (godotX + OriginX) / TileSize
+    public static readonly float OriginX = WorldW * 0.5f * TileSize;
+    public static readonly float OriginZ = WorldD * 0.5f * TileSize;
 }
