@@ -118,7 +118,7 @@ public partial class TileWorldRenderer3D : Node3D
         foreach (var (coord, chunk) in _world.ActiveChunks)
         {
             if (!chunk.MeshNeedsRebuild) continue;
-            if (sideScroll2D && coord.Z != 0) { chunk.MeshNeedsRebuild = false; continue; }
+            if (sideScroll2D && coord.Z != 0) continue;  // 保留 dirty flag，切換 FP 模式時能重建
             if (viewRadius >= 0 && viewCX >= 0)
             {
                 int dx = Math.Abs(coord.X - viewCX);
