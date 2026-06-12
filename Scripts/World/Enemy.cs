@@ -19,11 +19,10 @@ public class Enemy : IElementalTarget, ISnapshottable
 {
     private static int _nextId = 0;
 
-    public int        Id       { get; } = ++_nextId; // 場景內不重複的穩定 ID
-    int IElementalTarget.EntityId => Id;             // IElementalTarget 實作
+    public int        Id       { get; } = ++_nextId;
+    int IElementalTarget.EntityId => Id;
     void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
 
-    // ── 元素系統（W-3）────────────────────────────────────────────────
     public ElementalAuraComponent Aura { get; } = new();
     public GridPos    Position { get; set; }
     public GridPos    SpawnPos { get; }
@@ -33,24 +32,22 @@ public class Enemy : IElementalTarget, ISnapshottable
     public bool       IsAlive  => Hp > 0f;
     public EnemyState State    { get; private set; } = EnemyState.Idle;
 
-    // 遠程敵人：本幀是否要發射投射物（由 EnemyManager 消費）
     public bool WantsToFire { get; set; }
-    // 面向（用於發射方向）
     public int FacingX { get; private set; } = 1;
+    public int FacingZ { get; private set; } = 0;
 
-    private float _vy     = 0f;  // 縱向速度（tiles/s，正向下）
-    private float _fractY = 0f; // 次格累積量
+    private float _vy     = 0f;
+    private float _fractY = 0f;
     private float _moveTimer;
     private float _attackTimer;
     private float _respawnTimer;
-    private int   _patrolDir = 1;   // Patrol 當前巡邏方向
+    private int   _patrolDir = 1;
 
     public const float RespawnTime = 8f;
 
-    // ── 類型特化常數 ──────────────────────────────────────────────
     private const float Gravity      = 30f;
     private const float MaxFallSpeed = 20f;
-    private const int   PatrolRange     = 12;   // Patrol 離出生點最遠距離
+    private const int   PatrolRange  = 12;
 
     private float BaseMoveInterval => Type switch
     {
@@ -60,7 +57,6 @@ public class Enemy : IElementalTarget, ISnapshottable
         _                => 0.35f,
     };
 
-    // 套用元素移速懲罰後的實際移動間隔（值越大越慢）
     private float MoveInterval => BaseMoveInterval * (1f + Aura.SpeedPenalty);
 
     private float AttackInterval => Type switch
@@ -73,7 +69,7 @@ public class Enemy : IElementalTarget, ISnapshottable
     private float AttackDamage => Type switch
     {
         EnemyType.Heavy  => 25f,
-        EnemyType.Ranged => 0f,   // 由投射物造成傷害
+        EnemyType.Ranged => 0f,
         _                => 8f,
     };
 
@@ -91,8 +87,6 @@ public class Enemy : IElementalTarget, ISnapshottable
         _                => 25,
     };
 
-    // ── 建構 ──────────────────────────────────────────────────────
-
     public Enemy(GridPos pos, EnemyType type = EnemyType.Melee, float maxHp = -1f)
     {
         Position = pos;
@@ -107,8 +101,6 @@ public class Enemy : IElementalTarget, ISnapshottable
         };
         Hp = MaxHp;
     }
-
-    // ── 重生 ──────────────────────────────────────────────────────
 
     public void StartRespawn() => _respawnTimer = RespawnTime;
 
@@ -133,7 +125,6 @@ public class Enemy : IElementalTarget, ISnapshottable
         Aura.Reset();
     }
 
-    /// <summary>S-14：繞過重生計時器，直接強制復活至指定狀態（Rollback 用）。</summary>
     public void ForceRevive(GridPos position, float hp)
     {
         Position      = position;
@@ -143,8 +134,6 @@ public class Enemy : IElementalTarget, ISnapshottable
         _respawnTimer = 0f;
         Aura.Reset();
     }
-
-    // ── ISnapshottable（S-7）──────────────────────────────────────
 
     public EntitySnapshot TakeSnapshot() => new(
         EntityId: Id,
@@ -159,7 +148,7 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     public void RestoreFromSnapshot(EntitySnapshot snap)
     {
-        if (!snap.WasAlive) return; // 快照時已死亡，不做任何還原
+        if (!snap.WasAlive) return;
 
         if (!IsAlive)
             ForceRevive(snap.Position, snap.Hp);
@@ -173,32 +162,32 @@ public class Enemy : IElementalTarget, ISnapshottable
         Aura.RestoreFromSnapshot(snap.Aura);
     }
 
-    // ── 每幀更新 ──────────────────────────────────────────────────
-
     public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         Aura.Process(delta, this);
         ApplyGravity(world, delta);
         WantsToFire = false;
 
-        int distX = Math.Abs(Position.X - player.Position.X);
-        int dist  = distX + Math.Abs(Position.Y - player.Position.Y);
-        int dx    = Math.Sign(player.Position.X - Position.X);
+        int dx   = Math.Sign(player.Position.X - Position.X);
+        int dz   = Math.Sign(player.Position.Z - Position.Z);
+        int dist = Math.Abs(player.Position.X - Position.X)
+                 + Math.Abs(player.Position.Y - Position.Y)
+                 + Math.Abs(player.Position.Z - Position.Z);
+
         if (dx != 0) FacingX = dx;
+        FacingZ = dz;
 
         switch (Type)
         {
-            case EnemyType.Melee:  UpdateMelee(world, player, delta, dist, dx);  break;
-            case EnemyType.Ranged: UpdateRanged(world, player, delta, dist, dx); break;
-            case EnemyType.Patrol: UpdatePatrol(world, player, delta, dist, dx); break;
-            case EnemyType.Heavy:  UpdateHeavy(world, player, delta, dist, dx);  break;
+            case EnemyType.Melee:  UpdateMelee(world, player, delta, dist, dx, dz);  break;
+            case EnemyType.Ranged: UpdateRanged(world, player, delta, dist, dx, dz); break;
+            case EnemyType.Patrol: UpdatePatrol(world, player, delta, dist, dx, dz); break;
+            case EnemyType.Heavy:  UpdateHeavy(world, player, delta, dist, dx, dz);  break;
         }
     }
 
-    // ── Melee ─────────────────────────────────────────────────────
-
     private void UpdateMelee(TileWorld3D world, PlayerController player,
-        float delta, int dist, int dx)
+        float delta, int dist, int dx, int dz)
     {
         State = dist <= AttackRange ? EnemyState.Attack
               : dist <= DetectRange ? EnemyState.Chase
@@ -210,7 +199,7 @@ public class Enemy : IElementalTarget, ISnapshottable
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                if (!Aura.IsImmobilized) TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveXZ(world, dx, dz);
             }
         }
         else if (State == EnemyState.Attack)
@@ -224,29 +213,25 @@ public class Enemy : IElementalTarget, ISnapshottable
         }
     }
 
-    // ── Ranged ────────────────────────────────────────────────────
-
     private const int RangedPreferredDist = 8;
 
     private void UpdateRanged(TileWorld3D world, PlayerController player,
-        float delta, int dist, int dx)
+        float delta, int dist, int dx, int dz)
     {
         if (dist > DetectRange) { State = EnemyState.Idle; return; }
 
         if (dist < RangedPreferredDist)
         {
-            // 太近：後退
             State = EnemyState.Chase;
             _moveTimer -= delta;
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                TryMoveX(world, -dx);   // 往反方向走
+                TryMoveXZ(world, -dx, -dz);
             }
         }
         else if (dist <= AttackRange)
         {
-            // 在射程內：發射
             State = EnemyState.Attack;
             _attackTimer -= delta;
             if (_attackTimer <= 0f)
@@ -257,21 +242,18 @@ public class Enemy : IElementalTarget, ISnapshottable
         }
         else
         {
-            // 靠近到射程
             State = EnemyState.Chase;
             _moveTimer -= delta;
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                if (!Aura.IsImmobilized) TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveXZ(world, dx, dz);
             }
         }
     }
 
-    // ── Patrol ────────────────────────────────────────────────────
-
     private void UpdatePatrol(TileWorld3D world, PlayerController player,
-        float delta, int dist, int dx)
+        float delta, int dist, int dx, int dz)
     {
         if (dist <= AttackRange)
         {
@@ -290,12 +272,12 @@ public class Enemy : IElementalTarget, ISnapshottable
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                if (!Aura.IsImmobilized) TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveXZ(world, dx, dz);
             }
         }
         else
         {
-            // 巡邏模式：在出生點 ±PatrolRange 間來回
+            // 巡邏：沿 X 軸在出生點 ±PatrolRange 間來回
             State = EnemyState.Idle;
             _moveTimer -= delta;
             if (_moveTimer <= 0f)
@@ -303,8 +285,8 @@ public class Enemy : IElementalTarget, ISnapshottable
                 _moveTimer = MoveInterval;
                 if (!Aura.IsImmobilized)
                 {
-                    var next = new GridPos(Position.X + _patrolDir, Position.Y);
-                    if (world.TypeAt(next.X, next.Y) == MaterialType.Air)
+                    var next = new GridPos(Position.X + _patrolDir, Position.Y, Position.Z);
+                    if (world.GetTile(next.X, next.Y, next.Z) == MaterialType.Air)
                     {
                         Position = next;
                         if (Math.Abs(Position.X - SpawnPos.X) >= PatrolRange)
@@ -319,10 +301,8 @@ public class Enemy : IElementalTarget, ISnapshottable
         }
     }
 
-    // ── Heavy ─────────────────────────────────────────────────────
-
     private void UpdateHeavy(TileWorld3D world, PlayerController player,
-        float delta, int dist, int dx)
+        float delta, int dist, int dx, int dz)
     {
         State = dist <= AttackRange ? EnemyState.Attack
               : dist <= DetectRange ? EnemyState.Chase
@@ -334,7 +314,7 @@ public class Enemy : IElementalTarget, ISnapshottable
             if (_moveTimer <= 0f)
             {
                 _moveTimer = MoveInterval;
-                if (!Aura.IsImmobilized) TryMoveX(world, dx);
+                if (!Aura.IsImmobilized) TryMoveXZ(world, dx, dz);
             }
         }
         else if (State == EnemyState.Attack)
@@ -348,14 +328,29 @@ public class Enemy : IElementalTarget, ISnapshottable
         }
     }
 
-    // ── 共用工具 ──────────────────────────────────────────────────
-
-    private void TryMoveX(TileWorld3D world, int dx)
+    // 嘗試向 (dx, dz) 移動：優先對角，次 X，次 Z
+    private void TryMoveXZ(TileWorld3D world, int dx, int dz)
     {
-        if (dx == 0) return;
-        var next = new GridPos(Position.X + dx, Position.Y);
-        if (world.TypeAt(next.X, next.Y) == MaterialType.Air)
-            Position = next;
+        if (dx == 0 && dz == 0) return;
+
+        if (dx != 0 && dz != 0)
+        {
+            var diag = new GridPos(Position.X + dx, Position.Y, Position.Z + dz);
+            if (world.GetTile(diag.X, diag.Y, diag.Z) == MaterialType.Air)
+            { Position = diag; return; }
+        }
+        if (dx != 0)
+        {
+            var nx = new GridPos(Position.X + dx, Position.Y, Position.Z);
+            if (world.GetTile(nx.X, nx.Y, nx.Z) == MaterialType.Air)
+            { Position = nx; return; }
+        }
+        if (dz != 0)
+        {
+            var nz = new GridPos(Position.X, Position.Y, Position.Z + dz);
+            if (world.GetTile(nz.X, nz.Y, nz.Z) == MaterialType.Air)
+                Position = nz;
+        }
     }
 
     private void ApplyGravity(TileWorld3D world, float delta)
@@ -364,13 +359,13 @@ public class Enemy : IElementalTarget, ISnapshottable
         _fractY += _vy * delta;
         while (_fractY >= 1f)
         {
-            var below = new GridPos(Position.X, Position.Y + 1);
-            if (world.TypeAt(below.X, below.Y) != MaterialType.Air)
+            var below = new GridPos(Position.X, Position.Y + 1, Position.Z);
+            if (world.GetTile(below.X, below.Y, below.Z) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
             Position = below;
             _fractY -= 1f;
         }
-        if (_vy > 0f && world.TypeAt(Position.X, Position.Y + 1) != MaterialType.Air)
+        if (_vy > 0f && world.GetTile(Position.X, Position.Y + 1, Position.Z) != MaterialType.Air)
         { _vy = 0f; _fractY = 0f; }
     }
 
@@ -384,15 +379,10 @@ public class Enemy : IElementalTarget, ISnapshottable
 
     public void TakeDamage(float amount)
     {
-        // ── 元素狀態效果修改（W-3：鏽化防禦懲罰 + 結凍受傷加成）────
         float modified = amount * (1f + Aura.DefensePenalty) * (1f + Aura.DamageTakenBonus);
-        // ──────────────────────────────────────────────────────────────
-
-        // ── 行動攔截鉤子（Phase 4 第三層）────────────────────────────
         var result = ActionBus.Dispatch(new EntityDamageAction(Id, modified));
-        if (result == null) return; // 攔截：傷害取消
+        if (result == null) return;
         float finalDmg = result is EntityDamageAction eda ? eda.Amount : modified;
-        // ──────────────────────────────────────────────────────────────
         Hp = Math.Max(0f, Hp - finalDmg);
     }
 }
