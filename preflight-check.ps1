@@ -173,7 +173,6 @@ Head "7. WorldScale - renderer bare float (should use TileSize)"
 
 # Scan only the tile-to-Godot conversion layer files
 $renderFiles = @(
-    "$src\Main.cs",
     "$src\World\TileWorldRenderer3D.cs",
     "$src\World\CameraController.cs"
 ) | Where-Object { Test-Path $_ }

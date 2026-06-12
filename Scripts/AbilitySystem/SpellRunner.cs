@@ -158,7 +158,7 @@ public sealed class SpellRunner
             // InvokeTotem：共用 helper 自動處理 ForEach 定位（EffectOriginOverride）
             if (s.Ctx.PendingInvokeTotem != null)
             {
-                SpellCaster.ConsumeInvokeTotem(s.Ctx, s.SlotByRef, s.Player, s.World, s.AtHitPoint);
+                SpellCaster.ConsumeInvokeTotem(s.Ctx, s.SlotByRef, s.Player, s.World, s.AtHitPoint, s.Enemies);
                 continue;
             }
 
