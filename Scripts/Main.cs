@@ -23,6 +23,8 @@ public partial class Main : Node
     private int                      _evictFrame;           // G-4: 幀計數（LRU 卸載用）
     private int                      _simStepsPerFrame = 1;
     private bool                     _simPaused        = false;
+    private float                    _autoSaveTimer    = 0f;  // 每 30 秒自動存檔
+    private const float              AutoSaveInterval  = 30f;
     private AbilityEditorUI          _editor     = null!;
     private SpellListUI              _spellList  = null!;
     private PlayerController         _player     = null!;
@@ -202,6 +204,25 @@ public partial class Main : Node
         var flowUI = new GameFlowUI();
         AddChild(flowUI);
         flowUI.GameStarted += StartGameplay;
+    }
+
+    // ── 存檔 ──────────────────────────────────────────────────────
+    private void SaveAll()
+    {
+        if (_worldData == null || _world3d == null) return;
+        _world3d.SaveAllLoadedChunks(_worldData.WorldDir);
+        _placedRegistry.Save(_worldData.WorldDir);
+        FlowSaveSystem.SaveWorld(_worldData);
+    }
+
+    // 視窗關閉前強制存檔（退出鉤子）
+    public override void _Notification(int what)
+    {
+        if (what == NotificationWMCloseRequest)
+        {
+            SaveAll();
+            GetTree().Quit();
+        }
     }
 
     private void StartGameplay(CharacterSaveData _charData, WorldSaveData worldData)
@@ -863,10 +884,19 @@ public partial class Main : Node
             {
                 _deathScreen.Visible = true;
                 Input.MouseMode = Input.MouseModeEnum.Visible; // 釋放滑鼠讓玩家能點按鈕
+                SaveAll(); // 死亡立即存檔
             }
             return;
         }
         if (_deathScreen.Visible) _deathScreen.Visible = false;
+
+        // 每 30 秒自動存檔
+        _autoSaveTimer += dt;
+        if (_autoSaveTimer >= AutoSaveInterval)
+        {
+            _autoSaveTimer = 0f;
+            SaveAll();
+        }
 
         // 滑鼠世界格座標 + 面法線
         {
