@@ -610,6 +610,84 @@ public sealed class TileWorld3D : IWorldInterface
     }
 
     // ════════════════════════════════════════════════════════════
+    //  Chunk 磁碟持久化（G-3）
+    // ════════════════════════════════════════════════════════════
+
+    /// <summary>將 chunk 序列化為 16³ × 1 byte 的 .bin 並寫入磁碟。</summary>
+    public void SaveChunk(int cx, int cy, int cz, string worldDir)
+    {
+        var coord = new Vector3I(cx, cy, cz);
+        if (!_chunks.TryGetValue(coord, out var chunk)) return;
+        const int S = Chunk3D.Size;
+        var data = new byte[S * S * S];
+        int i = 0;
+        for (int ly = 0; ly < S; ly++)
+        for (int lz = 0; lz < S; lz++)
+        for (int lx = 0; lx < S; lx++)
+            data[i++] = (byte)chunk.Cells[chunk.Idx(lx, ly, lz)].Type;
+        string path = ChunkPath(worldDir, cx, cy, cz);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, data);
+    }
+
+    /// <summary>從磁碟載入 chunk；若檔案不存在回傳 false（呼叫端應程序生成）。</summary>
+    public bool TryLoadChunk(int cx, int cy, int cz, string worldDir)
+    {
+        string path = ChunkPath(worldDir, cx, cy, cz);
+        if (!File.Exists(path)) return false;
+        var data = File.ReadAllBytes(path);
+        var coord = new Vector3I(cx, cy, cz);
+        if (!_chunks.TryGetValue(coord, out var chunk))
+            _chunks[coord] = chunk = new Chunk3D(coord);
+        const int S = Chunk3D.Size;
+        int i = 0;
+        for (int ly = 0; ly < S; ly++)
+        for (int lz = 0; lz < S; lz++)
+        for (int lx = 0; lx < S; lx++)
+        {
+            ref var cell = ref chunk.Cells[chunk.Idx(lx, ly, lz)];
+            cell.Type = (MaterialType)data[i++];
+        }
+        chunk.IsDirty          = true;   // 觸發 mesh rebuild
+        chunk.MeshNeedsRebuild = true;
+        return true;
+    }
+
+    /// <summary>把所有目前在記憶體的 chunk 寫到磁碟（世界退出時呼叫）。</summary>
+    public void SaveAllLoadedChunks(string worldDir)
+    {
+        foreach (var coord in _chunks.Keys.ToList())
+            SaveChunk(coord.X, coord.Y, coord.Z, worldDir);
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  LRU Chunk 卸載（G-4）
+    // ════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 卸載超出保留半徑的 chunk（先存磁碟再移出記憶體）。
+    /// 回傳被卸載的 chunk 座標列表，供呼叫端同步 _generatedChunks。
+    /// keepRadius 建議 = MeshRadiusChunks + 2。
+    /// </summary>
+    public List<Vector3I> EvictFarChunks(int cx, int cy, int cz, int keepRadius, string worldDir)
+    {
+        var evicted = new List<Vector3I>();
+        foreach (var coord in _chunks.Keys.ToList())
+        {
+            int d = Math.Max(Math.Abs(coord.X - cx),
+                    Math.Max(Math.Abs(coord.Y - cy), Math.Abs(coord.Z - cz)));
+            if (d <= keepRadius) continue;
+            SaveChunk(coord.X, coord.Y, coord.Z, worldDir);
+            _chunks.Remove(coord);
+            evicted.Add(coord);
+        }
+        return evicted;
+    }
+
+    private static string ChunkPath(string worldDir, int cx, int cy, int cz)
+        => Path.Combine(worldDir, "chunks", $"{cx}_{cy}_{cz}.bin");
+
+    // ════════════════════════════════════════════════════════════
     //  IWorldInterface 實作
     // ════════════════════════════════════════════════════════════
 

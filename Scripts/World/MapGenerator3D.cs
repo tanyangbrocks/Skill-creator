@@ -29,6 +29,8 @@ public class MapGenerator3D
     private float _hp1, _hp2, _hp3, _hp4;
     private int _worldSeed, _worldW, _worldH, _worldD;
     private readonly HashSet<Vector3I> _generatedChunks = new();
+    // G-3: 世界存檔目錄（空字串 = 不持久化，G-5 設值）
+    public string WorldDir { get; set; } = "";
 
     // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
 
@@ -98,10 +100,25 @@ public class MapGenerator3D
                 if (coord.X < 0 || coord.Y < 0 || coord.Z < 0) continue;
                 if (coord.X > maxCX || coord.Y > maxCY || coord.Z > maxCZ) continue;
                 if (!_generatedChunks.Add(coord)) continue; // 已生成
-                GenerateChunkLazy(world, coord);
+                // G-3: 磁碟優先；若磁碟沒有才程序生成
+                bool fromDisk = WorldDir.Length > 0
+                    && world.TryLoadChunk(coord.X, coord.Y, coord.Z, WorldDir);
+                if (!fromDisk) GenerateChunkLazy(world, coord);
                 if (++generated >= maxPerCall) return;
             }
         }
+    }
+
+    /// <summary>
+    /// G-4: 卸載遠離玩家的 chunk（存磁碟 + 移出記憶體）。
+    /// 同步清除 _generatedChunks，讓下次進入時能重新載入。
+    /// 由 Main._Process 每 300 幀呼叫一次。
+    /// </summary>
+    public void EvictFarChunks(TileWorld3D world, int cx, int cy, int cz, int keepRadius)
+    {
+        if (WorldDir.Length == 0) return;
+        foreach (var coord in world.EvictFarChunks(cx, cy, cz, keepRadius, WorldDir))
+            _generatedChunks.Remove(coord);
     }
 
     /// <summary>
