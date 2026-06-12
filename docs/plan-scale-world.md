@@ -615,6 +615,62 @@ if (_frameCount++ % 300 == 0)
 
 ---
 
+#### G-6：角色／世界刪除功能（GameFlowUI）
+
+> **開發必要性**：G 系列完成後，修改世界生成邏輯（地形、洞穴）後舊世界的磁碟 chunk 不會自動更新。
+> 必須刪除舊世界、創建新世界才能看到效果。刪除按鈕因此是**日常開發測試的必要工具**，不只是玩家 UX。
+
+**UI 佈局**（`GameFlowUI.cs` 角色列表 ＋ 世界列表）：
+
+```
+┌──────────────────────────────────────┐
+│  世界名稱 / 角色名稱           [🗑]  │  ← 每個列表項目變成 HBoxContainer
+└──────────────────────────────────────┘
+```
+
+**確認對話框**（防誤刪）：
+
+```
+┌─────────────────────────────────┐
+│  確定要刪除「XXX」嗎？          │
+│  此操作無法復原。               │
+│            [取消]  [確定刪除]   │
+└─────────────────────────────────┘
+```
+
+**刪除世界的完整動作**（不只刪 JSON）：
+
+```csharp
+// FlowSaveSystem 中新增
+public static void DeleteWorld(WorldSaveData world)
+{
+    // 1. 刪除 chunks/ 目錄（所有 .bin 檔案）
+    string chunksDir = Path.Combine(world.WorldDir, "chunks");
+    if (Directory.Exists(chunksDir))
+        Directory.Delete(chunksDir, recursive: true);
+
+    // 2. 刪除 world.json
+    string jsonPath = Path.Combine(world.WorldDir, "world.json");
+    if (File.Exists(jsonPath)) File.Delete(jsonPath);
+
+    // 3. 若目錄空了就也刪掉
+    if (Directory.Exists(world.WorldDir) &&
+        !Directory.EnumerateFileSystemEntries(world.WorldDir).Any())
+        Directory.Delete(world.WorldDir);
+
+    // 4. 從 flowsave.json 的世界清單移除
+    // SaveSystem.RemoveWorld(world.WorldName);
+}
+
+// 刪除角色只需從 flowsave.json 的角色清單移除
+public static void DeleteCharacter(CharacterSaveData character)
+{
+    // SaveSystem.RemoveCharacter(character.Name);
+}
+```
+
+---
+
 #### G 系列實作順序
 
 ```
@@ -626,6 +682,8 @@ G-3  TileWorld3D chunk 磁碟讀寫（SaveChunk / TryLoadChunk）
 G-4  LRU chunk 卸載（EvictFarChunks，防止 OOM）
 G-5  WorldSaveData 擴展 + GameFlowUI 創建/進入分離
      → 里程碑：重進世界不重新生成，遊戲進度持久保留
+G-6  角色／世界刪除功能（🗑 按鈕 + 確認對話框 + 磁碟清理）
+     → 里程碑：可快速切換測試世界，開發工作流完整
 ```
 
 ---
@@ -644,7 +702,8 @@ Phase A（近期，Grain=16）：
   Step 6.5 G 系列：世界生成/進入分離＋Chunk 持久化（Minecraft 式）
            G-0 緊急修正 → G-1 懶加載高度圖 → G-2 噪音洞穴
            → G-3 磁碟持久化 → G-4 LRU 卸載 → G-5 GameFlowUI 分離
-           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆
+           → G-6 角色／世界刪除功能（🗑 + 確認對話框）
+           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆，可快速切換測試世界
   Step 7   W-2：MapGen simplex noise + 大洞穴
   Step 8   E-2：Upload 跳過 Air chunk
   Step 9   E-3：分幀 CA 模擬
@@ -794,7 +853,8 @@ Phase A（近期，Grain=16）：
   Step 6.5 G 系列：世界生成/進入分離＋Chunk 持久化（Minecraft 式）
            G-0 緊急修正 → G-1 懶加載高度圖 → G-2 噪音洞穴
            → G-3 磁碟持久化 → G-4 LRU 卸載 → G-5 GameFlowUI 分離
-           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆
+           → G-6 角色／世界刪除功能（🗑 + 確認對話框）
+           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆，可快速切換測試世界
 
   Step 7   V-1：VFX 粒子池（爆炸/採掘視覺）
   Step 8   V-2：液體表面 Shader
@@ -860,4 +920,4 @@ powershell -ExecutionPolicy Bypass -File preflight-check.ps1
 
 ---
 
-*最後更新：2026-06-12（加入 G 系列 — 世界生成/進入分離＋Chunk 持久化）*
+*最後更新：2026-06-12（G 系列加入 G-6 角色／世界刪除功能）*
