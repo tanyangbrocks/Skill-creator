@@ -31,6 +31,20 @@ public class PlayerController : IElementalTarget, ISnapshottable
     public PlayerEquipment Equipment  { get; } = new();
     public const float MiningRange = 5f;
 
+    // ── 碰撞體尺寸（由 WorldScale 驅動）──────────────────────────────────
+    public const int BodyH  = WorldScale.PlayerH;          // = 32 at Grain=16
+    public const int BodyW  = 1;
+    private const int StepH = BodyH / 16;                  // max step-up tiles (2 at Grain=16)
+
+    // 檢查從 (x, yHead) 向下 height 格是否全為 Air。
+    private static bool ColumnClear(TileWorld3D w, int x, int yHead, int height, int z)
+    {
+        for (int i = 0; i < height; i++)
+            if (w.GetTile(x, yHead + i, z) != MaterialType.Air)
+                return false;
+        return true;
+    }
+
     public float Hp { get; set; }
     /// <summary>最大 HP（由 Stats.MaxHpBase 決定；不再是 const，支援動態調整）。</summary>
     public float MaxHp => Stats.MaxHpBase;
@@ -175,7 +189,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     /// </summary>
     public void UpdateEnvironment(TileWorld3D world)
     {
-        var tile = world.GetTile(Position.X, Position.Y, Position.Z);
+        var tile = world.GetTile(Position.X, Position.Y + BodyH - 1, Position.Z);
         State.IsOxygenDeprived  = tile == MaterialType.Water;
         State.AmbientTemperature = CharacterState.DefaultAmbientTemp + Aura.AuraTemperatureShift;
     }
@@ -192,21 +206,24 @@ public class PlayerController : IElementalTarget, ISnapshottable
         if (Mp > MaxMp) Mp = MaxMp; // 裝備卸下時上限可能縮小
     }
 
-    // 水平移動（A/D），同時更新朝向；支援地形跨坡（升一格）
+    // 水平移動（A/D），同時更新朝向；支援地形跨坡（最多 StepH 格）
     public bool TryMove(TileWorld3D world, int dx, int dy)
     {
         if (!CanMove || Aura.IsImmobilized) return false;
         int nx = Position.X + dx, ny = Position.Y + dy, nz = Position.Z;
 
-        if (world.GetTile(nx, ny, nz) != MaterialType.Air)
+        if (!ColumnClear(world, nx, ny, BodyH, nz))
         {
-            // 嘗試爬升一格（Y-1 = 世界向上）：前方新位置可行且頭頂有空間
-            if (dy == 0
-             && world.GetTile(nx, ny - 1, nz) == MaterialType.Air
-             && world.GetTile(Position.X, ny - 1, nz) == MaterialType.Air)
-                ny -= 1;
-            else
-                return false;
+            if (dy != 0) return false;
+            bool stepped = false;
+            for (int s = 1; s <= StepH; s++)
+            {
+                // target column clear + head clearance at current X
+                if (ColumnClear(world, nx, ny - s, BodyH, nz)
+                 && ColumnClear(world, Position.X, Position.Y - s, s, nz))
+                { ny -= s; stepped = true; break; }
+            }
+            if (!stepped) return false;
         }
 
         Position = new GridPos(nx, ny, nz);
@@ -219,7 +236,7 @@ public class PlayerController : IElementalTarget, ISnapshottable
     /// 相機相對方向移動（WASD 換算後呼叫）。
     /// dx/dz 各為 -1/0/1，支援斜向（dx 和 dz 同時非零）。
     /// 每次消耗一個 moveCooldown；Facing 更新為實際移動的 XZ 方向。
-    /// 含一格爬坡：整批移動最多爬升一格，不會雙重爬坡。
+    /// 含爬坡：整批移動最多爬升 StepH 格，不會雙重爬坡。
     /// </summary>
     public bool TryMoveDir(TileWorld3D world, int dx, int dz)
     {
@@ -228,46 +245,49 @@ public class PlayerController : IElementalTarget, ISnapshottable
 
         int px = Position.X, py = Position.Y, pz = Position.Z;
         int nx = px, ny = py, nz = pz;
-        bool stepped = false; // 本次已使用爬坡配額（最多一格）
+        bool stepped = false;
 
         // ── X 軸（含爬坡）────────────────────────────────────────────────────
         if (dx != 0)
         {
             int tx = px + dx;
-            if (world.GetTile(tx, ny, pz) == MaterialType.Air)
+            if (ColumnClear(world, tx, ny, BodyH, pz))
             {
                 nx = tx;
             }
-            else if (!stepped
-                  && world.GetTile(tx, py - 1, pz) == MaterialType.Air
-                  && world.GetTile(px, py - 1, pz) == MaterialType.Air)
+            else
             {
-                nx = tx; ny = py - 1; stepped = true;
+                for (int s = 1; s <= StepH && !stepped; s++)
+                {
+                    if (ColumnClear(world, tx, py - s, BodyH, pz)
+                     && ColumnClear(world, px, py - s, s, pz))
+                    { nx = tx; ny = py - s; stepped = true; }
+                }
             }
-            // else: X 方向完全阻塞，不移動 X
         }
 
         // ── Z 軸（含爬坡；step-up 從原始 py 計算，防二次爬坡）──────────────
         if (dz != 0)
         {
             int tz = pz + dz;
-            if (world.GetTile(nx, ny, tz) == MaterialType.Air)
+            if (ColumnClear(world, nx, ny, BodyH, tz))
             {
                 nz = tz;
             }
-            else if (!stepped
-                  && world.GetTile(nx, py - 1, tz) == MaterialType.Air
-                  && world.GetTile(nx, py - 1, pz) == MaterialType.Air)
+            else if (!stepped)
             {
-                nz = tz; ny = py - 1; stepped = true;
+                for (int s = 1; s <= StepH; s++)
+                {
+                    if (ColumnClear(world, nx, py - s, BodyH, tz)
+                     && ColumnClear(world, nx, py - s, s, pz))
+                    { nz = tz; ny = py - s; stepped = true; break; }
+                }
             }
-            // else: Z 方向完全阻塞，不移動 Z
         }
 
         if (nx == px && ny == py && nz == pz) return false;
 
         Position = new GridPos(nx, ny, nz);
-        // 面向：依實際移動的 XZ 方向設定（Y 固定 0 = 水平面）
         int fDx = nx - px, fDz = nz - pz;
         if (fDx != 0 || fDz != 0)
             Facing = new GridPos(Math.Sign(fDx), 0, Math.Sign(fDz));
@@ -276,22 +296,24 @@ public class PlayerController : IElementalTarget, ISnapshottable
     }
 
     // 深度移動（W/S，TPS/FPS 模式），在世界 Z 軸方向前進後退
-    // 支援地形跨坡：若正前方被一格高差阻擋，且頭頂有空間，則自動爬升一格
+    // 支援地形跨坡：前方被阻擋時最多爬升 StepH 格
     public bool TryMoveDepth(TileWorld3D world, int dz)
     {
         if (!CanMove || Aura.IsImmobilized) return false;
         int nz = Position.Z + dz;
         if ((uint)nz >= (uint)world.Depth) return false;
 
-        int ny = Position.Y;
-        if (world.GetTile(Position.X, ny, nz) != MaterialType.Air)
+        int py = Position.Y, ny = py;
+        if (!ColumnClear(world, Position.X, py, BodyH, nz))
         {
-            // 嘗試爬升一格（Y-1 = 世界向上）：前方新位置可行且頭頂有空間
-            if (world.GetTile(Position.X, ny - 1, nz) == MaterialType.Air
-             && world.GetTile(Position.X, ny - 1, Position.Z) == MaterialType.Air)
-                ny -= 1;
-            else
-                return false;
+            bool stepped = false;
+            for (int s = 1; s <= StepH; s++)
+            {
+                if (ColumnClear(world, Position.X, py - s, BodyH, nz)
+                 && ColumnClear(world, Position.X, py - s, s, Position.Z))
+                { ny = py - s; stepped = true; break; }
+            }
+            if (!stepped) return false;
         }
 
         Position = new GridPos(Position.X, ny, nz);
@@ -306,34 +328,29 @@ public class PlayerController : IElementalTarget, ISnapshottable
         _vy     = Math.Clamp(_vy + Gravity * delta, -MaxFallSpeed, MaxFallSpeed);
         _fractY += _vy * delta;
 
-        // 向下移動
+        // 向下移動（查腳底 Y+BodyH）
         while (_fractY >= 1f)
         {
-            var below = new GridPos(Position.X, Position.Y + 1);
-            if (world.GetTile(below.X, below.Y, pz) != MaterialType.Air)
+            if (world.GetTile(Position.X, Position.Y + BodyH, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = new GridPos(below.X, below.Y, pz);
+            Position = new GridPos(Position.X, Position.Y + 1, pz);
             _fractY -= 1f;
         }
-        // 向上移動（跳躍弧線）
+        // 向上移動（查頭頂 Y-1）
         while (_fractY <= -1f)
         {
-            var above = new GridPos(Position.X, Position.Y - 1);
-            if (world.GetTile(above.X, above.Y, pz) != MaterialType.Air)
+            if (world.GetTile(Position.X, Position.Y - 1, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = new GridPos(above.X, above.Y, pz);
+            Position = new GridPos(Position.X, Position.Y - 1, pz);
             _fractY += 1f;
         }
         // 已落地時歸零，防止 _vy 持續累積
-        if (_vy > 0f && world.GetTile(Position.X, Position.Y + 1, pz) != MaterialType.Air)
+        if (_vy > 0f && world.GetTile(Position.X, Position.Y + BodyH, pz) != MaterialType.Air)
         { _vy = 0f; _fractY = 0f; }
     }
 
     public bool IsOnGround(TileWorld3D world)
-    {
-        var below = new GridPos(Position.X, Position.Y + 1);
-        return world.GetTile(below.X, below.Y, Position.Z) != MaterialType.Air;
-    }
+        => world.GetTile(Position.X, Position.Y + BodyH, Position.Z) != MaterialType.Air;
 
     public void StartJump()
     {
