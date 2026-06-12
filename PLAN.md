@@ -20,6 +20,7 @@ docs/
 ├── plan-scale-world.md             玩家尺度・世界擴張・Raycast 採掘
 ├── plan-mining-placement.md        採掘建築・多形狀放置 R 系列
 ├── plan-placed-objects.md          放置物件系統・殘餘格・拉伸（R-6a~e）
+├── plan-player-actions.md          玩家動作全清單・鍵位對照・系統依賴分析・實作順序
 └── history/
     ├── phase1-2.md         Phase 1~2 完成內容存檔
     └── phase3.md           Phase 3+ 實作歷史（archive-done.ps1 歸檔）
@@ -41,6 +42,7 @@ docs/
 | 玩家尺度・世界擴張・效能優化・採掘 Raycast | `docs/plan-scale-world.md` |
 | 採掘建築系統・多形狀放置（R 系列）計畫 | `docs/plan-mining-placement.md` |
 | 放置物件系統・殘餘格・拉伸系統（R-6 系列）計畫 | `docs/plan-placed-objects.md` |
+| 玩家動作完整清單・鍵位衝突・系統依賴・實作排序 | `docs/plan-player-actions.md` |
 
 ---
 
