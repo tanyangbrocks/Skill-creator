@@ -25,8 +25,9 @@ public class MapGenerator3D
 
     // ── 懶加載狀態（Generate 後有效）──────────────────────────────────────
     private int[,]? _heights;                              // 出生區高度圖 [initW, initD]
-    private int _heightsW;                                 // _heights 實際寬度
-    private int _heightsD;                                 // _heights 實際深度
+    // G-1: 地形參數（一次初始化，供 GetHeightAt 任意 (x,z) 確定性計算）
+    private float _hp1, _hp2, _hp3, _hp4;
+    private int _worldSeed, _worldW, _worldH, _worldD;
     private readonly HashSet<Vector3I> _generatedChunks = new();
 
     // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
@@ -39,10 +40,15 @@ public class MapGenerator3D
         int initW = Math.Min(W, Chunk3D.Size * 3);  // 48 tiles
         int initD = Math.Min(D, Chunk3D.Size);       // 16 tiles
 
-        // 出生區高度圖（initW×initD），懶加載區域用固定高度代替
-        _heights  = GenerateHeightmap(initW, initD, H, rng);
-        _heightsW = initW;
-        _heightsD = initD;
+        // G-1: 儲存地形參數供 GetHeightAt 確定性查詢任意 (x,z)
+        _worldSeed = seed; _worldW = W; _worldH = H; _worldD = D;
+        _hp1 = rng.NextSingle() * MathF.Tau;
+        _hp2 = rng.NextSingle() * MathF.Tau;
+        _hp3 = rng.NextSingle() * MathF.Tau;
+        _hp4 = rng.NextSingle() * MathF.Tau;
+
+        // 出生區高度圖（initW×initD）
+        _heights = GenerateHeightmap(initW, initD);
 
         FillAll(world, initW, H, initD, MaterialType.Stone);
         ApplyHeightmap(world, _heights, initW, H, initD);
@@ -98,6 +104,32 @@ public class MapGenerator3D
         }
     }
 
+    /// <summary>
+    /// G-1: 確定性地形高度查詢，任意 (x,z) 皆可呼叫，不依賴預生成陣列。
+    /// 結果只取決於世界 seed 與座標，chunk 邊界天衣無縫。
+    /// </summary>
+    public int GetHeightAt(int x, int z)
+    {
+        float fx = (float)x / _worldW, fz = (float)z / _worldD;
+        float n = (HeightHash(x, z, _worldSeed) / (float)0x7fff_ffff - 0.5f) * (_worldH * 0.012f);
+        float raw = _worldH * 0.32f
+            + MathF.Sin(fx * 2 * MathF.PI + _hp1) * (_worldH * 0.05f)
+            + MathF.Sin(fz * 3 * MathF.PI + _hp2) * (_worldH * 0.04f)
+            + MathF.Sin(fx * 7 * MathF.PI + _hp3) * (_worldH * 0.025f)
+            + MathF.Sin(fz * 5 * MathF.PI + _hp4) * (_worldH * 0.02f)
+            + n;
+        return Math.Clamp((int)raw, (int)(_worldH * 0.20f), (int)(_worldH * 0.45f));
+    }
+
+    private static int HeightHash(int x, int z, int seed)
+    {
+        int h = x * 1664525 + z * 1013904223 + seed * 22695477;
+        h ^= h >> 16;
+        h *= unchecked((int)0x45d9f3b);
+        h ^= h >> 16;
+        return h & 0x7fff_ffff;
+    }
+
     private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)
     {
         const int S = Chunk3D.Size;
@@ -109,15 +141,12 @@ public class MapGenerator3D
         {
             int wx = wx0 + lx, wz = wz0 + lz;
             if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
-            // 出生區外用固定高度（~32% of world height）
-            int h = (_heights != null && wx < _heightsW && wz < _heightsD)
-                ? _heights[wx, wz]
-                : (int)(H * 0.32f);
+            int h = GetHeightAt(wx, wz);  // G-1: 確定性查詢，不限 spawn 區
 
             for (int ly = 0; ly < S; ly++)
             {
                 int wy = wy0 + ly;
-                if ((uint)wy >= (uint)H || wy < h) continue; // 地表以上 = Air，不需 SetTile
+                if ((uint)wy >= (uint)H || wy < h) continue;
                 var mat = wy <= h + 2 ? MaterialType.Dirt : MaterialType.Stone;
                 world.SetTile(wx, wy, wz, mat);
             }
@@ -142,42 +171,13 @@ public class MapGenerator3D
     //  Step 2 — 高度圖（XZ 2D，each column has one surface Y）
     // ════════════════════════════════════════════════════════════
 
-    private static int[,] GenerateHeightmap(int W, int D, int H, Random rng)
+    // G-1: 改為 instance method，直接呼叫 GetHeightAt（不再用 rng / smoothing）
+    private int[,] GenerateHeightmap(int W, int D)
     {
-        float baseY  = H * 0.32f;
-        float p1 = rng.NextSingle() * MathF.Tau, p2 = rng.NextSingle() * MathF.Tau;
-        float p3 = rng.NextSingle() * MathF.Tau, p4 = rng.NextSingle() * MathF.Tau;
-
-        var raw = new float[W, D];
-        for (int x = 0; x < W; x++)
-        for (int z = 0; z < D; z++)
-        {
-            float fx = (float)x / W, fz = (float)z / D;
-            raw[x, z] = baseY
-                + MathF.Sin(fx * 2 * MathF.PI + p1) * (H * 0.05f)
-                + MathF.Sin(fz * 3 * MathF.PI + p2) * (H * 0.04f)
-                + MathF.Sin(fx * 7 * MathF.PI + p3) * (H * 0.025f)
-                + MathF.Sin(fz * 5 * MathF.PI + p4) * (H * 0.02f)
-                + (rng.NextSingle() - 0.5f) * (H * 0.012f);
-        }
-
-        // X 軸 + Z 軸各平滑 3 次
-        for (int pass = 0; pass < 3; pass++)
-        {
-            for (int z = 0; z < D; z++)
-            for (int x = 1; x < W - 1; x++)
-                raw[x, z] = (raw[x-1, z] + raw[x, z] + raw[x+1, z]) / 3f;
-            for (int x = 0; x < W; x++)
-            for (int z = 1; z < D - 1; z++)
-                raw[x, z] = (raw[x, z-1] + raw[x, z] + raw[x, z+1]) / 3f;
-        }
-
-        int yMin = (int)(H * 0.20f), yMax = (int)(H * 0.45f);
         var heights = new int[W, D];
         for (int x = 0; x < W; x++)
         for (int z = 0; z < D; z++)
-            heights[x, z] = Math.Clamp((int)raw[x, z], yMin, yMax);
-
+            heights[x, z] = GetHeightAt(x, z);
         return heights;
     }
 
