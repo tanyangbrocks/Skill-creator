@@ -57,11 +57,13 @@ public partial class TileWorldRenderer3D : Node3D
     public void Initialize(TileWorld3D world)
     {
         _world = world;
-        // 不透明材質：CullMode=Back（預設值），每個面只渲染一次
+        // 不透明材質：CullMode=Disabled，Greedy mesh 僅在 Air 鄰居方向生成面，
+        // 不存在「多餘的內側面」，雙面渲染不引入 artifact，且修正 +Y 面繞序問題。
         _matOpaque = new StandardMaterial3D
         {
             VertexColorUseAsAlbedo = true,
             ShadingMode            = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            CullMode               = BaseMaterial3D.CullModeEnum.Disabled,
         };
         // 半透明材質（水/火/蒸汽）：雙面 + AlphaBlend
         _matTransparent = new StandardMaterial3D
@@ -299,7 +301,10 @@ public partial class TileWorldRenderer3D : Node3D
                     V.Add(V3(L3(na,ua,va,df,i+h,j+w)));
                     V.Add(V3(L3(na,ua,va,df,i,  j+w)));
                     N.Add(norm); N.Add(norm); N.Add(norm); N.Add(norm);
-                    C.Add(col);  C.Add(col);  C.Add(col);  C.Add(col);
+                    // 方向光遮蔽：+Y=100% / ±X=80% / ±Z=70% / -Y=45%
+                    float shade = na == 1 ? (ns > 0 ? 1.00f : 0.45f) : (na == 0 ? 0.80f : 0.70f);
+                    var sc = new Color(col.R * shade, col.G * shade, col.B * shade, col.A);
+                    C.Add(sc);   C.Add(sc);   C.Add(sc);   C.Add(sc);
                     if (front)
                     { I.Add(b); I.Add(b+1); I.Add(b+2); I.Add(b); I.Add(b+2); I.Add(b+3); }
                     else
