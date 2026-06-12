@@ -155,8 +155,8 @@ public partial class Main : Node
 
     // 鏡頭縮放（3D 模式：調整正交尺寸）
     private float _orthoZoom = 30f * TileWorldConstants.TileSize;
-    private const float ZoomMin  = 8f  * TileWorldConstants.TileSize;
-    private const float ZoomMax  = 80f * TileWorldConstants.TileSize;
+    private static readonly float ZoomMin  = 8f  * TileWorldConstants.TileSize;
+    private static readonly float ZoomMax  = 80f * TileWorldConstants.TileSize;
     private const float ZoomStep = 1.2f;
 
     // 世界尺寸（3D）：Z 軸與 X 軸等寬；懶加載生成，不會拖慢啟動。
@@ -217,7 +217,7 @@ public partial class Main : Node
         _entitiesRoot = new Node3D();
         AddChild(_entitiesRoot);
 
-        const float T = TileWorldConstants.TileSize;
+        float T = TileWorldConstants.TileSize;
         _playerMesh = new MeshInstance3D
         {
             Mesh = new BoxMesh { Size = new Vector3(0.65f * T, 0.9f * T, 0.65f * T) },

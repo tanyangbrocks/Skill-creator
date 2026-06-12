@@ -155,7 +155,7 @@ public partial class TileWorldRenderer3D : Node3D
                 ch.MeshNode = miO;
         }
 
-        const float T = TileWorldConstants.TileSize;
+        float T = TileWorldConstants.TileSize;
         var pos = new Vector3(r.Coord.X * S * T, r.Coord.Y * S * T, r.Coord.Z * S * T);
         pair.O.Position = pos;
         pair.T.Position = pos;
