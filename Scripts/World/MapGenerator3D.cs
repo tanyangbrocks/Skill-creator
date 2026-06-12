@@ -130,6 +130,28 @@ public class MapGenerator3D
         return h & 0x7fff_ffff;
     }
 
+    /// <summary>
+    /// G-2: 確定性 3D 噪音洞穴判斷，per-tile，不依賴全域陣列。
+    /// 乘積型 sin*sin*cos 形成蠕蟲隧道形狀。
+    /// </summary>
+    private bool IsCaveAt(int x, int y, int z, int surfaceH)
+    {
+        if (y <= surfaceH + 2 || y >= _worldH - 8) return false;
+
+        // 種子相位（取低 12 位避免大浮點數誤差）
+        float ps = (_worldSeed & 0xfff) * 0.001f;
+        float nx = x * 0.06f, ny = y * 0.09f, nz = z * 0.06f;
+
+        // 主頻（乘積型：三個 sin/cos 同時接近 1 才出現大值 → 蠕蟲隧道）
+        float v = MathF.Sin(nx + ps) * MathF.Sin(nz * 1.3f + ps * 1.7f)
+                * MathF.Cos(ny * 0.7f + ps * 2.3f);
+        // 次頻（細節）
+        v += MathF.Sin(nx * 2.5f + nz * 1.9f + ps * 3.1f)
+           * MathF.Cos(ny * 2.2f + ps * 1.3f) * 0.35f;
+
+        return v > 0.40f;  // 地下約 10-15% 為 Air（洞穴）
+    }
+
     private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)
     {
         const int S = Chunk3D.Size;
@@ -141,12 +163,13 @@ public class MapGenerator3D
         {
             int wx = wx0 + lx, wz = wz0 + lz;
             if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
-            int h = GetHeightAt(wx, wz);  // G-1: 確定性查詢，不限 spawn 區
+            int h = GetHeightAt(wx, wz);
 
             for (int ly = 0; ly < S; ly++)
             {
                 int wy = wy0 + ly;
                 if ((uint)wy >= (uint)H || wy < h) continue;
+                if (IsCaveAt(wx, wy, wz, h)) continue;  // G-2: 噪音洞穴 → Air
                 var mat = wy <= h + 2 ? MaterialType.Dirt : MaterialType.Stone;
                 world.SetTile(wx, wy, wz, mat);
             }
