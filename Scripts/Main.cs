@@ -776,14 +776,30 @@ public partial class Main : Node
         }
         if (_deathScreen.Visible) _deathScreen.Visible = false;
 
-        // 滑鼠世界格座標：透過 CameraController 將螢幕座標投影到 Z=0 平面取得世界座標
+        // 滑鼠世界格座標 + 面法線
         {
-            var screenMouse = GetViewport().GetMousePosition();
-            var worldPos3   = _camera3d.ProjectScreenToWorld(screenMouse);
             float mT = TileWorldConstants.TileSize;
-            _player.MouseGridPos = new GridPos(
-                Math.Clamp((int)(worldPos3.X / mT), 0, _world3d.Width  - 1),
-                Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1));
+            var screenMouse = GetViewport().GetMousePosition();
+            var worldPos3   = _camera3d.ProjectScreenToWorld(screenMouse); // 供 debug 顯示
+
+            if (_camera3d.Mode == CameraController.CameraMode.SideScroll2D)
+            {
+                _player.MouseGridPos = new GridPos(
+                    Math.Clamp((int)(worldPos3.X / mT), 0, _world3d.Width  - 1),
+                    Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1));
+                _player.MouseFaceNormal = new GridPos(0, -1, 0);
+            }
+            else
+            {
+                var (ro, rd) = _camera3d.GetCenterRay();
+                var startGrid = new GridPos(
+                    Math.Clamp((int)(ro.X / mT), 0, _world3d.Width  - 1),
+                    Math.Clamp((int)(ro.Y / mT), 0, _world3d.Height - 1),
+                    Math.Clamp((int)(ro.Z / mT), 0, _world3d.Depth  - 1));
+                var (hit, _, norm, ok) = _world3d.Raycast(startGrid, rd.X, rd.Y, rd.Z,
+                    PlayerController.MiningRange * 2f);
+                if (ok) { _player.MouseGridPos = hit; _player.MouseFaceNormal = norm; }
+            }
 
             if (_debugCoordEnabled)
             {
@@ -970,20 +986,20 @@ public partial class Main : Node
         // 放置（右鍵，含冷卻避免過快連放）
         if (_placeCooldown > 0f) _placeCooldown -= dt;
 
-        // 放置（右鍵，所有視角均可；TPS/FPS 目標定位待 Phase 2 尾款 Raycast 完成前以 MouseGridPos 近似）
+        // 放置（右鍵，face-aligned：目標 = MouseGridPos + MouseFaceNormal）
         if (Input.IsMouseButtonPressed(MouseButton.Right) && _placeCooldown <= 0f && !_mouseOverHotbar && !_inventoryOpen && !_equipPanelOpen)
         {
-            var target = _player.MouseGridPos;
             var active = _player.Inventory.ActiveItem;
             if (!active.IsEmpty)
             {
-                var itemData = ItemRegistry.Get(active.ItemId);
+                var itemData    = ItemRegistry.Get(active.ItemId);
+                var placeTarget = _player.MouseGridPos + _player.MouseFaceNormal;
                 if (itemData.IsPlaceable && itemData.PlaceAs.HasValue
-                    && target != _player.Position
-                    && _player.Position.DistanceTo(target) <= PlayerController.MiningRange
-                    && _world3d.TypeAt(target.X, target.Y) == MaterialType.Air)
+                    && placeTarget != _player.Position
+                    && _player.Position.DistanceTo(placeTarget) <= PlayerController.MiningRange
+                    && PlacementValidator.CanPlace(_world3d, placeTarget, itemData.PlaceAs.Value))
                 {
-                    _world3d.Set(target.X, target.Y, itemData.PlaceAs.Value);
+                    _world3d.SetTile(placeTarget.X, placeTarget.Y, placeTarget.Z, itemData.PlaceAs.Value);
                     _player.Inventory.Consume(_player.Inventory.ActiveHotbarIndex);
                     _placeCooldown = 0.12f;
                 }

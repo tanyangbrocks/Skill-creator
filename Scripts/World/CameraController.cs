@@ -112,6 +112,13 @@ public partial class CameraController : Node3D
     public Vector2 WorldToScreen(Vector3 worldPos) =>
         _cam.UnprojectPosition(worldPos);
 
+    /// <summary>螢幕中央射線（TPS/FPS 採掘用）</summary>
+    public (Vector3 Origin, Vector3 Dir) GetCenterRay()
+    {
+        var mid = GetViewport().GetVisibleRect().GetCenter();
+        return (_cam.ProjectRayOrigin(mid), _cam.ProjectRayNormal(mid));
+    }
+
     public void CycleMode()
     {
         Mode = (CameraMode)(((int)Mode + 1) % 4);

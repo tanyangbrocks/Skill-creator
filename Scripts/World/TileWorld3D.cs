@@ -555,12 +555,12 @@ public sealed class TileWorld3D : IWorldInterface
         OnExplosion?.Invoke(new GridPos(cx, cy, cz), radius);
     }
 
-    /// <summary>3D DDA 射線（Amanatides-Woo）</summary>
-    public (GridPos Hit, int MatId, bool DidHit) Raycast(
+    /// <summary>3D DDA 射線（Amanatides-Woo），回傳命中格與面法線</summary>
+    public (GridPos Hit, int MatId, GridPos FaceNormal, bool DidHit) Raycast(
         GridPos start, float dirX, float dirY, float dirZ, float maxDist)
     {
         float len = MathF.Sqrt(dirX*dirX + dirY*dirY + dirZ*dirZ);
-        if (len < 1e-4f) return (start, 0, false);
+        if (len < 1e-4f) return (start, 0, new GridPos(0, -1, 0), false);
         dirX /= len; dirY /= len; dirZ /= len;
 
         int tx = start.X, ty = start.Y, tz = start.Z;
@@ -576,24 +576,36 @@ public sealed class TileWorld3D : IWorldInterface
         float sY = dirY >= 0 ? (ty + 1f - (start.Y + 0.5f)) * dY : ((start.Y + 0.5f) - ty) * dY;
         float sZ = dirZ >= 0 ? (tz + 1f - (start.Z + 0.5f)) * dZ : ((start.Z + 0.5f) - tz) * dZ;
 
+        int lastAxis = 1;
         for (float dist = 0f; dist < maxDist;)
         {
-            if (sX < sY && sX < sZ) { dist = sX; sX += dX; tx += stepX; }
-            else if (sY < sZ)        { dist = sY; sY += dY; ty += stepY; }
-            else                     { dist = sZ; sZ += dZ; tz += stepZ; }
+            if (sX < sY && sX < sZ) { dist = sX; sX += dX; tx += stepX; lastAxis = 0; }
+            else if (sY < sZ)        { dist = sY; sY += dY; ty += stepY; lastAxis = 1; }
+            else                     { dist = sZ; sZ += dZ; tz += stepZ; lastAxis = 2; }
 
             if (dist > maxDist || !InBounds(tx, ty, tz)) break;
             var mat = GetTile(tx, ty, tz);
             if (mat != MaterialType.Air)
-                return (new GridPos(tx, ty, tz), (int)mat, true);
+            {
+                var norm = lastAxis switch
+                {
+                    0 => new GridPos(-stepX, 0, 0),
+                    1 => new GridPos(0, -stepY, 0),
+                    _ => new GridPos(0, 0, -stepZ),
+                };
+                return (new GridPos(tx, ty, tz), (int)mat, norm, true);
+            }
         }
-        return (start, 0, false);
+        return (start, 0, new GridPos(0, -1, 0), false);
     }
 
     /// <summary>2D Raycast 向後相容包裝（Z=0 平面）</summary>
     public (GridPos Hit, int MatId, bool DidHit) Raycast(
-        GridPos start, float dirX, float dirY, float maxDist) =>
-        Raycast(start, dirX, dirY, 0f, maxDist);
+        GridPos start, float dirX, float dirY, float maxDist)
+    {
+        var (hit, mat, _, ok) = Raycast(start, dirX, dirY, 0f, maxDist);
+        return (hit, mat, ok);
+    }
 
     /// <summary>球形快照（鍵 = z*W*H + y*W + x）</summary>
     public TileWorldSnapshot SnapshotRegion(GridPos center, int radius)

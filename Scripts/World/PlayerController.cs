@@ -25,7 +25,9 @@ public class PlayerController : IElementalTarget, ISnapshottable
     // Facing 只追蹤水平方向，確保投射物永遠往左/右打
     public GridPos Facing       { get; private set; } = new GridPos(1, 0);
     // 滑鼠對應的世界格座標（由 Main._Process 每幀更新）
-    public GridPos MouseGridPos { get; set; }
+    public GridPos MouseGridPos    { get; set; }
+    // 滑鼠指向格的面法線（由 Main._Process 每幀更新；SideScroll2D 預設朝上 -Y）
+    public GridPos MouseFaceNormal { get; set; } = new GridPos(0, -1, 0);
 
     public Inventory       Inventory  { get; } = new();
     public PlayerEquipment Equipment  { get; } = new();

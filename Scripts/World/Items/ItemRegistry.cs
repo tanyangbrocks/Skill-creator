@@ -16,11 +16,11 @@ public static class ItemRegistry
 
         // ── 方塊物品 ──────────────────────────────────────────────
         //        Id               名稱   可放  放成        工具  Tier  速度   疊
-        Reg(new ItemData(ItemId.BlockDirt,  "泥土", true, MaterialType.Dirt,  false, 0, 1.0f, 99));
-        Reg(new ItemData(ItemId.BlockStone, "圓石", true, MaterialType.Stone, false, 0, 1.0f, 99));
-        Reg(new ItemData(ItemId.BlockWood,  "木材", true, MaterialType.Wood,  false, 0, 1.0f, 99));
-        Reg(new ItemData(ItemId.BlockSand,  "沙",   true, MaterialType.Sand,  false, 0, 1.0f, 99));
-        Reg(new ItemData(ItemId.BlockAsh,   "灰燼", true, MaterialType.Ash,   false, 0, 1.0f, 99));
+        Reg(new ItemData(ItemId.BlockDirt,  "泥土", true, MaterialType.Dirt,  false, 0, 1.0f, 99999));
+        Reg(new ItemData(ItemId.BlockStone, "圓石", true, MaterialType.Stone, false, 0, 1.0f, 99999));
+        Reg(new ItemData(ItemId.BlockWood,  "木材", true, MaterialType.Wood,  false, 0, 1.0f, 99999));
+        Reg(new ItemData(ItemId.BlockSand,  "沙",   true, MaterialType.Sand,  false, 0, 1.0f, 99999));
+        Reg(new ItemData(ItemId.BlockAsh,   "灰燼", true, MaterialType.Ash,   false, 0, 1.0f, 99999));
 
         // ── 工具 ──────────────────────────────────────────────────
         Reg(new ItemData(ItemId.ToolBasicPick, "基礎鎬", false, null, true, 1, 2.5f, 1));
@@ -38,10 +38,10 @@ public static class ItemRegistry
 
         // ── 礦石原材料（W-4）─────────────────────────────────────────
         //        Id                  名稱       可放   放成                              工具   Tier  速  疊
-        Reg(new ItemData(ItemId.OreCoal,         "煤炭",   true, MaterialType.CoalOre,         false, 0, 1f, 99));
-        Reg(new ItemData(ItemId.OreCopperRaw,    "生銅礦", true, MaterialType.CopperOre,       false, 0, 1f, 99));
-        Reg(new ItemData(ItemId.OreIronRaw,      "生鐵礦", true, MaterialType.IronOre,         false, 0, 1f, 99));
-        Reg(new ItemData(ItemId.OreMagicCrystal, "魔晶石", true, MaterialType.MagicCrystalOre, false, 0, 1f, 99));
+        Reg(new ItemData(ItemId.OreCoal,         "煤炭",   true, MaterialType.CoalOre,         false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.OreCopperRaw,    "生銅礦", true, MaterialType.CopperOre,       false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.OreIronRaw,      "生鐵礦", true, MaterialType.IronOre,         false, 0, 1f, 99999));
+        Reg(new ItemData(ItemId.OreMagicCrystal, "魔晶石", true, MaterialType.MagicCrystalOre, false, 0, 1f, 99999));
     }
 
     private static void Reg(ItemData d) => _data[(int)d.Id] = d;
