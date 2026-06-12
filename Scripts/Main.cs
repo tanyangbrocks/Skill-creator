@@ -1077,23 +1077,26 @@ public partial class Main : Node
                 var minedMat = _player.TickMining(_world3d, target, dt);
                 if (minedMat.HasValue)
                 {
-                    // 分流：完美移除 vs 形狀採掘
-                    bool doPerformRemove = _perfectRemove
-                        && pendingUnit != null
-                        && pendingUnit.Tiles.Count > 0;  // Tiles=0 代表已解體
-
-                    if (doPerformRemove)
+                    // R-6c 分流：完美移除 vs 形狀採掘
+                    // 完美移除模式且目標屬於 PlacedUnit → 進入放置物件路線
+                    // （即使此次採掘令 Unit 剛好達 Damage≥0.5 而解體，也不 fall-through 到形狀採掘）
+                    if (_perfectRemove && pendingUnit != null)
                     {
-                        // 完美移除路線：移除 Unit 剩餘所有 tiles，返還 1 物品
-                        var remaining = pendingUnit!.Tiles.ToList();
-                        _placedRegistry.RemoveUnit(pendingUnit);
-                        foreach (var p in remaining)
-                            if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
-                                _world3d.DestroyTile(p, DestroyReason.ShapeMining);
+                        if (pendingUnit.Tiles.Count > 0)
+                        {
+                            // Unit 仍完整（Damage < 0.5）：移除剩餘所有 tiles，返還 1 物品
+                            var remaining = pendingUnit.Tiles.ToList();
+                            _placedRegistry.RemoveUnit(pendingUnit);
+                            foreach (var p in remaining)
+                                if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                                    _world3d.DestroyTile(p, DestroyReason.ShapeMining);
+                        }
+                        // else: 此次採掘令 Unit 達 Damage≥0.5 → 已自動解體
+                        // 剩餘 tiles 已變世界原生；不做形狀採掘，僅返還 1 物品
                     }
                     else
                     {
-                        // 形狀採掘路線：靜默破壞形狀內其餘格（中心格已由 TickMining 摧毀）
+                        // 形狀採掘路線（世界原生 tile 或 _perfectRemove=false）
                         foreach (var (dx, dy, dz) in ShapeVoxels.GetOffsets(_activeShape))
                         {
                             if (dx == 0 && dy == 0 && dz == 0) continue;
