@@ -859,7 +859,8 @@ public partial class Main : Node
             {
                 _player.MouseGridPos = new GridPos(
                     Math.Clamp((int)((worldPos3.X + WorldScale.OriginX) / mT), 0, _world3d.Width  - 1),
-                    Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1));
+                    Math.Clamp((int)(worldPos3.Y / mT), 0, _world3d.Height - 1),
+                    _player.Position.Z);
                 _player.MouseFaceNormal = new GridPos(0, -1, 0);
             }
             else
@@ -869,8 +870,7 @@ public partial class Main : Node
                     Math.Clamp((int)((ro.X + WorldScale.OriginX) / mT), 0, _world3d.Width  - 1),
                     Math.Clamp((int)(ro.Y / mT), 0, _world3d.Height - 1),
                     Math.Clamp((int)((ro.Z + WorldScale.OriginZ) / mT), 0, _world3d.Depth  - 1));
-                var (hit, _, norm, ok) = _world3d.Raycast(startGrid, rd.X, rd.Y, rd.Z,
-                    PlayerController.MiningRange * 2f);
+                var (hit, _, norm, ok) = _world3d.Raycast(startGrid, rd.X, rd.Y, rd.Z, 50f);
                 if (ok) { _player.MouseGridPos = hit; _player.MouseFaceNormal = norm; }
             }
 

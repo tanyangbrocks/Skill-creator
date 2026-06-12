@@ -44,14 +44,15 @@ public class MapGenerator3D
     {
         _worldSeed = seed;
 
-        // 地形高度：FBm 5 octave，頻率 0.0015 → 一個地形起伏跨越約 667 tiles
+        // 地形高度：FBm 7 octave，頻率 0.001 → 一個大山脈週期約 1000 tiles（更寬廣）
+        // 7 個 octave 讓高頻細節（第 6-7 octave ≈ 16-31 tile 週期）增加地表凹凸感
         _heightNoise = new Godot.FastNoiseLite
         {
             NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
             Seed           = seed,
-            Frequency      = 0.0015f,
+            Frequency      = 0.001f,
             FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
-            FractalOctaves = 5,
+            FractalOctaves = 7,
             FractalLacunarity = 2.0f,
             FractalGain    = 0.5f,
         };
@@ -180,8 +181,9 @@ public class MapGenerator3D
     public int GetHeightAt(int x, int z)
     {
         float n = _heightNoise!.GetNoise2D(x, z);  // [-1, 1]
-        float raw = _worldH * 0.32f + n * (_worldH * 0.13f);
-        return Math.Clamp((int)raw, (int)(_worldH * 0.18f), (int)(_worldH * 0.46f));
+        // mean 0.35 → 平均地表在 35% 深度；振幅 0.20 → ±320 tile = ±10 倍玩家身高
+        float raw = _worldH * 0.35f + n * (_worldH * 0.20f);
+        return Math.Clamp((int)raw, (int)(_worldH * 0.10f), (int)(_worldH * 0.57f));
     }
 
     /// <summary>
@@ -201,7 +203,7 @@ public class MapGenerator3D
 
         // 大洞穴：noise 高值區域，Y 方向壓縮 0.6× 讓洞穴橫向更寬
         float c = _caveWide!.GetNoise3D(x, y * 0.6f, z);
-        if (c > 0.58f) return true;
+        if (c > 0.75f) return true;
 
         return false;
     }
@@ -371,17 +373,28 @@ public class MapGenerator3D
         int spawnX = _worldW / 2;
         int spawnZ = _worldD / 2;
 
-        // 生成出生點所在的 chunk 全高 column（若尚未生成）
-        int spawnCX = spawnX / Chunk3D.Size;
-        int spawnCZ = spawnZ / Chunk3D.Size;
-        for (int cy = 0; cy < CeilDiv(_worldH, Chunk3D.Size); cy++)
+        int spawnCX  = spawnX / Chunk3D.Size;
+        int spawnCZ  = spawnZ / Chunk3D.Size;
+        int maxCX    = CeilDiv(_worldW, Chunk3D.Size) - 1;
+        int maxCZ    = CeilDiv(_worldD, Chunk3D.Size) - 1;
+        int totalCY  = CeilDiv(_worldH, Chunk3D.Size);
+
+        // 預生成出生點周圍 3×3 chunk 範圍（防止玩家出生後四周全是空氣）
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dx = -1; dx <= 1; dx++)
         {
-            var coord = new Vector3I(spawnCX, cy, spawnCZ);
-            if (_generatedChunks.Add(coord))
-                GenerateChunkLazy(world, coord);
+            int pcx = spawnCX + dx, pcz = spawnCZ + dz;
+            if ((uint)pcx > (uint)maxCX || (uint)pcz > (uint)maxCZ) continue;
+            for (int cy = 0; cy < totalCY; cy++)
+            {
+                var coord = new Vector3I(pcx, cy, pcz);
+                if (!_generatedChunks.Add(coord)) continue;
+                bool fromDisk = WorldDir.Length > 0
+                    && world.TryLoadChunk(pcx, cy, pcz, WorldDir);
+                if (!fromDisk) GenerateChunkLazy(world, coord);
+            }
         }
 
-        // 掃描找到第一個可站立的地表（空氣格正下方為實心格，且上方有足夠淨高）
         int h = GetHeightAt(spawnX, spawnZ);
         int spawnY = Math.Max(0, h - WorldScale.PlayerH);
         return new GridPos(spawnX, spawnY, spawnZ);
