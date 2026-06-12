@@ -26,6 +26,11 @@ public sealed partial class GameFlowUI : CanvasLayer
     private VBoxContainer _charListBox  = null!;
     private VBoxContainer _worldListBox = null!;
 
+    // G-6: 確認對話框
+    private Panel  _confirmDialog  = null!;
+    private Label  _confirmMsgLbl  = null!;
+    private Action? _pendingConfirm;
+
     public override void _Ready()
     {
         Layer = 100; // 始終在最頂層
@@ -39,6 +44,7 @@ public sealed partial class GameFlowUI : CanvasLayer
         BuildCharCreateScreen();
         BuildWorldSelectScreen();
         BuildWorldCreateScreen();
+        BuildConfirmDialog();   // G-6: 刪除確認框（ZIndex 最高，蓋在所有畫面之上）
 
         ShowScreen(_titleScreen);
     }
@@ -87,6 +93,60 @@ public sealed partial class GameFlowUI : CanvasLayer
         _charCreateScreen.Visible  = target == _charCreateScreen;
         _worldSelectScreen.Visible = target == _worldSelectScreen;
         _worldCreateScreen.Visible = target == _worldCreateScreen;
+    }
+
+    // ── G-6：確認對話框 ────────────────────────────────────────────────────
+
+    private void BuildConfirmDialog()
+    {
+        // 半透明遮罩（覆蓋全螢幕）
+        _confirmDialog = MakeFullPanel(new Color(0f, 0f, 0f, 0.72f));
+        _confirmDialog.Visible = false;
+        _confirmDialog.ZIndex  = 20;   // 蓋在所有 Panel 之上
+        AddChild(_confirmDialog);
+
+        // 對話框本體
+        var box = new Panel { Size = new Vector2(420, 180) };
+        box.Position = new Vector2(190, 210);
+        box.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+        {
+            BgColor = new Color(0.13f, 0.13f, 0.18f),
+            CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6,
+            CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6,
+        });
+        _confirmDialog.AddChild(box);
+
+        _confirmMsgLbl = MakeLabel("", 16);
+        _confirmMsgLbl.Position     = new Vector2(20, 28);
+        _confirmMsgLbl.Size         = new Vector2(380, 56);
+        _confirmMsgLbl.AutowrapMode = TextServer.AutowrapMode.Word;
+        box.AddChild(_confirmMsgLbl);
+
+        var subMsg = MakeLabel("此操作無法復原。", 14, new Color(0.70f, 0.40f, 0.40f));
+        subMsg.Position = new Vector2(20, 84);
+        box.AddChild(subMsg);
+
+        var cancelBtn = MakeBtn("取消", new Vector2(110, 40));
+        cancelBtn.Position = new Vector2(180, 122);
+        cancelBtn.Pressed += () => { _confirmDialog.Visible = false; _pendingConfirm = null; };
+        box.AddChild(cancelBtn);
+
+        var okBtn = MakeBtn("確定刪除", new Vector2(120, 40), new Color(0.50f, 0.12f, 0.12f));
+        okBtn.Position = new Vector2(300, 122);
+        okBtn.Pressed += () =>
+        {
+            _confirmDialog.Visible = false;
+            _pendingConfirm?.Invoke();
+            _pendingConfirm = null;
+        };
+        box.AddChild(okBtn);
+    }
+
+    private void ShowConfirm(string message, Action onConfirm)
+    {
+        _confirmMsgLbl.Text    = message;
+        _pendingConfirm        = onConfirm;
+        _confirmDialog.Visible = true;
     }
 
     // ── 標題畫面 ─────────────────────────────────────────────────────────
@@ -156,9 +216,13 @@ public sealed partial class GameFlowUI : CanvasLayer
             _charListBox.AddChild(MakeCharCard(ch));
     }
 
-    private Panel MakeCharCard(CharacterSaveData ch)
+    private Control MakeCharCard(CharacterSaveData ch)
     {
-        var card = new Panel { CustomMinimumSize = new Vector2(750, 64) };
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(750, 64) };
+        row.AddThemeConstantOverride("separation", 4);
+
+        // 主卡片區（點擊 → 選角色）
+        var card = new Panel { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         card.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
             BgColor = new Color(0.16f, 0.20f, 0.28f),
@@ -168,24 +232,23 @@ public sealed partial class GameFlowUI : CanvasLayer
 
         var lbl = MakeLabel($"  {ch.Name}    LV {ch.Level}", 18);
         lbl.Position = new Vector2(0, 20);
-        lbl.Size     = new Vector2(600, 30);
+        lbl.Size     = new Vector2(550, 30);
         card.AddChild(lbl);
 
-        // 透明點擊層，覆蓋整張卡片
-        var clickBtn = new Button
-        {
-            Text = "", Flat = true,
-            FocusMode = Control.FocusModeEnum.None,
-        };
+        var clickBtn = new Button { Text = "", Flat = true, FocusMode = Control.FocusModeEnum.None };
         clickBtn.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        clickBtn.Pressed += () =>
-        {
-            _selChar = ch;
-            RebuildWorldList();
-            ShowScreen(_worldSelectScreen);
-        };
+        clickBtn.Pressed += () => { _selChar = ch; RebuildWorldList(); ShowScreen(_worldSelectScreen); };
         card.AddChild(clickBtn);
-        return card;
+        row.AddChild(card);
+
+        // 🗑 刪除按鈕
+        var delBtn = MakeBtn("🗑", new Vector2(52, 64), new Color(0.38f, 0.10f, 0.10f));
+        delBtn.AddThemeFontSizeOverride("font_size", 18);
+        delBtn.Pressed += () => ShowConfirm(
+            $"確定要刪除角色「{ch.Name}」嗎？",
+            () => { FlowSaveSystem.DeleteCharacter(ch, _chars); FlowSaveSystem.Save(_chars, _worlds); RebuildCharList(); });
+        row.AddChild(delBtn);
+        return row;
     }
 
     // ── 創建角色 ─────────────────────────────────────────────────────────
@@ -289,9 +352,13 @@ public sealed partial class GameFlowUI : CanvasLayer
             _worldListBox.AddChild(MakeWorldCard(w));
     }
 
-    private Panel MakeWorldCard(WorldSaveData w)
+    private Control MakeWorldCard(WorldSaveData w)
     {
-        var card = new Panel { CustomMinimumSize = new Vector2(750, 64) };
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(750, 64) };
+        row.AddThemeConstantOverride("separation", 4);
+
+        // 主卡片區（點擊 → 進入世界）
+        var card = new Panel { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         card.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
             BgColor = new Color(0.16f, 0.26f, 0.20f),
@@ -301,14 +368,10 @@ public sealed partial class GameFlowUI : CanvasLayer
 
         var lbl = MakeLabel($"  {w.Name}", 18);
         lbl.Position = new Vector2(0, 20);
-        lbl.Size     = new Vector2(600, 30);
+        lbl.Size     = new Vector2(550, 30);
         card.AddChild(lbl);
 
-        var clickBtn = new Button
-        {
-            Text = "", Flat = true,
-            FocusMode = Control.FocusModeEnum.None,
-        };
+        var clickBtn = new Button { Text = "", Flat = true, FocusMode = Control.FocusModeEnum.None };
         clickBtn.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         clickBtn.Pressed += () =>
         {
@@ -318,7 +381,16 @@ public sealed partial class GameFlowUI : CanvasLayer
             GameStarted?.Invoke(_selChar!, w);
         };
         card.AddChild(clickBtn);
-        return card;
+        row.AddChild(card);
+
+        // 🗑 刪除按鈕
+        var delBtn = MakeBtn("🗑", new Vector2(52, 64), new Color(0.38f, 0.10f, 0.10f));
+        delBtn.AddThemeFontSizeOverride("font_size", 18);
+        delBtn.Pressed += () => ShowConfirm(
+            $"確定要刪除世界「{w.Name}」嗎？",
+            () => { FlowSaveSystem.DeleteWorld(w, _worlds); FlowSaveSystem.Save(_chars, _worlds); RebuildWorldList(); });
+        row.AddChild(delBtn);
+        return row;
     }
 
     // ── 創建世界 ─────────────────────────────────────────────────────────
