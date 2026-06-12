@@ -18,6 +18,7 @@ public partial class Main : Node
     private TileWorld3D              _world3d     = null!;
     private CameraController         _camera3d    = null!;
     private MapGenerator3D           _mapGen      = null!;
+    private SkyController            _sky         = null!;
     private WorldSaveData?           _worldData;            // G-5: 當前世界存檔
     private int                      _evictFrame;           // G-4: 幀計數（LRU 卸載用）
     private int                      _simStepsPerFrame = 1;
@@ -220,6 +221,11 @@ public partial class Main : Node
                 EnemySpawns = [],
             };
         }
+
+        // 天空背景（在渲染器前加入，確保深度緩衝正確排序）
+        _sky = new SkyController();
+        AddChild(_sky);
+        _sky.Initialize();
 
         _renderer3d = new TileWorldRenderer3D();
         _renderer3d.Initialize(_world3d);
