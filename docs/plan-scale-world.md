@@ -28,7 +28,7 @@
 | **BodyH（玩家 tile 高）** | **1** | **24~32** | **64~96** |
 | WorldH | 200 | 1600 | 4800 |
 | WorldW / D | 600 | 3200 | 9600 |
-| CA 主動區（WxHxD） | 64×200×64 | 128×400×128 | 256×800×256 |
+| CA 主動區（WxHxD） | 64×200×64 | 128×1600×128 | 256×3200×256 |
 
 「近期目標」可在現有硬體上跑，但 fps 需優化。
 「遠期目標」等設備更強或架構升級後調整一個常數即可。
@@ -469,6 +469,33 @@ V-3（粒子沉積）    → R 系列完成後，Grain 穩定後
 
 ---
 
+## 完整實作順序（含 V 系列）
+
+```
+Phase A（近期，Grain=16）：
+  Step 1   P-0：WorldScale.cs
+  Step 2   E-1：GPU Upload GC 修正 ⚠️
+  Step 3   P-1/P-3/P-2：玩家 BodyH=32 + MapGen + mesh
+  Step 4   W-1/W-2/W-3：世界擴張 3200×1600×3200
+  Step 5   E-2/E-3：Upload 跳過 Air + 分幀 CA
+  Step 6   R-1/R-2/R-3：3D Raycast 採掘
+           → 里程碑：粒子尺度可見，挖掘凹坑細緻
+
+  Step 7   V-1：VFX 粒子池（爆炸/採掘視覺）
+  Step 8   V-2：液體表面 Shader
+           → 里程碑：世界視覺豐富
+
+Phase B（遠期，Grain=32）：
+  → 改 WorldScale.Grain = 32，其餘自動跟進
+
+  Step 9   V-3：粒子沉積 → 改變 Tile 材質
+           → 最終里程碑：灰燼堆積、水痕殘留、岩漿冷卻成石
+```
+
+---
+
+---
+
 ## 自動迴歸保護：Preflight Check 7
 
 `preflight-check.ps1` Check 7 掃描渲染層檔案，確保 `Vector3`/`Vector2` 建構式不含「裸 Godot-unit float」——即未乘 TileSize 的絕對單位值。
@@ -509,35 +536,12 @@ powershell -ExecutionPolicy Bypass -File preflight-check.ps1
 # - MeshInstance3D / Node3D 的 Vector3 → 必須確認有 * TileSize
 ```
 
-### 未來維護
+### 計畫完成後必做：驗證 Check 7
 
-實作 S-2 ~ S-6（TileWorldRenderer3D、Main.cs 3D 座標）後，
-若某個 Check 7 hit 確認已加 TileSize，可將其對應的識別字加入 `$tsSafe`，或直接確認程式碼含有 `TileSize`/`WorldScale.` 即可消除警告。
-
----
-
-## 完整實作順序（含 V 系列）
-
-```
-Phase A（近期，Grain=16）：
-  Step 1   P-0：WorldScale.cs
-  Step 2   E-1：GPU Upload GC 修正 ⚠️
-  Step 3   P-1/P-3/P-2：玩家 BodyH=32 + MapGen + mesh
-  Step 4   W-1/W-2/W-3：世界擴張 3200×1600×3200
-  Step 5   E-2/E-3：Upload 跳過 Air + 分幀 CA
-  Step 6   R-1/R-2/R-3：3D Raycast 採掘
-           → 里程碑：粒子尺度可見，挖掘凹坑細緻
-
-  Step 7   V-1：VFX 粒子池（爆炸/採掘視覺）
-  Step 8   V-2：液體表面 Shader
-           → 里程碑：世界視覺豐富
-
-Phase B（遠期，Grain=32）：
-  → 改 WorldScale.Grain = 32，其餘自動跟進
-
-  Step 9   V-3：粒子沉積 → 改變 Tile 材質
-           → 最終里程碑：灰燼堆積、水痕殘留、岩漿冷卻成石
-```
+> **⚠️ 本計畫（P/E/W/R 系列）全部實作完成後**，回頭跑一次 Check 7，確認：
+> 1. **$tsSafe 豁免清單**是否需要更新——新增 UI 識別字，或刪除已不再出現的豁免
+> 2. **是否有遺漏**——即 WW 輸出中仍有 MeshInstance3D / Node3D 的 Vector3 未加 TileSize
+> 3. **誤報率**——若 WW 數量大幅增加，檢查 P-2 / R-2 / E-4 的新程式碼是否帶入了裸 float
 
 ---
 
