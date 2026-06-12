@@ -110,7 +110,8 @@ public class MapGenerator3D
         ApplyCaves(world, caves, _heights, initW, H, initD);
         EnsureWalkableCaves(world, _heights, initW, H, initD);
 
-        var surfaceEntry = EnsureConnectivity(world, _heights, initW, H, initD, rng);
+        EnsureConnectivity(world, _heights, initW, H, initD, rng);  // 修復出生區洞穴連通性
+        var surfaceEntry = ComputeWorldCenterSpawn(world);           // 真正出生點：世界中心
         SealBedrock(world, initW, H, initD);
         PlaceOreVeins(world, _heights, initW, H, initD, rng);
         AddDecor(world, _heights, initW, H, initD, rng);
@@ -362,10 +363,35 @@ public class MapGenerator3D
     }
 
     // ════════════════════════════════════════════════════════════
+    //  出生點：世界中心地表，確保對應 chunk 已生成
+    // ════════════════════════════════════════════════════════════
+
+    private GridPos ComputeWorldCenterSpawn(TileWorld3D world)
+    {
+        int spawnX = _worldW / 2;
+        const int spawnZ = 0;   // SideScroll2D 鎖 Z=0
+
+        // 生成出生點所在的 chunk 全高 column（若尚未生成）
+        int spawnCX = spawnX / Chunk3D.Size;
+        int spawnCZ = spawnZ / Chunk3D.Size;
+        for (int cy = 0; cy < CeilDiv(_worldH, Chunk3D.Size); cy++)
+        {
+            var coord = new Vector3I(spawnCX, cy, spawnCZ);
+            if (_generatedChunks.Add(coord))
+                GenerateChunkLazy(world, coord);
+        }
+
+        // 掃描找到第一個可站立的地表（空氣格正下方為實心格，且上方有足夠淨高）
+        int h = GetHeightAt(spawnX, spawnZ);
+        int spawnY = Math.Max(0, h - WorldScale.PlayerH);
+        return new GridPos(spawnX, spawnY, spawnZ);
+    }
+
+    // ════════════════════════════════════════════════════════════
     //  Step 4 — 連通性保證（6-鄰接 FloodFill，以 initD 為 Z 邊界）
     // ════════════════════════════════════════════════════════════
 
-    private static GridPos EnsureConnectivity(
+    private static void EnsureConnectivity(
         TileWorld3D world, int[,] heights, int W, int H, int D, Random rng)
     {
         int midX = W / 2, midZ = 0;
@@ -391,7 +417,6 @@ public class MapGenerator3D
                 }
             }
         }
-        return start;
     }
 
     private static HashSet<GridPos> FloodFill3D(TileWorld3D world, GridPos start, int W, int H, int D)
