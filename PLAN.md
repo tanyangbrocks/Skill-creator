@@ -10,12 +10,22 @@
 
 ```
 docs/
-├── plan-ability-system.md   §1-11   能力系統設計（是什麼）
-├── plan-references.md       §12,17  靈感來源與參考遊戲解析
-├── plan-roadmap.md          §13-16,18,附錄   實作規劃與技術決策
+├── plan-ability-system.md         §1-11   能力系統設計（是什麼）
+├── plan-references.md             §12,17  靈感來源與參考遊戲解析
+├── plan-roadmap.md                §13-16,18,附錄  實作規劃與技術決策
+├── plan-worldlore-integration.md   蒼究世界觀導入計畫 W-1~W-21
+├── plan-3d-conversion.md           3D 化實作計畫 Phase 0–4
+├── plan-w6-mp-multitype.md         MP 多類型框架 W-6A~F
+├── plan-tile-scale.md              Tile 尺度縮放系統（TileSize 常數）
+├── plan-scale-world.md             玩家尺度・世界擴張・Raycast 採掘
+├── plan-mining-placement.md        採掘建築・多形狀放置 R 系列
+├── plan-placed-objects.md          放置物件系統・殘餘格・拉伸（R-6a~e）
 └── history/
-    └── phase1-2.md          Phase 1~2 完成內容存檔
+    ├── phase1-2.md         Phase 1~2 完成內容存檔
+    └── phase3.md           Phase 3+ 實作歷史（archive-done.ps1 歸檔）
 ```
+
+詳細每份文件的內容範疇見 [docs/DOC-STRUCTURE.md](docs/DOC-STRUCTURE.md)。
 
 ### 什麼內容放哪裡
 
@@ -24,6 +34,13 @@ docs/
 | 能力系統的運作規則（圖騰、刻印、VM、安全機制等） | `docs/plan-ability-system.md` |
 | 靈感來源、參考遊戲深度解析 | `docs/plan-references.md` |
 | 介面設計、技術選型、實作時程、未來方向 | `docs/plan-roadmap.md` |
+| 蒼究世界觀導入（W 系列）的設計決策與進度 | `docs/plan-worldlore-integration.md` |
+| 3D 化技術決策與各元件改動評估 | `docs/plan-3d-conversion.md` |
+| MP 多類型框架（W-6）設計決策 | `docs/plan-w6-mp-multitype.md` |
+| Tile 尺度縮放（TileSize 常數系統）相關技術決策 | `docs/plan-tile-scale.md` |
+| 玩家尺度・世界擴張・效能優化・採掘 Raycast | `docs/plan-scale-world.md` |
+| 採掘建築系統・多形狀放置（R 系列）計畫 | `docs/plan-mining-placement.md` |
+| 放置物件系統・殘餘格・拉伸系統（R-6 系列）計畫 | `docs/plan-placed-objects.md` |
 
 ---
 
@@ -62,5 +79,4 @@ docs/
 
 ---
 
-*文件由 `docs/split-docs.ps1` 從原始 PLAN.md 遷移整理。*
 *原始 PLAN.md 完整內容保留在 git 歷史中。*
