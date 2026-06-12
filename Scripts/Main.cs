@@ -154,7 +154,7 @@ public partial class Main : Node
         { "U", "I", "O", "P", "U+I", "I+O", "O+P", "U+I+O", "I+O+P", "U+I+O+P" };
 
     // 鏡頭縮放（3D 模式：調整正交尺寸）
-    private float _orthoZoom = 30f * TileWorldConstants.TileSize;
+    private float _orthoZoom = WorldScale.OrthoSize;
     private static readonly float ZoomMin  = 8f  * TileWorldConstants.TileSize;
     private static readonly float ZoomMax  = 80f * TileWorldConstants.TileSize;
     private const float ZoomStep = 1.2f;
@@ -210,7 +210,7 @@ public partial class Main : Node
             _camera3d.TpsArmLength = 12f  * cT;
             _camera3d.IsoArmLength = 25f  * cT;
             _camera3d.SideDist     = 40f  * cT;
-            _camera3d.OrthoSize    = 30f  * cT;
+            _camera3d.OrthoSize    = WorldScale.OrthoSize;
         }
 
         // ── 實體 3D 視覺（Phase 2-C）────────────────────────────────
@@ -220,7 +220,7 @@ public partial class Main : Node
         float T = TileWorldConstants.TileSize;
         _playerMesh = new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(0.65f * T, 0.9f * T, 0.65f * T) },
+            Mesh = new BoxMesh { Size = new Vector3(WorldScale.PlayerW * T, WorldScale.PlayerH * T, WorldScale.PlayerW * T) },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.25f, 0.55f, 1.0f),
@@ -848,7 +848,7 @@ public partial class Main : Node
             float pT = TileWorldConstants.TileSize;
             _playerMesh.Position = new Vector3(
                 _player.Position.X * pT + pT * 0.5f,
-                _player.Position.Y * pT + pT * 0.45f,
+                _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
                 _player.Position.Z * pT + pT * 0.5f);
             // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
             _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
@@ -858,7 +858,7 @@ public partial class Main : Node
             bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
             _camera3d.TargetPosition = new Vector3(
                 _player.Position.X * pT + pT * 0.5f,
-                _player.Position.Y * pT + pT * 0.5f,
+                _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
                 _cam2D ? 0f : _player.Position.Z * pT + pT * 0.5f);
         }
 
