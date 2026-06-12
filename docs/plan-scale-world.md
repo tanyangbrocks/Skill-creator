@@ -324,6 +324,312 @@ var placeTarget = new GridPos(
 
 ---
 
+### G 系列 — 世界生成／進入分離＋Chunk 持久化（Minecraft 式）
+
+> **觸發原因**：W-1 把世界擴大到 3200×1600×3200 後，`Generate()` 的初始 strip 需要
+> 8 千萬次 SetTile（`FillAll`）＋數億次 bool 運算（CA caves），進入世界極慢或崩潰。
+>
+> 根本解法複製 Minecraft 架構：世界「生成」與「進入」完全分離；chunk 按需生成並持久化到磁碟。
+
+#### 三層目標
+
+| 層 | 目標 | 解決的問題 |
+|----|------|-----------|
+| 即時效能 | `Generate()` 只初始化出生區（~9 個 chunk） | 進入世界 <1s |
+| 持久化 | 已造訪 chunk 寫磁碟，重進世界讀磁碟 | 不重新生成、遊戲進度保留 |
+| 記憶體 | LRU 卸載遠距 chunk | 記憶體不隨探索無限增長 |
+
+---
+
+#### G-0：緊急修正 — `Generate()` 限縮至出生區（~9 chunk）
+
+**不改架構**，只讓 `Generate()` 只生成 spawn 附近的 3×1×3 = 9 個 chunk，剩下懶加載。
+
+根本原因拆解：
+
+| 操作 | 舊 (600×200×600) | 新 (3200×1600×3200, initD=16) | 倍數 |
+|------|-----------------|-------------------------------|------|
+| `GenerateHeightmap` | `float[600,600]` ≈ 1.4M 格 | `float[3200,3200]` ≈ 10.2M 格 | ×7 |
+| `FillAll` SetTile | 600×200×16 ≈ 1.9M 次 | 3200×1600×16 ≈ 81.9M 次 | ×43 |
+| CA cave bool array | `bool[600,200,16]` × 5 pass | `bool[3200,1600,16]` × 5 pass | ×43 |
+| `EnsureWalkableCaves` | 600×16 columns | 3200×16 columns × 1600 深 | ×43 |
+
+修正方式：
+
+```csharp
+// MapGenerator3D.Generate() — 只生成 spawn 周圍 spawnRadius 個 chunk
+const int spawnRadius = 1;  // 生成 3×1×3 = 9 chunk（48×H×48 tiles）
+int sCX = (W / 2) / Chunk3D.Size;
+int x0 = Math.Max(0, (sCX - spawnRadius) * Chunk3D.Size);
+int x1 = Math.Min(W, (sCX + spawnRadius + 1) * Chunk3D.Size);
+int z1 = Math.Min(D, (spawnRadius + 1) * Chunk3D.Size);
+// 之後 FillAll / heightmap / CA / EnsureWalkable 全改為對 (x0..x1) × H × (0..z1) 操作
+```
+
+效果：`FillAll` ≈ 48×1600×48 = 3.7M calls（vs 81.9M），CA array = 3.7M（vs 82M），速度回到可接受範圍。
+
+副作用：玩家走出 48 tiles 後，`GenerateChunkLazy` 生成的 chunk 只有地形高度，沒有 CA caves。→ G-2 解決。
+
+---
+
+#### G-1：高度圖懶加載——確定性 per-column 函數
+
+**問題**：`_heights = new int[W, D]` = 3200×3200 × 4B = 40 MB，且每次 `Generate()` 都重算整張。
+
+**方案**：把高度圖改為「確定性 per-column 函數」——任意 (x, z) 隨用隨算，結果加快取：
+
+```csharp
+// MapGenerator3D 建構時由 seed 算出 noise phases（只需 4 個 float）
+private float _p1, _p2, _p3, _p4;
+private int   _worldW, _worldH, _worldD;
+private readonly Dictionary<(int, int), int> _heightCache = new();
+
+private int GetHeightAt(int x, int z)
+{
+    if (_heightCache.TryGetValue((x, z), out int h)) return h;
+    float baseY = _worldH * 0.32f;
+    float fx = (float)x / _worldW, fz = (float)z / _worldD;
+    float raw = baseY
+        + MathF.Sin(fx * 2 * MathF.PI + _p1) * (_worldH * 0.05f)
+        + MathF.Sin(fz * 3 * MathF.PI + _p2) * (_worldH * 0.04f)
+        + MathF.Sin(fx * 7 * MathF.PI + _p3) * (_worldH * 0.025f)
+        + MathF.Sin(fz * 5 * MathF.PI + _p4) * (_worldH * 0.02f);
+    // （不含隨機噪聲項，以保確定性；隨機項改為 noise(seed, x, z)）
+    int yMin = (int)(_worldH * 0.20f), yMax = (int)(_worldH * 0.45f);
+    h = Math.Clamp((int)raw, yMin, yMax);
+    _heightCache[(x, z)] = h;
+    return h;
+}
+```
+
+效果：
+- `Generate()` 不預算高度圖，啟動不再配置 40 MB 陣列
+- `GenerateChunkLazy` 在生成任意 chunk 時呼叫 `GetHeightAt(x, z)`，結果一致
+- 高度圖按需計算，初始記憶體 ≈ 0；隨探索緩慢增長（每格 16 bytes）
+
+---
+
+#### G-2：`GenerateChunkLazy` 改為完整地形（含噪音洞穴）
+
+**問題**：目前 `GenerateChunkLazy` 只有地表層（Air / Dirt / Stone），無洞穴。CA caves 需要全域 bool[W,H,D] 無法懶加載。
+
+**方案**：改用 **3D 噪音函數** 判斷洞穴——每格獨立計算，不依賴任何全域 array：
+
+```csharp
+// 3D value noise（或 Simplex），seed + (x,y,z) → 確定性
+private static float CaveNoise(int seed, int x, int y, int z)
+{
+    // 簡單 3D 雜湊 noise；可換成 FastNoiseLite 提升品質
+    uint h = (uint)(seed ^ (x * 1619) ^ (y * 31337) ^ (z * 6271));
+    h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
+    return (h & 0xffff) / 65535f;
+}
+
+private bool IsCave(int x, int y, int z)
+{
+    int surface = GetHeightAt(x, z);
+    if (y <= surface + 4) return false;          // 地表以下才有洞
+    if (y >= _worldH - 10) return false;         // 岩床保留
+    float n = CaveNoise(_worldSeed, x / 3, y / 3, z / 3);  // 尺度控制洞穴大小
+    return n > 0.70f;                            // 閾值控制洞穴密度
+}
+```
+
+**`GenerateChunkLazy` 改版**：
+
+```csharp
+private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)
+{
+    const int S = Chunk3D.Size;
+    for (int lx = 0; lx < S; lx++)
+    for (int lz = 0; lz < S; lz++)
+    for (int ly = 0; ly < S; ly++)
+    {
+        int wx = coord.X*S+lx, wy = coord.Y*S+ly, wz = coord.Z*S+lz;
+        if (!world.InBounds(wx, wy, wz)) continue;
+        int h = GetHeightAt(wx, wz);
+        MaterialType mat =
+            wy < h              ? MaterialType.Air   :
+            wy <= h + 2         ? MaterialType.Dirt  :
+            wy >= _worldH - 8   ? MaterialType.Stone :  // bedrock
+            IsCave(wx, wy, wz)  ? MaterialType.Air   :
+                                  MaterialType.Stone;
+        if (mat != MaterialType.Air)   // 略去 Air（預設值）
+            world.SetTile(wx, wy, wz, mat);
+    }
+}
+```
+
+CA caves vs 噪音洞穴 比較：
+
+| | CA caves（現行）| 噪音洞穴（G-2）|
+|--|--------------|--------------|
+| 懶加載 | ❌ 需全域 array | ✅ per-tile 獨立 |
+| 洞穴形狀 | 有機、連通大空洞 | 分散、較蟲洞感 |
+| 可調性 | 閾值 / 迭代數 | noise 尺度 / 閾值 |
+| 磁碟持久化 | 複雜（需先生成再存） | 天然相容（按需生成即可） |
+
+G-2 完成後，G-0 的臨時限縮可以移除——整個 `Generate()` 縮減為「算出 spawn point」，不再有大量 SetTile。
+
+---
+
+#### G-3：Chunk 磁碟持久化（TileWorld3D）
+
+**目錄結構**：
+
+```
+user://worlds/{worldName}/
+  world.json          ← WorldSaveData（seed / spawn / IsFirstEnter）
+  chunks/
+    0_5_0.bin         ← chunk (cx=0, cy=5, cz=0)，4096 bytes（16³ × 1 byte）
+    1_5_0.bin
+    ...
+```
+
+**新增方法到 `TileWorld3D.cs`**：
+
+```csharp
+// 儲存 chunk（只在 IsDirty 時寫）
+public void SaveChunk(int cx, int cy, int cz, string worldDir)
+{
+    if (!TryGetChunk(cx, cy, cz, out var chunk) || !chunk.IsDirty) return;
+    var data = new byte[Chunk3D.Size * Chunk3D.Size * Chunk3D.Size];
+    int i = 0;
+    for (int ly=0;ly<Chunk3D.Size;ly++)
+    for (int lz=0;lz<Chunk3D.Size;lz++)
+    for (int lx=0;lx<Chunk3D.Size;lx++)
+        data[i++] = (byte)chunk.GetLocal(lx, ly, lz);
+    File.WriteAllBytes(ChunkPath(worldDir, cx, cy, cz), data);
+    chunk.ClearDirty();
+}
+
+// 讀取 chunk；若磁碟沒有回傳 false（→ 呼叫端應生成）
+public bool TryLoadChunk(int cx, int cy, int cz, string worldDir)
+{
+    string path = ChunkPath(worldDir, cx, cy, cz);
+    if (!File.Exists(path)) return false;
+    var data = File.ReadAllBytes(path);
+    EnsureChunk(cx, cy, cz);     // 在記憶體建立空 chunk
+    var chunk = GetChunk(cx, cy, cz);
+    int i = 0;
+    for (int ly=0;ly<Chunk3D.Size;ly++)
+    for (int lz=0;lz<Chunk3D.Size;lz++)
+    for (int lx=0;lx<Chunk3D.Size;lx++)
+        chunk.SetLocal(lx, ly, lz, (MaterialType)data[i++]);
+    chunk.ClearDirty();
+    return true;
+}
+
+private static string ChunkPath(string worldDir, int cx, int cy, int cz)
+    => Path.Combine(worldDir, "chunks", $"{cx}_{cy}_{cz}.bin");
+```
+
+**`EnsureChunksGenerated` 改版**（磁碟優先）：
+
+```csharp
+// MapGenerator3D.EnsureChunksGenerated 中
+if (!_generatedChunks.Add(coord)) continue;
+if (!_world.TryLoadChunk(coord.X, coord.Y, coord.Z, _worldDir))
+    GenerateChunkLazy(_world, coord);   // 磁碟沒有 → 程序生成
+```
+
+---
+
+#### G-4：記憶體管理——LRU Chunk 卸載
+
+**問題**：玩家探索越多，`_chunks` 字典無限增長，最終 OOM。
+
+**方案**：每隔 N 幀，將超出保留半徑的 chunk 儲存並從記憶體卸載：
+
+```csharp
+// TileWorld3D 中，由 Main._Process 定期呼叫（建議每 300 幀）
+public void EvictFarChunks(int cx, int cy, int cz, int keepRadius, string worldDir)
+{
+    foreach (var coord in _chunks.Keys.ToList())
+    {
+        int d = Math.Max(Math.Abs(coord.X-cx),
+                Math.Max(Math.Abs(coord.Y-cy), Math.Abs(coord.Z-cz)));
+        if (d <= keepRadius) continue;
+        if (_chunks[coord].IsDirty)
+            SaveChunk(coord.X, coord.Y, coord.Z, worldDir);
+        _chunks.Remove(coord);
+    }
+}
+```
+
+`keepRadius` 建議 = `WorldScale.MeshRadiusChunks + 2`（= 9），比渲染半徑多留一圈緩衝，避免邊界抖動。
+
+`MapGenerator3D._generatedChunks` 也需同步移除已卸載的 coord，確保下次進入範圍時能重新從磁碟載入。
+
+---
+
+#### G-5：WorldSaveData 擴展 ＋ GameFlowUI 分離
+
+**`WorldSaveData.cs` 新增欄位**：
+
+```csharp
+public int    WorldSeed    { get; set; } = 12345;
+public string WorldDir     { get; set; } = "";    // "user://worlds/{name}/"
+public int    SpawnX       { get; set; }
+public int    SpawnY       { get; set; }
+public int    SpawnZ       { get; set; }
+public bool   IsFirstEnter { get; set; } = true;
+```
+
+**GameFlowUI 流程改版**：
+
+```
+創建世界 → 輸入名稱 / 選 seed
+           └→ 建立 WorldDir 目錄 + 儲存 WorldSaveData（IsFirstEnter=true）
+           └→ 回世界列表（不生成世界）
+
+進入世界 → 讀取 WorldSaveData
+           IsFirstEnter？
+             是 → 顯示 Loading 畫面 → 在背景 Task 生成出生區（G-0 限縮版 Generate）
+                  → 完成後 IsFirstEnter=false，儲存 SpawnX/Y/Z → 進入遊戲
+             否 → 直接進入（spawn 從 WorldSaveData 讀取）
+```
+
+**Main.cs `StartGameplay` 改版**：
+
+```csharp
+_mapGen = new MapGenerator3D(_worldData.WorldSeed, _worldData.WorldDir);
+
+if (_worldData.IsFirstEnter)
+{
+    var sd = _mapGen.Generate(_world3d);        // G-0/G-2 後已很快
+    _worldData.SpawnX = sd.PlayerSpawn.X;
+    _worldData.SpawnY = sd.PlayerSpawn.Y;
+    _worldData.SpawnZ = sd.PlayerSpawn.Z;
+    _worldData.IsFirstEnter = false;
+    FlowSaveSystem.Save(_worldData);
+}
+_player = new PlayerController(
+    new GridPos(_worldData.SpawnX, _worldData.SpawnY, _worldData.SpawnZ));
+
+// _Process 中加入 chunk 持久化
+if (_frameCount++ % 300 == 0)
+    _world3d.EvictFarChunks(pCX, pCY, pCZ,
+        WorldScale.MeshRadiusChunks + 2, _worldData.WorldDir);
+```
+
+---
+
+#### G 系列實作順序
+
+```
+G-0  緊急修正：Generate() 限縮至出生區 ~9 chunk（可立即進入世界）
+G-1  GetHeightAt() 確定性 per-column 函數（移除全域 _heights 陣列）
+G-2  GenerateChunkLazy 噪音洞穴（移除全域 CA bool array）
+     → G-0 限縮可移除，Generate() 縮減為純「找出生點」
+G-3  TileWorld3D chunk 磁碟讀寫（SaveChunk / TryLoadChunk）
+G-4  LRU chunk 卸載（EvictFarChunks，防止 OOM）
+G-5  WorldSaveData 擴展 + GameFlowUI 創建/進入分離
+     → 里程碑：重進世界不重新生成，遊戲進度持久保留
+```
+
+---
+
 ## 實作順序
 
 ```
@@ -335,6 +641,10 @@ Phase A（近期，Grain=16）：
   Step 5   P-2：Main.cs mesh + 相機
            → build + 遊戲內確認：玩家 32 tiles 高，tile ≈ 3px，洞穴可行走
   Step 6   W-1：世界擴張（3200×1600×3200）
+  Step 6.5 G 系列：世界生成/進入分離＋Chunk 持久化（Minecraft 式）
+           G-0 緊急修正 → G-1 懶加載高度圖 → G-2 噪音洞穴
+           → G-3 磁碟持久化 → G-4 LRU 卸載 → G-5 GameFlowUI 分離
+           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆
   Step 7   W-2：MapGen simplex noise + 大洞穴
   Step 8   E-2：Upload 跳過 Air chunk
   Step 9   E-3：分幀 CA 模擬
@@ -481,6 +791,11 @@ Phase A（近期，Grain=16）：
   Step 6   R-1/R-2/R-3：3D Raycast 採掘
            → 里程碑：粒子尺度可見，挖掘凹坑細緻
 
+  Step 6.5 G 系列：世界生成/進入分離＋Chunk 持久化（Minecraft 式）
+           G-0 緊急修正 → G-1 懶加載高度圖 → G-2 噪音洞穴
+           → G-3 磁碟持久化 → G-4 LRU 卸載 → G-5 GameFlowUI 分離
+           → 里程碑：進世界 <1s，重進不重生成，記憶體不爆
+
   Step 7   V-1：VFX 粒子池（爆炸/採掘視覺）
   Step 8   V-2：液體表面 Shader
            → 里程碑：世界視覺豐富
@@ -545,4 +860,4 @@ powershell -ExecutionPolicy Bypass -File preflight-check.ps1
 
 ---
 
-*最後更新：2026-06-12*
+*最後更新：2026-06-12（加入 G 系列 — 世界生成/進入分離＋Chunk 持久化）*
