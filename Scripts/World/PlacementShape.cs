@@ -15,6 +15,10 @@ public enum PlacementShape
 
 public static class ShapeVoxels
 {
+    // TODO: V-4 FillJunction — 靜態方法 FillJunction(TileWorld3D, GridPos from, GridPos to, MaterialType)
+    //   偵測兩形狀接觸面的法線方向，自動補上接合 tile，消除球-錐等半徑不一致的幾何空隙。
+    //   待 V 系列視覺需求明確後實作。
+
     /// <summary>
     /// 回傳形狀內所有相對偏移量。radius=-1 時自動取 WorldScale.PlayerH/6。
     /// </summary>
