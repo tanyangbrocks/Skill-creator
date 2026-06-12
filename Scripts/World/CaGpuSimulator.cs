@@ -30,7 +30,8 @@ public sealed class CaGpuSimulator : IDisposable
     private uint _bufferByteSize;
 
     // ── CPU staging 緩衝 ──────────────────────────────────────────────────
-    private uint[]? _staging;
+    private uint[]?  _staging;
+    private byte[]?  _stagingBytes;   // pre-allocated; avoids per-frame ToArray GC
 
     // ── Push constant 大小（bytes）───────────────────────────────────────
     // struct Params { int W, H, D, phase; uint rng; int p0, p1, p2; } = 32 bytes
@@ -126,7 +127,8 @@ public sealed class CaGpuSimulator : IDisposable
         u.AddId(_buffer);
         _uniformSet = _rd.UniformSetCreate(new Array<RDUniform> { u }, _shader, 0);
 
-        _staging = new uint[aw * ah * ad];
+        _staging      = new uint[aw * ah * ad];
+        _stagingBytes = new byte[aw * ah * ad * sizeof(uint)];
         GD.Print($"[CaGpu] 初始化完成：{aw}×{ah}×{ad} 格，buffer={_bufferByteSize / 1024} KB");
     }
 
@@ -140,15 +142,15 @@ public sealed class CaGpuSimulator : IDisposable
     /// </summary>
     public void Upload(TileWorld3D world, int ox, int oy, int oz)
     {
-        if (_rd == null || _staging == null) return;
+        if (_rd == null || _staging == null || _stagingBytes == null) return;
 
         for (int z = 0; z < AD; z++)
         for (int y = 0; y < AH; y++)
         for (int x = 0; x < AW; x++)
             _staging[z * AH * AW + y * AW + x] = Pack(world.GetCell(ox + x, oy + y, oz + z));
 
-        var bytes = MemoryMarshal.AsBytes(_staging.AsSpan()).ToArray();
-        _rd.BufferUpdate(_buffer, 0, _bufferByteSize, bytes);
+        Buffer.BlockCopy(_staging, 0, _stagingBytes, 0, _stagingBytes.Length);
+        _rd.BufferUpdate(_buffer, 0, _bufferByteSize, _stagingBytes);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -228,8 +230,9 @@ public sealed class CaGpuSimulator : IDisposable
         if (_buffer.IsValid)    _rd.FreeRid(_buffer);
         if (_pipeline.IsValid)  _rd.FreeRid(_pipeline);
         if (_shader.IsValid)    _rd.FreeRid(_shader);
-        _rd = null;
-        _staging = null;
+        _rd           = null;
+        _staging      = null;
+        _stagingBytes = null;
     }
 
     // ════════════════════════════════════════════════════════════
