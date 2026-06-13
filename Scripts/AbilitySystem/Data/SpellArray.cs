@@ -41,6 +41,34 @@ public class SpellArray
 
     public bool IsValid => !string.IsNullOrWhiteSpace(Name) && Slots.Any(s => !s.IsEmpty);
 
+    // W-6B：每個技能整構最多可使用的 MP 種類（日後可隨種族/特異體質擴充，不要 hardcode 數字）
+    public const int MaxManaTypes = 3;
+
+    /// <summary>
+    /// 收集此技能整構（含容器效果）所有插槽中已指定的 ManaTypeKey（去重）。
+    /// </summary>
+    public HashSet<string> GetUsedManaTypes(bool recursive = true)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var slot in Slots)
+            if (slot.ManaTypeKey != null) result.Add(slot.ManaTypeKey);
+        if (recursive && ContainerEffect != null)
+            result.UnionWith(ContainerEffect.GetUsedManaTypes(recursive));
+        return result;
+    }
+
+    /// <summary>此技能整構使用的 MP 種類數是否在上限內。</summary>
+    public bool IsValidManaTypeCount(int limit = MaxManaTypes) =>
+        GetUsedManaTypes().Count <= limit;
+
+    /// <summary>
+    /// 是否存在「有 MP 積木但尚未指定 ManaTypeKey」的技能因子（含容器效果遞迴檢查）。
+    /// 供編輯器紅光警告與儲存驗證使用。
+    /// </summary>
+    public bool HasUnboundMpBlocks() =>
+        Slots.Any(s => s.HasAnyMpBlocks && s.ManaTypeKey == null) ||
+        (ContainerEffect?.HasUnboundMpBlocks() ?? false);
+
     /// <summary>
     /// W-3c：技能整構攜帶的主要元素屬性（供投射物 Apply Aura 使用）。
     /// 優先取 GlobalEngravings，再掃各插槽 LocalEngravings；無則回傳 None。

@@ -15,7 +15,8 @@ docs/
 ├── plan-roadmap.md                §13-16,18,附錄  實作規劃與技術決策
 ├── plan-worldlore-integration.md   蒼究世界觀導入計畫 W-1~W-21
 ├── plan-3d-conversion.md           3D 化實作計畫 Phase 0–4
-├── plan-w6-mp-multitype.md         MP 多類型框架 W-6A~F
+├── plan-w6-mp-multitype.md         MP 多類型框架 W-6 設計探討稿（待確認決策）
+├── plan-w6-implementation.md      MP 多類型框架 W-6 正式實作計畫（決策已確認）
 ├── plan-tile-scale.md              Tile 尺度縮放系統（TileSize 常數）
 ├── plan-scale-world.md             玩家尺度・世界擴張・Raycast 採掘
 ├── plan-mining-placement.md        採掘建築・多形狀放置 R 系列
@@ -37,7 +38,8 @@ docs/
 | 介面設計、技術選型、實作時程、未來方向 | `docs/plan-roadmap.md` |
 | 蒼究世界觀導入（W 系列）的設計決策與進度 | `docs/plan-worldlore-integration.md` |
 | 3D 化技術決策與各元件改動評估 | `docs/plan-3d-conversion.md` |
-| MP 多類型框架（W-6）設計決策 | `docs/plan-w6-mp-multitype.md` |
+| MP 多類型框架（W-6）設計探討稿（含待確認決策） | `docs/plan-w6-mp-multitype.md` |
+| MP 多類型框架（W-6）正式實作計畫（決策已確認） | `docs/plan-w6-implementation.md` |
 | Tile 尺度縮放（TileSize 常數系統）相關技術決策 | `docs/plan-tile-scale.md` |
 | 玩家尺度・世界擴張・效能優化・採掘 Raycast | `docs/plan-scale-world.md` |
 | 採掘建築系統・多形狀放置（R 系列）計畫 | `docs/plan-mining-placement.md` |

@@ -9,7 +9,14 @@ public class SpellSlot
     public TotemData? Totem { get; set; }
     public List<EngraveData> LocalEngravings { get; } = new();
 
+    // W-6B：此技能因子注入的 MP 類型（null = 未指定，免費執行或待設定）
+    public string? ManaTypeKey { get; set; }
+
     public bool IsEmpty => Totem is null;
+
+    // 此技能因子鏈是否包含需要消耗 MP 的積木。
+    // 初期保守判斷：有圖騰即視為可能消耗 MP；W-6E 可依積木型別精確化。
+    public bool HasAnyMpBlocks => !IsEmpty;
 
     public int AbilityPointCost
     {

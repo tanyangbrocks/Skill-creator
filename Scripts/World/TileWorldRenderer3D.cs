@@ -209,21 +209,20 @@ public partial class TileWorldRenderer3D : Node3D
         else pair.T.Visible = false;
     }
 
-    // ArrayMesh 只在主執行緒建立（Godot Rendering Server 限制）
-    // 用 SurfaceTool 避免直接使用 PackedVector3Array/PackedColorArray/PackedInt32Array
-    // 的泛型建構子（GodotSharp 4.6.x 無法從 C# 陣列直接建立）。
-    // 頂點資料（最昂貴）已在 worker 執行緒完成；SurfaceTool 逐頂點呼叫的開銷可接受。
+    // ArrayMesh 只在主執行緒建立（Godot Rendering Server 限制）。
+    // 直接用 AddSurfaceFromArrays + C# 陣列（GodotSharp 有 Vector3[]/Color[]/int[] → Variant 隱式轉換），
+    // 比 SurfaceTool 逐頂點快 2-5×，且保留 index buffer（每 quad 4 頂點，非展開的 6）。
     private static ArrayMesh MakeMesh(MeshSurface s)
     {
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
-        foreach (int idx in s.Indices)
-        {
-            st.SetColor(s.Colors[idx]);
-            st.SetNormal(s.Norms[idx]);
-            st.AddVertex(s.Verts[idx]);
-        }
-        return st.Commit()!;
+        var arr = new Godot.Collections.Array();
+        arr.Resize((int)Mesh.ArrayType.Max);
+        arr[(int)Mesh.ArrayType.Vertex] = s.Verts;   // Vector3[] → Variant (PackedVector3Array)
+        arr[(int)Mesh.ArrayType.Normal] = s.Norms;
+        arr[(int)Mesh.ArrayType.Color]  = s.Colors;  // Color[]   → Variant (PackedColorArray)
+        arr[(int)Mesh.ArrayType.Index]  = s.Indices; // int[]     → Variant (PackedInt32Array)
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+        return mesh;
     }
 
     // ── 主執行緒：預計算邊界 Air 狀態（供 off-thread 使用）─────────────────
@@ -360,6 +359,109 @@ public partial class TileWorldRenderer3D : Node3D
 
         return new ChunkTaskResult(coord, opaque, transp2);
     }
+
+    // ── 採掘 Hover 高亮 ───────────────────────────────────────────────────────
+
+    private MeshInstance3D?     _highlightMesh;
+    private StandardMaterial3D? _highlightMat;
+    private HashSet<GridPos>?   _prevHighlightTiles;
+
+    /// <summary>
+    /// 每幀呼叫：若可挖掘格集合與上幀相同則免重建；否則重建半透明 overlay mesh。
+    /// tiles = null / empty 時隱藏 overlay。
+    /// </summary>
+    public void UpdateHighlightMesh(IReadOnlyCollection<GridPos>? tiles, TileWorld3D world)
+    {
+        if (SameHighlightTiles(tiles)) return;
+
+        _prevHighlightTiles = (tiles != null && tiles.Count > 0)
+            ? new HashSet<GridPos>(tiles) : null;
+
+        EnsureHighlightMeshNode();
+
+        if (tiles == null || tiles.Count == 0)
+        {
+            _highlightMesh!.Visible = false;
+            return;
+        }
+
+        float T   = TileWorldConstants.TileSize;
+        float eps = T * 0.01f;                         // 稍微凸出，避免 Z-fighting
+        var   col = new Color(1f, 1f, 1f, 0.28f);     // 白色半透明 → 略提亮
+
+        // face 方向 (ndx,ndy,ndz)
+        int[] ndx = { +1, -1,  0,  0,  0,  0 };
+        int[] ndy = {  0,  0, +1, -1,  0,  0 };
+        int[] ndz = {  0,  0,  0,  0, +1, -1 };
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+
+        foreach (var tile in tiles)
+        {
+            float gx = tile.X * T - WorldScale.OriginX;
+            float gy = tile.Y * T;
+            float gz = tile.Z * T - WorldScale.OriginZ;
+
+            for (int fi = 0; fi < 6; fi++)
+            {
+                if (world.GetTile(tile.X + ndx[fi], tile.Y + ndy[fi], tile.Z + ndz[fi])
+                    != MaterialType.Air) continue;
+
+                var (a, b, c, d) = FaceVerts(fi, gx, gy, gz, T, eps);
+                st.SetColor(col); st.AddVertex(a);
+                st.SetColor(col); st.AddVertex(b);
+                st.SetColor(col); st.AddVertex(c);
+                st.SetColor(col); st.AddVertex(a);
+                st.SetColor(col); st.AddVertex(c);
+                st.SetColor(col); st.AddVertex(d);
+            }
+        }
+
+        var mesh = st.Commit();
+        _highlightMesh!.Mesh    = mesh;
+        _highlightMesh.Visible  = mesh != null && mesh.GetSurfaceCount() > 0;
+    }
+
+    private void EnsureHighlightMeshNode()
+    {
+        if (_highlightMesh != null) return;
+        _highlightMat = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            Transparency           = BaseMaterial3D.TransparencyEnum.Alpha,
+            ShadingMode            = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            CullMode               = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode          = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority         = 1,
+        };
+        _highlightMesh = new MeshInstance3D { MaterialOverride = _highlightMat };
+        AddChild(_highlightMesh);
+    }
+
+    private bool SameHighlightTiles(IReadOnlyCollection<GridPos>? newTiles)
+    {
+        bool prevEmpty = _prevHighlightTiles == null || _prevHighlightTiles.Count == 0;
+        bool newEmpty  = newTiles == null || newTiles.Count == 0;
+        if (prevEmpty && newEmpty) return true;
+        if (prevEmpty != newEmpty) return false;
+        if (_prevHighlightTiles!.Count != newTiles!.Count) return false;
+        foreach (var t in newTiles)
+            if (!_prevHighlightTiles.Contains(t)) return false;
+        return true;
+    }
+
+    /// <summary>回傳指定 face 方向（fi=0..5）的 4 個頂點，已考慮 epsilon 偏移。</summary>
+    private static (Vector3 a, Vector3 b, Vector3 c, Vector3 d) FaceVerts(
+        int fi, float gx, float gy, float gz, float T, float e) => fi switch
+    {
+        0 => (new(gx+T+e, gy,   gz  ), new(gx+T+e, gy+T, gz  ), new(gx+T+e, gy+T, gz+T), new(gx+T+e, gy,   gz+T)),
+        1 => (new(gx  -e, gy,   gz  ), new(gx  -e, gy+T, gz  ), new(gx  -e, gy+T, gz+T), new(gx  -e, gy,   gz+T)),
+        2 => (new(gx,  gy+T+e, gz  ),  new(gx+T, gy+T+e, gz  ), new(gx+T, gy+T+e, gz+T), new(gx,  gy+T+e, gz+T)),
+        3 => (new(gx,  gy  -e, gz  ),  new(gx+T, gy  -e, gz  ), new(gx+T, gy  -e, gz+T), new(gx,  gy  -e, gz+T)),
+        4 => (new(gx,  gy,  gz+T+e),  new(gx+T, gy,   gz+T+e), new(gx+T, gy+T, gz+T+e), new(gx,  gy+T, gz+T+e)),
+        _ => (new(gx,  gy,  gz  -e),  new(gx+T, gy,   gz  -e), new(gx+T, gy+T, gz  -e), new(gx,  gy+T, gz  -e)),
+    };
 
     // ── 靜態輔助 ─────────────────────────────────────────────────────────────
 

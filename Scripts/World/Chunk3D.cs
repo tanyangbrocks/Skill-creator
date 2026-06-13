@@ -16,6 +16,7 @@ public sealed class Chunk3D
     // Dirty AABB — 只重建有變動的子區域
     public bool IsDirty          { get; set; }
     public bool MeshNeedsRebuild { get; set; }  // 由 TileWorldRenderer3D 在 rebuild 後清除
+    public bool NeedsSave        { get; set; }  // 由 SaveChunk 清除；增量存檔用
     public int  DirtyMinX, DirtyMinY, DirtyMinZ;
     public int  DirtyMaxX, DirtyMaxY, DirtyMaxZ;
 
@@ -34,10 +35,14 @@ public sealed class Chunk3D
     {
         IsDirty          = true;
         MeshNeedsRebuild = true;
+        NeedsSave        = true;
         DirtyMinX    = Math.Min(DirtyMinX, x); DirtyMaxX = Math.Max(DirtyMaxX, x);
         DirtyMinY    = Math.Min(DirtyMinY, y); DirtyMaxY = Math.Max(DirtyMaxY, y);
         DirtyMinZ    = Math.Min(DirtyMinZ, z); DirtyMaxZ = Math.Max(DirtyMaxZ, z);
     }
+
+    /// <summary>僅標記 mesh 需重建（鄰 chunk 邊界面外露時用）；不影響 CA 或存檔。</summary>
+    public void FlagMeshRebuild() => MeshNeedsRebuild = true;
 
     public void ClearDirty()
     {

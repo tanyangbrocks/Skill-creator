@@ -47,6 +47,16 @@ public static class FlowSaveSystem
         }
     }
 
+    // G-5: 更新單一角色資料（load-update-save）
+    public static void SaveCharacter(CharacterSaveData character)
+    {
+        var (chars, worlds) = Load();
+        int idx = chars.FindIndex(c => c.Id == character.Id);
+        if (idx >= 0) chars[idx] = character;
+        else chars.Add(character);
+        Save(chars, worlds);
+    }
+
     // G-5: 更新單一世界資料（load-update-save）
     public static void SaveWorld(WorldSaveData world)
     {

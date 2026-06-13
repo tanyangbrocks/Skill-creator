@@ -1,7 +1,9 @@
 namespace SkillCreator.World;
 
+using System.Collections.Concurrent;
 using Godot;
 using SkillCreator.World.Materials;
+using SkillCreator.World.Terrain;
 
 /// <summary>
 /// 3D 地圖生成器，對應 <see cref="TileWorld3D"/>。
@@ -30,9 +32,20 @@ public class MapGenerator3D
     private Godot.FastNoiseLite? _caveThin;                // 細蠕蟲隧道（3D，near-isosurface）
     private Godot.FastNoiseLite? _caveWide;                // 大洞穴（3D，高值區域）
     private int _worldSeed, _worldW, _worldH, _worldD;
-    private readonly HashSet<Vector3I> _generatedChunks = new();
+    private readonly HashSet<Vector3I>   _generatedChunks = new();
+    // ── 地形特徵系統 ─────────────────────────────────────────────────────────
+    // 新增地形：繼承 TerrainFeature，加到這個清單即可
+    private readonly List<TerrainFeature> _terrainFeatures = new() { new SurfaceWaterPool() };
     // G-3: 世界存檔目錄（空字串 = 不持久化，G-5 設值）
     public string WorldDir { get; set; } = "";
+
+    // ── 非同步 chunk 生成（Direction B）────────────────────────────────────
+    // noise pool：Godot FastNoiseLite 必須在主執行緒建立，用 pool 借給 Task.Run
+    private readonly ConcurrentBag<(FastNoiseLite hn, FastNoiseLite ct, FastNoiseLite cw)> _noisePool = new();
+    // in-flight：已排程但尚未 apply 的 chunk（僅主執行緒存取）
+    private readonly HashSet<Vector3I> _inFlight = new();
+    // ready queue：背景執行緒填完後 enqueue，主執行緒每幀 drain
+    private readonly ConcurrentQueue<(Vector3I coord, MaterialType[] flat)> _readyChunks = new();
 
     // ── 主入口：只生成初始 Z strip ─────────────────────────────────────────
 
@@ -42,41 +55,46 @@ public class MapGenerator3D
     /// </summary>
     private void InitNoises(int seed)
     {
-        _worldSeed = seed;
+        _worldSeed   = seed;
+        _heightNoise = MakeHeightNoise(seed);
+        _caveThin    = MakeCaveThin(seed);
+        _caveWide    = MakeCaveWide(seed);
 
-        // 地形高度：FBm 7 octave，頻率 0.001 → 一個大山脈週期約 1000 tiles（更寬廣）
-        // 7 個 octave 讓高頻細節（第 6-7 octave ≈ 16-31 tile 週期）增加地表凹凸感
-        _heightNoise = new Godot.FastNoiseLite
-        {
-            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
-            Seed           = seed,
-            Frequency      = 0.001f,
-            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
-            FractalOctaves = 7,
-            FractalLacunarity = 2.0f,
-            FractalGain    = 0.5f,
-        };
-
-        // 細蠕蟲隧道：near-isosurface 偵測，頻率 0.022 → 隧道直徑約 20-30 tiles（≈ PlayerH）
-        _caveThin = new Godot.FastNoiseLite
-        {
-            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
-            Seed           = seed + 1,
-            Frequency      = 0.022f,
-            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
-            FractalOctaves = 2,
-        };
-
-        // 大洞穴：高值區域，頻率 0.008 → 洞穴直徑約 60-100 tiles
-        _caveWide = new Godot.FastNoiseLite
-        {
-            NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
-            Seed           = seed + 2,
-            Frequency      = 0.008f,
-            FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
-            FractalOctaves = 2,
-        };
+        // 暖 noise pool（主執行緒建立，借給背景 Task 使用）
+        while (_noisePool.TryTake(out _)) { }   // 清舊 pool（換世界 seed 時）
+        int poolSize = Math.Max(4, Math.Min(System.Environment.ProcessorCount, 8));
+        for (int i = 0; i < poolSize; i++)
+            _noisePool.Add((MakeHeightNoise(seed), MakeCaveThin(seed), MakeCaveWide(seed)));
     }
+
+    private static FastNoiseLite MakeHeightNoise(int seed) => new Godot.FastNoiseLite
+    {
+        NoiseType         = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+        Seed              = seed,
+        Frequency         = 0.001f,
+        FractalType       = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+        FractalOctaves    = 7,
+        FractalLacunarity = 2.0f,
+        FractalGain       = 0.5f,
+    };
+
+    private static FastNoiseLite MakeCaveThin(int seed) => new Godot.FastNoiseLite
+    {
+        NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+        Seed           = seed + 1,
+        Frequency      = 0.022f,
+        FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+        FractalOctaves = 2,
+    };
+
+    private static FastNoiseLite MakeCaveWide(int seed) => new Godot.FastNoiseLite
+    {
+        NoiseType      = Godot.FastNoiseLite.NoiseTypeEnum.SimplexSmooth,
+        Seed           = seed + 2,
+        Frequency      = 0.008f,
+        FractalType    = Godot.FastNoiseLite.FractalTypeEnum.Fbm,
+        FractalOctaves = 2,
+    };
 
     /// <summary>
     /// 只初始化地形參數，供 GetHeightAt / IsCaveAt 確定性查詢使用。
@@ -87,42 +105,19 @@ public class MapGenerator3D
     {
         _worldW = world.Width; _worldH = world.Height; _worldD = world.Depth;
         InitNoises(seed);
+        foreach (var f in _terrainFeatures)
+        {
+            f.Initialize(seed, _worldW, _worldH, _worldD);
+            f.Prepare(GetHeightAt);
+        }
     }
 
     /// <summary>
-    /// 重新計算敵人出生點（載入已有世界時使用）。
-    /// 需在 InitTerrainParams 之後呼叫；世界 tile 資料必須已從磁碟載入。
+    /// 返回玩家出生點（載入已有世界時使用）。
+    /// 敵人改由 MobSpawnController 動態生成，不再需要靜態出生點。
     /// </summary>
     public SpawnData RebuildSpawns(TileWorld3D world, GridPos playerSpawn)
-    {
-        if (_worldW == 0)
-            return new SpawnData { PlayerSpawn = playerSpawn, EnemySpawns = [] };
-
-        int W = _worldW, H = _worldH, D = _worldD;
-        int initW = Math.Min(W, Chunk3D.Size * 3);
-        int initD = Math.Min(D, Chunk3D.Size);
-
-        // FloodFill3D 需要真實 tile 資料；載入世界後 chunks 仍在磁碟，必須先同步預載
-        if (WorldDir.Length > 0)
-        {
-            int cxMax = CeilDiv(initW, Chunk3D.Size);
-            int cyMax = CeilDiv(H,     Chunk3D.Size);
-            int czMax = CeilDiv(initD, Chunk3D.Size);
-            for (int cz = 0; cz < czMax; cz++)
-            for (int cy = 0; cy < cyMax; cy++)
-            for (int cx = 0; cx < cxMax; cx++)
-            {
-                var coord = new Vector3I(cx, cy, cz);
-                if (_generatedChunks.Contains(coord)) continue;
-                if (world.TryLoadChunk(cx, cy, cz, WorldDir))
-                    _generatedChunks.Add(coord);
-            }
-        }
-
-        var rng     = new Random(_worldSeed);
-        var heights = GenerateHeightmap(initW, initD);
-        return BuildSpawns(world, heights, playerSpawn, initW, H, initD, rng);
-    }
+        => new SpawnData { PlayerSpawn = playerSpawn, EnemySpawns = [] };
 
     public SpawnData Generate(TileWorld3D world, int seed = 12345)
     {
@@ -146,12 +141,23 @@ public class MapGenerator3D
         ApplyCaves(world, caves, _heights, initW, H, initD);
         EnsureWalkableCaves(world, _heights, initW, H, initD);
 
+        // 地形特徵：先 Initialize+Prepare，確保 ComputeWorldCenterSpawn 的 GenerateChunkLazy
+        // 呼叫 GetSurfaceOverride 時已有正確的 WaterSurface（池邊在 spawn 外 ≥64 tiles）
+        foreach (var f in _terrainFeatures)
+        {
+            f.Initialize(seed, W, H, D);
+            f.Prepare(GetHeightAt);
+        }
+
         EnsureConnectivity(world, _heights, initW, H, initD, rng);  // 修復出生區洞穴連通性
         var surfaceEntry = ComputeWorldCenterSpawn(world);           // 真正出生點：世界中心
         SealBedrock(world, initW, H, initD);
         PlaceOreVeins(world, _heights, initW, H, initD, rng);
         AddDecor(world, _heights, initW, H, initD, rng);
-        AddSurfaceWater(world, _heights, initW, initD);
+
+        // 地形特徵：把 tile 寫入初始條帶（只需 initW×initD 範圍）
+        foreach (var f in _terrainFeatures)
+            f.PlaceInWorld(world, GetHeightAt, initW, initD);
 
         // 標記初始已生成的 chunks（僅出生區 3×all×1）
         for (int cz = 0; cz < CeilDiv(initD, Chunk3D.Size); cz++)
@@ -159,7 +165,7 @@ public class MapGenerator3D
         for (int cx = 0; cx < CeilDiv(initW, Chunk3D.Size); cx++)
             _generatedChunks.Add(new Vector3I(cx, cy, cz));
 
-        return BuildSpawns(world, _heights, surfaceEntry, initW, H, initD, rng);
+        return BuildSpawns(surfaceEntry);
     }
 
     // ── 懶加載：每幀由 Main._Process 呼叫 ──────────────────────────────────
@@ -188,11 +194,33 @@ public class MapGenerator3D
             var coord = new Vector3I(cx + dx, cy + dy, cz + dz);
             if (coord.X < 0 || coord.Y < 0 || coord.Z < 0) continue;
             if (coord.X > maxCX || coord.Y > maxCY || coord.Z > maxCZ) continue;
-            if (!_generatedChunks.Add(coord)) continue; // 已生成
+            if (!_generatedChunks.Add(coord)) continue; // 已生成或生成中
+            if (_inFlight.Contains(coord)) continue;
+
             // G-3: 磁碟優先；若磁碟沒有才程序生成
             bool fromDisk = WorldDir.Length > 0
                 && world.TryLoadChunk(coord.X, coord.Y, coord.Z, WorldDir);
-            if (!fromDisk) GenerateChunkLazy(world, coord);
+
+            if (!fromDisk)
+            {
+                if (_noisePool.TryTake(out var noises))
+                {
+                    // 非同步路徑：噪音計算移到背景執行緒
+                    _inFlight.Add(coord);
+                    var c = coord;
+                    Task.Run(() =>
+                    {
+                        try   { _readyChunks.Enqueue((c, ComputeChunkFlat(c, noises))); }
+                        finally { _noisePool.Add(noises); } // 一定歸還 pool
+                    });
+                }
+                else
+                {
+                    // pool 耗盡：同步 fallback
+                    GenerateChunkLazy(world, coord);
+                }
+            }
+
             if (++generated >= maxPerCall) return;
         }
     }
@@ -243,6 +271,7 @@ public class MapGenerator3D
         return false;
     }
 
+    // 主執行緒同步版（世界初始化 + pool 耗盡時 fallback 用）
     private void GenerateChunkLazy(TileWorld3D world, Vector3I coord)
     {
         const int S = Chunk3D.Size;
@@ -254,26 +283,146 @@ public class MapGenerator3D
         {
             int wx = wx0 + lx, wz = wz0 + lz;
             if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
-            int h = GetHeightAt(wx, wz);
+            int naturalH = GetHeightAt(wx, wz);
 
-            // 地表凹陷：四方鄰居 h 值都比自己小（Y 軸向下，h 大 = 視覺低）→ 地表格改為水
-            bool isSurfaceBasin =
-                GetHeightAt(Math.Max(0, wx - 1), wz) < h &&
-                GetHeightAt(Math.Min(W - 1, wx + 1), wz) < h &&
-                GetHeightAt(wx, Math.Max(0, wz - 1)) < h &&
-                GetHeightAt(wx, Math.Min(D - 1, wz + 1)) < h;
+            // 查詢地形特徵覆寫（例如水池會加深地表、換材質）
+            (int h, MaterialType mat)? terrainOv = null;
+            foreach (var f in _terrainFeatures)
+            {
+                terrainOv = f.GetSurfaceOverride(wx, wz, naturalH);
+                if (terrainOv.HasValue) break;
+            }
+            int effectiveH      = terrainOv?.h ?? naturalH;
+            MaterialType? surfM = terrainOv?.mat;
 
+            bool isWaterPool = surfM == MaterialType.Water;
             for (int ly = 0; ly < S; ly++)
             {
                 int wy = wy0 + ly;
-                if ((uint)wy >= (uint)H || wy < h) continue;
-                if (IsCaveAt(wx, wy, wz, h)) continue;  // G-2: 噪音洞穴 → Air
-                var mat = wy <= h + 2 ? MaterialType.Dirt : MaterialType.Stone;
-                if (isSurfaceBasin && wy == h) mat = MaterialType.Water;
+                if ((uint)wy >= (uint)H || wy < effectiveH) continue;
+                if (isWaterPool && wy < naturalH)
+                {
+                    // 水池碗內：effectiveH（水面）到 naturalH-1 全填 Water
+                    world.SetTile(wx, wy, wz, MaterialType.Water);
+                    continue;
+                }
+                if (IsCaveAt(wx, wy, wz, effectiveH)) continue;
+                var mat = wy <= effectiveH + 2 ? MaterialType.Dirt : MaterialType.Stone;
+                if (surfM.HasValue && wy == effectiveH) mat = surfM.Value;
                 world.SetTile(wx, wy, wz, mat);
             }
         }
     }
+
+    // ── 非同步 chunk 生成（Direction B）───────────────────────────────────────
+
+    // 背景執行緒：純計算，不碰 world，使用租借的 noise 實例
+    private MaterialType[] ComputeChunkFlat(
+        Vector3I coord,
+        (FastNoiseLite hn, FastNoiseLite ct, FastNoiseLite cw) n)
+    {
+        const int S = Chunk3D.Size;
+        int wx0 = coord.X * S, wy0 = coord.Y * S, wz0 = coord.Z * S;
+        var flat = new MaterialType[S * S * S]; // 預設 Air(0)
+
+        for (int lx = 0; lx < S; lx++)
+        for (int lz = 0; lz < S; lz++)
+        {
+            int wx = wx0 + lx, wz = wz0 + lz;
+            if ((uint)wx >= (uint)_worldW || (uint)wz >= (uint)_worldD) continue;
+
+            float hn = n.hn.GetNoise2D(wx, wz);
+            float raw = _worldH * 0.30f + hn * (_worldH * 0.08f);
+            int naturalH = Math.Clamp((int)raw, (int)(_worldH * 0.15f), (int)(_worldH * 0.45f));
+
+            // 查詢地形特徵覆寫（背景執行緒只讀 _terrainFeatures，初始化後不可變，無競態）
+            (int h, MaterialType mat)? terrainOv = null;
+            foreach (var f in _terrainFeatures)
+            {
+                terrainOv = f.GetSurfaceOverride(wx, wz, naturalH);
+                if (terrainOv.HasValue) break;
+            }
+            int effectiveH      = terrainOv?.h ?? naturalH;
+            MaterialType? surfM = terrainOv?.mat;
+            bool isWaterPool = surfM == MaterialType.Water;
+
+            for (int ly = 0; ly < S; ly++)
+            {
+                int wy = wy0 + ly;
+                if ((uint)wy >= (uint)_worldH || wy < effectiveH) continue;
+
+                if (isWaterPool && wy < naturalH)
+                {
+                    // 水池碗內：effectiveH（水面）到 naturalH-1 全填 Water
+                    flat[lx * S * S + ly * S + lz] = MaterialType.Water;
+                    continue;
+                }
+
+                // IsCaveAt（inline，使用租借 noise）
+                if (wy > effectiveH + WorldScale.PlayerH && wy < _worldH - 8)
+                {
+                    float a = n.ct.GetNoise3D(wx, wy, wz);
+                    float b = n.ct.GetNoise3D(wx + 317, wy + 131, wz + 247);
+                    if (a * a + b * b < 0.020f) continue;
+                    float c = n.cw.GetNoise3D(wx, wy * 0.6f, wz);
+                    if (c > 0.80f) continue;
+                }
+
+                var mat = wy <= effectiveH + 2 ? MaterialType.Dirt : MaterialType.Stone;
+                if (surfM.HasValue && wy == effectiveH) mat = surfM.Value;
+                flat[lx * S * S + ly * S + lz] = mat;
+            }
+        }
+        return flat;
+    }
+
+    // 主執行緒：把背景計算好的 flat buffer 寫入 world
+    private static void ApplyChunkFlat(TileWorld3D world, Vector3I coord, MaterialType[] flat)
+    {
+        const int S = Chunk3D.Size;
+        int wx0 = coord.X * S, wy0 = coord.Y * S, wz0 = coord.Z * S;
+        int W = world.Width, H = world.Height, D = world.Depth;
+
+        for (int lx = 0; lx < S; lx++)
+        for (int ly = 0; ly < S; ly++)
+        for (int lz = 0; lz < S; lz++)
+        {
+            var mat = flat[lx * S * S + ly * S + lz];
+            if (mat == MaterialType.Air) continue;
+            int wx = wx0 + lx, wy = wy0 + ly, wz = wz0 + lz;
+            if ((uint)wx >= (uint)W || (uint)wy >= (uint)H || (uint)wz >= (uint)D) continue;
+            world.SetTile(wx, wy, wz, mat);
+        }
+    }
+
+    /// <summary>
+    /// 每幀由 Main._Process 呼叫：將背景完成的 chunk 資料寫入世界（主執行緒）。
+    /// </summary>
+    public void ApplyPendingChunks(TileWorld3D world, int maxPerFrame = 4)
+    {
+        int applied = 0;
+        while (applied < maxPerFrame && _readyChunks.TryDequeue(out var item))
+        {
+            _inFlight.Remove(item.coord);
+            ApplyChunkFlat(world, item.coord, item.flat);
+            applied++;
+        }
+    }
+
+    /// <summary>
+    /// 同步確保單一 chunk 已生成（供 MobSpawnController 按需使用）。
+    /// </summary>
+    public void EnsureChunkSync(TileWorld3D world, int cx, int cy, int cz)
+    {
+        if (_worldW == 0) return;
+        var coord = new Vector3I(cx, cy, cz);
+        if (!_generatedChunks.Add(coord)) return; // 已在清單（生成中或已完成）
+        bool fromDisk = WorldDir.Length > 0 && world.TryLoadChunk(cx, cy, cz, WorldDir);
+        if (!fromDisk) GenerateChunkLazy(world, coord);
+    }
+
+    // ≥2 cardinal neighbors shallower（h 較小 = 視覺上更高），
+    // 或在這樣的盆地中心 Manhattan 距離 ≤2 且高度 ≤ 中心深度的擴散範圍內。
 
     private static int CeilDiv(int a, int b) => (a + b - 1) / b;
 
@@ -468,7 +617,7 @@ public class MapGenerator3D
                 {
                     for (int sy = heights[x, z]; sy <= y; sy++)
                     for (int dx = -2; dx <= 2; dx++)
-                        world.SetTile(x + dx, sy, z, MaterialType.Air);
+                        world.SetTile(Math.Clamp(x + dx, 0, W - 1), sy, z, MaterialType.Air);
                     break;
                 }
             }
@@ -613,74 +762,11 @@ public class MapGenerator3D
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 7-B — 地表水池（local-min basin detection）
+    //  Step 8 — 生成點（敵人改由 MobSpawnController 動態生成）
     // ════════════════════════════════════════════════════════════
 
-    // 找出地形凹陷（四方鄰居 Y 值都比自己小，即視覺最低點），置換地表 Dirt → Water。
-    // 因為 Y 軸向下，h 值較大 = 視覺上較低，local-max(h) = 地形盆地。
-    private static void AddSurfaceWater(TileWorld3D world, int[,] heights, int W, int D)
-    {
-        for (int x = 1; x < W - 1; x++)
-        for (int z = 1; z < D - 1; z++)
-        {
-            int h = heights[x, z];
-            // h > all 4 cardinal neighbors' h → local maximum in Y = terrain depression
-            if (h > heights[x - 1, z] && h > heights[x + 1, z] &&
-                h > heights[x, z - 1] && h > heights[x, z + 1])
-            {
-                world.SetTile(x, h, z, MaterialType.Water);
-            }
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════
-    //  Step 8 — 生成點
-    // ════════════════════════════════════════════════════════════
-
-    private static SpawnData BuildSpawns(TileWorld3D world, int[,] heights, GridPos surfaceEntry,
-        int W, int H, int D, Random rng)
-    {
-        int caveMin = MaxHeight(heights, W, D) + 4;
-
-        GridPos caveStart = FindCaveStart3D(world, heights, W, H, D);
-        var caveArea = world.InBounds(caveStart.X, caveStart.Y, caveStart.Z)
-            ? FloodFill3D(world, caveStart, W, H, D)
-            : new HashSet<GridPos>();
-
-        var floors = caveArea
-            .Where(p => p.Y > caveMin
-                     && world.GetTile(p.X, p.Y + 1, p.Z) == MaterialType.Stone)
-            .OrderBy(p => p.X * 1000 + p.Z)
-            .ToList();
-
-        var types = new[] { EnemyType.Patrol, EnemyType.Melee, EnemyType.Ranged,
-                            EnemyType.Melee,  EnemyType.Heavy };
-        var enemySpawns = new List<(GridPos, EnemyType)>();
-
-        if (floors.Count > 0)
-        {
-            int count = Math.Min(types.Length, floors.Count);
-            int seg   = floors.Count / count;
-            for (int i = 0; i < count; i++)
-            {
-                int idx = Math.Min(i * seg + rng.Next(0, Math.Max(1, seg)), floors.Count - 1);
-                enemySpawns.Add((floors[idx], types[i]));
-            }
-        }
-
-        return new SpawnData { PlayerSpawn = surfaceEntry, EnemySpawns = enemySpawns };
-    }
-
-    private static GridPos FindCaveStart3D(TileWorld3D world, int[,] heights, int W, int H, int D)
-    {
-        int scanFrom = MaxHeight(heights, W, D) + 8;
-        for (int y = scanFrom; y < H - 10; y++)
-        for (int x = W / 4; x < 3 * W / 4; x++)
-        for (int z = D / 4; z < 3 * D / 4; z++)
-            if (world.GetTile(x, y, z) == MaterialType.Air)
-                return new GridPos(x, y, z);
-        return new GridPos(-1, -1, -1);
-    }
+    private static SpawnData BuildSpawns(GridPos surfaceEntry)
+        => new SpawnData { PlayerSpawn = surfaceEntry, EnemySpawns = [] };
 
     // ── 輔助 ──────────────────────────────────────────────────────────────
 

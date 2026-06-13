@@ -24,6 +24,13 @@ public static class SaveSystem
         public List<DtoSpell> PassiveSpells { get; set; } = [];
     }
 
+    // W-6F：SpellGroup 全組序列化容器
+    private sealed class DtoSpellGroup
+    {
+        public int          ActiveGroupIndex { get; set; }
+        public DtoLoadout[] Groups           { get; set; } = [];
+    }
+
     private sealed class DtoSpell
     {
         public string   Name           { get; set; } = "";
@@ -42,9 +49,10 @@ public static class SaveSystem
 
     private sealed class DtoSlot
     {
-        public string              Name       { get; set; } = "";
-        public string?             TotemId    { get; set; }
-        public List<DtoEngraving>  Engravings { get; set; } = [];
+        public string              Name        { get; set; } = "";
+        public string?             TotemId     { get; set; }
+        public string?             ManaTypeKey { get; set; }  // W-6B
+        public List<DtoEngraving>  Engravings  { get; set; } = [];
     }
 
     private sealed class DtoEngraving
@@ -64,8 +72,79 @@ public static class SaveSystem
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  Public API
+    //  W-6F：字串序列化 API（技能資料跟隨角色存檔）
     // ─────────────────────────────────────────────────────────────
+
+    /// <summary>將整個 SpellGroup 序列化為 JSON 字串，供存入 CharacterSaveData。</summary>
+    public static string SaveGroupToString(Data.SpellGroup group)
+    {
+        var dto = new DtoSpellGroup
+        {
+            ActiveGroupIndex = group.ActiveGroupIndex,
+            Groups = Enumerable.Range(0, Data.SpellGroup.MaxGroups)
+                               .Select(i => LoadoutToDto(group.GetGroup(i)))
+                               .ToArray(),
+        };
+        return JsonSerializer.Serialize(dto, Opts);
+    }
+
+    /// <summary>從 JSON 字串還原 SpellGroup 全組資料。</summary>
+    public static int LoadGroupFromString(
+        string               json,
+        Data.SpellGroup      target,
+        Dictionary<string, TotemData>   totemMap,
+        Dictionary<string, EngraveData> engraveMap)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return 0;
+        try
+        {
+            var dto = JsonSerializer.Deserialize<DtoSpellGroup>(json, Opts);
+            if (dto == null) return 0;
+
+            for (int g = 0; g < Math.Min(dto.Groups.Length, Data.SpellGroup.MaxGroups); g++)
+            {
+                var ld = target.GetGroup(g);
+                ld.ClearAll();
+                var src = dto.Groups[g];
+                ld.ActiveIndex = Math.Clamp(src.ActiveIndex, 0, SpellLoadout.MaxSlots - 1);
+                for (int i = 0; i < Math.Min(src.Slots.Length, SpellLoadout.MaxSlots); i++)
+                    if (src.Slots[i] is { } s)
+                        ld.SetSlot(i, FromDto(s, totemMap, engraveMap));
+                foreach (var p in src.PassiveSpells)
+                    ld.AddPassive(FromDto(p, totemMap, engraveMap));
+            }
+            return Math.Clamp(dto.ActiveGroupIndex, 0, Data.SpellGroup.MaxGroups - 1);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[SaveSystem] LoadGroupFromString 失敗：{ex.Message}");
+            return 0;
+        }
+    }
+
+    private static DtoLoadout LoadoutToDto(SpellLoadout ld) => new()
+    {
+        ActiveIndex   = ld.ActiveIndex,
+        Slots         = Enumerable.Range(0, SpellLoadout.MaxSlots)
+                                  .Select(i => ToDto(ld.GetSlot(i)))
+                                  .ToArray(),
+        PassiveSpells = ld.PassiveSpells.Select(s => ToDto(s)).Where(d => d != null)
+                                        .Select(d => d!).ToList(),
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    //  Public API（舊版：寫固定檔案，保留向後相容）
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>刪除舊版 loadout.json（新存檔系統改用 CharacterSaveData.SpellGroupJson）。</summary>
+    public static void CleanupLegacy()
+    {
+        if (System.IO.File.Exists(SavePath))
+        {
+            System.IO.File.Delete(SavePath);
+            GD.Print("[SaveSystem] 已清除舊版 loadout.json");
+        }
+    }
 
     public static void Save(SpellArray?[] spells, int activeIndex,
         IReadOnlyList<SpellArray>? passiveSpells = null)
@@ -147,9 +226,10 @@ public static class SaveSystem
 
     private static DtoSlot SlotToDto(SpellSlot s) => new()
     {
-        Name       = s.Name,
-        TotemId    = s.Totem?.Id,
-        Engravings = s.LocalEngravings.Select(EngrToDto).ToList(),
+        Name        = s.Name,
+        TotemId     = s.Totem?.Id,
+        ManaTypeKey = s.ManaTypeKey,
+        Engravings  = s.LocalEngravings.Select(EngrToDto).ToList(),
     };
 
     private static DtoEngraving EngrToDto(EngraveData e) =>
@@ -199,7 +279,7 @@ public static class SaveSystem
 
         foreach (var sd in dto.SpellSlots)
         {
-            var slot = new SpellSlot { Name = sd.Name };
+            var slot = new SpellSlot { Name = sd.Name, ManaTypeKey = sd.ManaTypeKey };
             if (sd.TotemId is not null && totemMap.TryGetValue(sd.TotemId, out var t))
                 slot.Totem = t;
             foreach (var ed in sd.Engravings)
@@ -259,7 +339,8 @@ public static class SaveSystem
 
     private static BlockNode BlockFromDto(DtoBlock dto)
     {
-        Enum.TryParse<BlockType>(dto.Type, out var bt);
+        if (!Enum.TryParse<BlockType>(dto.Type, out var bt))
+            GD.PushWarning($"[SaveSystem] 未知積木類型：{dto.Type}，以 default 替代");
         var p = new Dictionary<string, object?>();
         foreach (var (k, v) in dto.Params)
             p[k] = JeToObject(v);

@@ -32,6 +32,7 @@ public static class InputBindings
     public const string OpenSettings   = "open_settings";
     public const string TogglePaint    = "toggle_paint";
     public const string ShapeMenu      = "shape_menu";
+    public const string ToggleXray     = "toggle_xray";
 
     // 熱鍵欄 1–5
     public const string Hotbar1 = "hotbar_1";
@@ -39,6 +40,9 @@ public static class InputBindings
     public const string Hotbar3 = "hotbar_3";
     public const string Hotbar4 = "hotbar_4";
     public const string Hotbar5 = "hotbar_5";
+
+    // 技能組
+    public const string SpellGroupSwitch = "spell_group_switch";
 
     // 偵錯（不顯示在設定 UI，仍可在開發時重新繫結）
     public const string DebugCoord    = "debug_coord";
@@ -63,11 +67,13 @@ public static class InputBindings
         [OpenSettings]   = new[] { Key.B },
         [TogglePaint]    = new[] { Key.F1 },
         [ShapeMenu]      = new[] { Key.N },
+        [ToggleXray]     = new[] { Key.Tab },
         [Hotbar1]        = new[] { Key.Key1 },
         [Hotbar2]        = new[] { Key.Key2 },
         [Hotbar3]        = new[] { Key.Key3 },
         [Hotbar4]        = new[] { Key.Key4 },
         [Hotbar5]        = new[] { Key.Key5 },
+        [SpellGroupSwitch] = new[] { Key.V },
         [DebugCoord]     = new[] { Key.F2 },
         [DebugVmTrace]   = new[] { Key.F3 },
         [DebugSurvival]  = new[] { Key.F4 },

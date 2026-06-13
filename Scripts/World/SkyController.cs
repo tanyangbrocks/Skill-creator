@@ -23,15 +23,15 @@ public partial class SkyController : Node3D
 
         var sky = new Sky { SkyMaterial = _mat };
 
+        // chunk 生成半徑 6 chunks × TileSize(1/16) = 6 Godot units
+        // 霧從 3 units 開始漸淡，5.5 units 完全不透明，遮住未生成 chunk 的虛空
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Sky,
             Sky            = sky,
             SkyRotation    = Vector3.Zero,
-            // 關閉 tone mapping，避免壓縮天空顏色
             TonemapMode     = Godot.Environment.ToneMapper.Linear,
             TonemapExposure = 1.0f,
-            // 關閉霧氣（若需要霧效在天氣系統中另行添加）
             FogEnabled = false,
         };
 

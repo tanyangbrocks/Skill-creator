@@ -29,8 +29,9 @@ public class Enemy : IElementalTarget, ISnapshottable
     public EnemyType  Type     { get; }
     public float      Hp       { get; set; }
     public float      MaxHp    { get; }
-    public bool       IsAlive  => Hp > 0f;
-    public EnemyState State    { get; private set; } = EnemyState.Idle;
+    public bool          IsAlive   => Hp > 0f;
+    public SpawnCategory Category  { get; }
+    public EnemyState    State     { get; private set; } = EnemyState.Idle;
 
     public bool WantsToFire { get; set; }
     public int FacingX { get; private set; } = 1;
@@ -87,11 +88,13 @@ public class Enemy : IElementalTarget, ISnapshottable
         _                => 25,
     };
 
-    public Enemy(GridPos pos, EnemyType type = EnemyType.Melee, float maxHp = -1f)
+    public Enemy(GridPos pos, EnemyType type = EnemyType.Melee, float maxHp = -1f,
+                 SpawnCategory category = SpawnCategory.Common)
     {
         Position = pos;
         SpawnPos = pos;
         Type     = type;
+        Category = category;
         MaxHp    = maxHp > 0f ? maxHp : type switch
         {
             EnemyType.Heavy  => 150f,
@@ -101,6 +104,9 @@ public class Enemy : IElementalTarget, ISnapshottable
         };
         Hp = MaxHp;
     }
+
+    /// <summary>靜默清除（不給 XP、不進倒計時）。供 MobSpawnController 消除超範圍怪物使用。</summary>
+    public void ForceDespawn() => Hp = 0f;
 
     public void StartRespawn() => _respawnTimer = RespawnTime;
 
@@ -286,7 +292,11 @@ public class Enemy : IElementalTarget, ISnapshottable
                 if (!Aura.IsImmobilized)
                 {
                     var next = new GridPos(Position.X + _patrolDir, Position.Y, Position.Z);
-                    if (world.GetTile(next.X, next.Y, next.Z) == MaterialType.Air)
+                    int bodyH = Type == EnemyType.Heavy ? 2 : 1;
+                    bool pathClear = true;
+                    for (int dy = 0; dy < bodyH && pathClear; dy++)
+                        pathClear = world.GetTile(next.X, next.Y - dy, next.Z) == MaterialType.Air;
+                    if (pathClear)
                     {
                         Position = next;
                         if (Math.Abs(Position.X - SpawnPos.X) >= PatrolRange)
@@ -328,7 +338,7 @@ public class Enemy : IElementalTarget, ISnapshottable
         }
     }
 
-    // 嘗試向 (dx, dz) 移動：優先對角，次 X，次 Z
+    // 嘗試向 (dx, dz) 移動：優先對角，次 X，次 Z；對 1-tile 台階補爬台階邏輯
     private void TryMoveXZ(TileWorld3D world, int dx, int dz)
     {
         if (dx == 0 && dz == 0) return;
@@ -344,12 +354,27 @@ public class Enemy : IElementalTarget, ISnapshottable
             var nx = new GridPos(Position.X + dx, Position.Y, Position.Z);
             if (world.GetTile(nx.X, nx.Y, nx.Z) == MaterialType.Air)
             { Position = nx; return; }
+            // 嘗試爬上 1-tile 台階（Y-1 = 往上一格）
+            if (Position.Y > 0)
+            {
+                var stepUp = new GridPos(Position.X + dx, Position.Y - 1, Position.Z);
+                if (world.GetTile(stepUp.X, stepUp.Y, stepUp.Z) == MaterialType.Air
+                 && world.GetTile(Position.X, Position.Y - 1, Position.Z) == MaterialType.Air)
+                { Position = stepUp; return; }
+            }
         }
         if (dz != 0)
         {
             var nz = new GridPos(Position.X, Position.Y, Position.Z + dz);
             if (world.GetTile(nz.X, nz.Y, nz.Z) == MaterialType.Air)
-                Position = nz;
+            { Position = nz; return; }
+            if (Position.Y > 0)
+            {
+                var stepUp = new GridPos(Position.X, Position.Y - 1, Position.Z + dz);
+                if (world.GetTile(stepUp.X, stepUp.Y, stepUp.Z) == MaterialType.Air
+                 && world.GetTile(Position.X, Position.Y - 1, Position.Z) == MaterialType.Air)
+                { Position = stepUp; }
+            }
         }
     }
 
@@ -357,16 +382,27 @@ public class Enemy : IElementalTarget, ISnapshottable
     {
         _vy     = Math.Min(_vy + Gravity * delta, MaxFallSpeed);
         _fractY += _vy * delta;
+        int w = Type == EnemyType.Heavy ? 2 : 1;
         while (_fractY >= 1f)
         {
-            var below = new GridPos(Position.X, Position.Y + 1, Position.Z);
-            if (world.GetTile(below.X, below.Y, below.Z) != MaterialType.Air)
+            // 墜落至世界邊界 → 強制消除（防止在未生成 chunk 中無限墜落）
+            if (Position.Y + 1 >= world.Height) { ForceDespawn(); return; }
+            bool blocked = false;
+            for (int bx = 0; bx < w && !blocked; bx++)
+                blocked = world.GetTile(Position.X + bx, Position.Y + 1, Position.Z) != MaterialType.Air;
+            if (blocked)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = below;
+            Position = new GridPos(Position.X, Position.Y + 1, Position.Z);
             _fractY -= 1f;
         }
-        if (_vy > 0f && world.GetTile(Position.X, Position.Y + 1, Position.Z) != MaterialType.Air)
-        { _vy = 0f; _fractY = 0f; }
+        if (!IsAlive || Position.Y + 1 >= world.Height) return;
+        if (_vy > 0f)
+        {
+            bool grounded = false;
+            for (int bx = 0; bx < w && !grounded; bx++)
+                grounded = world.GetTile(Position.X + bx, Position.Y + 1, Position.Z) != MaterialType.Air;
+            if (grounded) { _vy = 0f; _fractY = 0f; }
+        }
     }
 
     public float XpReward => Type switch

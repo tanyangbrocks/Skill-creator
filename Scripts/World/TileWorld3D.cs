@@ -19,6 +19,8 @@ public sealed class TileWorld3D : IWorldInterface
 
     private readonly Dictionary<Vector3I, Chunk3D> _chunks = new();
     private readonly HashSet<(int x, int y, int z)> _occupied = new();
+    private readonly HashSet<Vector3I> _pendingNeighborDirty = new();
+    private readonly HashSet<Vector3I> _dirtyChunks = new(); // ★ 只掃有變動的 chunk，避免每幀全字典掃描
     private readonly Random _rng = new(42);
     private int _frame;
 
@@ -139,38 +141,73 @@ public sealed class TileWorld3D : IWorldInterface
         }
 
         // ── CPU Pass：Gas + Static（全部）+ Powder/Liquid（GPU 區域外）──
-        // 快照本幀 dirty chunk 並立即清除（Tick 期間新產生的 dirty = 下幀標記）
-        var toProcess = new List<(Vector3I coord, Chunk3D chunk)>();
-        foreach (var (coord, chunk) in _chunks)
+        // ★ 只掃 _dirtyChunks（有 SetTile 的 chunk），不再全字典掃描
+        // ★ 每個 chunk 只跑 dirty AABB ±1 的子區域，而不是全部 4096 tiles
+        var dirtySnap = new List<Vector3I>(_dirtyChunks.Count);
+        dirtySnap.AddRange(_dirtyChunks);
+        _dirtyChunks.Clear(); // 清空；CA 期間新的 SetTile 會再次加入
+
+        const int CS = Chunk3D.Size;
+        var toProcess = new List<(Vector3I coord, Chunk3D chunk,
+                                  int mnX, int mxX, int mnY, int mxY, int mnZ, int mxZ)>();
+        foreach (var coord in dirtySnap)
         {
-            if (!chunk.IsDirty) continue;
+            if (!_chunks.TryGetValue(coord, out var chunk) || !chunk.IsDirty) continue;
             if (simRadius >= 0 && centerCX >= 0)
             {
                 int dx = Math.Abs(coord.X - centerCX);
                 int dy = Math.Abs(coord.Y - centerCY);
                 int dz = centerCZ >= 0 ? Math.Abs(coord.Z - centerCZ) : 0;
-                if (dx > simRadius || dy > simRadius || dz > simRadius) continue;
+                if (dx > simRadius || dy > simRadius || dz > simRadius)
+                {
+                    _dirtyChunks.Add(coord); // 超出半徑，保留給下幀
+                    continue;
+                }
             }
+            // 取 dirty AABB（±1 擴展，因為 CA 粒子會影響鄰格）
+            int mnX = Math.Max(0,    chunk.DirtyMinX - 1);
+            int mxX = Math.Min(CS-1, chunk.DirtyMaxX + 1);
+            int mnY = Math.Max(0,    chunk.DirtyMinY - 1);
+            int mxY = Math.Min(CS-1, chunk.DirtyMaxY + 1);
+            int mnZ = Math.Max(0,    chunk.DirtyMinZ - 1);
+            int mxZ = Math.Min(CS-1, chunk.DirtyMaxZ + 1);
+            // 防呆：bounds 無效時退回全 chunk（初次生成 chunk 的情況）
+            if (mnX > mxX || mnY > mxY || mnZ > mxZ)
+            { mnX = mnY = mnZ = 0; mxX = mxY = mxZ = CS - 1; }
             chunk.ClearDirty();
             chunk.ClearUpdated();
-            toProcess.Add((coord, chunk));
+            toProcess.Add((coord, chunk, mnX, mxX, mnY, mxY, mnZ, mxZ));
         }
 
         // 由底往上（高 chunkY = 底部）
         toProcess.Sort((a, b) => b.coord.Y.CompareTo(a.coord.Y));
 
-        foreach (var (coord, chunk) in toProcess)
-        {
-            int wx0 = coord.X * Chunk3D.Size;
-            int wy0 = coord.Y * Chunk3D.Size;
-            int wz0 = coord.Z * Chunk3D.Size;
+        // B：Stopwatch 時間預算，確保 mesh rebuild 每幀有足夠時間
+        var tickSw = System.Diagnostics.Stopwatch.StartNew();
+        const long CaBudgetMs = 4;
 
-            for (int ly = Chunk3D.Size - 1; ly >= 0; ly--)
-            for (int lzi = 0; lzi < Chunk3D.Size; lzi++)
-            for (int lxi = 0; lxi < Chunk3D.Size; lxi++)
+        for (int ti = 0; ti < toProcess.Count; ti++)
+        {
+            if (tickSw.ElapsedMilliseconds > CaBudgetMs)
             {
-                int lz = zFirst ? lzi : (Chunk3D.Size - 1 - lzi);
-                int lx = xFirst ? lxi : (Chunk3D.Size - 1 - lxi);
+                for (int tr = ti; tr < toProcess.Count; tr++)
+                    _dirtyChunks.Add(toProcess[tr].coord);
+                break;
+            }
+
+            var (coord, chunk, mnX, mxX, mnY, mxY, mnZ, mxZ) = toProcess[ti];
+            int wx0 = coord.X * CS;
+            int wy0 = coord.Y * CS;
+            int wz0 = coord.Z * CS;
+            int spanZ = mxZ - mnZ;
+            int spanX = mxX - mnX;
+
+            for (int ly = mxY; ly >= mnY; ly--)
+            for (int lzi = 0; lzi <= spanZ; lzi++)
+            for (int lxi = 0; lxi <= spanX; lxi++)
+            {
+                int lz = zFirst ? (mnZ + lzi) : (mxZ - lzi);
+                int lx = xFirst ? (mnX + lxi) : (mxX - lxi);
                 int wx = wx0 + lx, wy = wy0 + ly, wz = wz0 + lz;
 
                 if (!InBounds(wx, wy, wz) || IsUpdated(wx, wy, wz)) continue;
@@ -186,8 +223,8 @@ public sealed class TileWorld3D : IWorldInterface
                     case PhysicsCategory.Liquid:
                         if (!gpuActive || !InGpuZone(wx, wy, wz))
                             UpdateLiquid(wx, wy, wz);
-                        else
-                            CheckElementalCaReactions(wx, wy, wz); // 僅元素反應
+                        else if (_frame % 8 == 0) // A：限速 1/8，降低水池侵蝕頻率
+                            CheckElementalCaReactions(wx, wy, wz);
                         break;
 
                     case PhysicsCategory.Gas:    UpdateGas(wx, wy, wz);    break;
@@ -272,7 +309,7 @@ public sealed class TileWorld3D : IWorldInterface
             if (!TryMove(x, y, z, x, y - 1, z))
             {
                 bool lr = _rng.Next(2) == 0, fb = _rng.Next(2) == 0;
-                TryMove(x, y, z, x + (lr ? -1 : 1), y - 1, z + (fb ? 0 : 0));
+                TryMove(x, y, z, x + (lr ? -1 : 1), y - 1, z + (fb ? -1 : 1));
             }
             TryIgniteAround(x, y, z, 0.08f);
             if (HasAdjacent(x, y, z, MaterialType.Water)) { ExtinguishFire(x, y, z); return; }
@@ -484,6 +521,28 @@ public sealed class TileWorld3D : IWorldInterface
         return chunk.Cells[chunk.Idx(lx, ly, lz)].Type;
     }
 
+    /// <summary>
+    /// 由 MapGenerator3D 注入：輸入 tile (x,z)，回傳自然地表 tile Y。
+    /// GetTilePhysics 用此估算未加載 chunk 的實心/虛空，避免空中幻影地板。
+    /// </summary>
+    public Func<int, int, int>? HeightEstimator { get; set; }
+
+    // 物理/碰撞專用：未加載 chunk 用地形高度估算，消除空中幻影地板/天花板
+    public MaterialType GetTilePhysics(int x, int y, int z)
+    {
+        if (!InBounds(x, y, z)) return MaterialType.Air;
+        var coord = WorldToChunk(x, y, z);
+        if (!_chunks.TryGetValue(coord, out var chunk))
+        {
+            // y >= surfaceH → 地下（含地表）實心；y < surfaceH → 地表以上虛空
+            if (HeightEstimator != null)
+                return y >= HeightEstimator(x, z) ? MaterialType.Stone : MaterialType.Air;
+            return MaterialType.Stone;
+        }
+        var (lx, ly, lz) = WorldToLocal(x, y, z);
+        return chunk.Cells[chunk.Idx(lx, ly, lz)].Type;
+    }
+
     public TileCell GetCell(int x, int y, int z)
     {
         if (!InBounds(x, y, z)) return default;
@@ -513,6 +572,8 @@ public sealed class TileWorld3D : IWorldInterface
             _                  => (short)0,
         };
         chunk.MarkDirty(lx, ly, lz);
+        _dirtyChunks.Add(coord);
+        MarkNeighborsMeshDirty(coord, lx, ly, lz);
     }
 
     private void WriteCell(int x, int y, int z, TileCell cell)
@@ -522,6 +583,8 @@ public sealed class TileWorld3D : IWorldInterface
         var (lx, ly, lz) = WorldToLocal(x, y, z);
         chunk.Cells[chunk.Idx(lx, ly, lz)] = cell;
         chunk.MarkDirty(lx, ly, lz);
+        _dirtyChunks.Add(coord);
+        MarkNeighborsMeshDirty(coord, lx, ly, lz);
     }
 
     /// <summary>
@@ -537,6 +600,27 @@ public sealed class TileWorld3D : IWorldInterface
         var (lx, ly, lz) = WorldToLocal(x, y, z);
         chunk.Cells[chunk.Idx(lx, ly, lz)] = cell;
         chunk.MarkDirty(lx, ly, lz);
+        _dirtyChunks.Add(coord);
+        MarkNeighborsMeshDirty(coord, lx, ly, lz);
+    }
+
+    // 當 tile 位於 chunk 邊界時，把相鄰 chunk 座標加入待刷新集合（延遲到 FlushNeighborDirty）。
+    private void MarkNeighborsMeshDirty(Vector3I coord, int lx, int ly, int lz)
+    {
+        if (lx == 0)                  _pendingNeighborDirty.Add(new Vector3I(coord.X - 1, coord.Y,     coord.Z    ));
+        if (lx == Chunk3D.Size - 1)  _pendingNeighborDirty.Add(new Vector3I(coord.X + 1, coord.Y,     coord.Z    ));
+        if (ly == 0)                  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y - 1, coord.Z    ));
+        if (ly == Chunk3D.Size - 1)  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y + 1, coord.Z    ));
+        if (lz == 0)                  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y,     coord.Z - 1));
+        if (lz == Chunk3D.Size - 1)  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y,     coord.Z + 1));
+    }
+
+    // 每幀由 Main.cs 呼叫一次，將累積的鄰居重建請求去重後統一觸發。
+    public void FlushNeighborDirty()
+    {
+        foreach (var coord in _pendingNeighborDirty)
+            TryGetChunkAt(coord.X, coord.Y, coord.Z)?.FlagMeshRebuild();
+        _pendingNeighborDirty.Clear();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -640,21 +724,32 @@ public sealed class TileWorld3D : IWorldInterface
     //  Chunk 磁碟持久化（G-3）
     // ════════════════════════════════════════════════════════════
 
-    /// <summary>將 chunk 序列化為 16³ × 1 byte 的 .bin 並寫入磁碟。</summary>
+    // 格式版本：舊版 = S³ bytes（僅 Type）；新版 = S³*4 bytes（Type+Variant+TimerLo+TimerHi）
+    private const int ChunkCellBytes = 4;
+
+    /// <summary>將 chunk 序列化（Type + Variant + Timer）並寫入磁碟。</summary>
     public void SaveChunk(int cx, int cy, int cz, string worldDir)
     {
         var coord = new Vector3I(cx, cy, cz);
         if (!_chunks.TryGetValue(coord, out var chunk)) return;
         const int S = Chunk3D.Size;
-        var data = new byte[S * S * S];
+        int cellCount = S * S * S;
+        var data = new byte[cellCount * ChunkCellBytes];
         int i = 0;
         for (int ly = 0; ly < S; ly++)
         for (int lz = 0; lz < S; lz++)
         for (int lx = 0; lx < S; lx++)
-            data[i++] = (byte)chunk.Cells[chunk.Idx(lx, ly, lz)].Type;
+        {
+            ref var cell = ref chunk.Cells[chunk.Idx(lx, ly, lz)];
+            data[i++] = (byte)cell.Type;
+            data[i++] = cell.Variant;
+            data[i++] = (byte)(cell.Timer & 0xFF);
+            data[i++] = (byte)((cell.Timer >> 8) & 0xFF);
+        }
         string path = ChunkPath(worldDir, cx, cy, cz);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, data);
+        chunk.NeedsSave = false;
     }
 
     /// <summary>從磁碟載入 chunk；若檔案不存在回傳 false（呼叫端應程序生成）。</summary>
@@ -662,29 +757,55 @@ public sealed class TileWorld3D : IWorldInterface
     {
         string path = ChunkPath(worldDir, cx, cy, cz);
         if (!File.Exists(path)) return false;
-        var data = File.ReadAllBytes(path);
+        byte[] data;
+        try { data = File.ReadAllBytes(path); }
+        catch (Exception ex)
+        {
+            GD.PushWarning($"[TileWorld3D] chunk ({cx},{cy},{cz}) 讀取失敗，改用程序生成：{ex.Message}");
+            return false;
+        }
         var coord = new Vector3I(cx, cy, cz);
         if (!_chunks.TryGetValue(coord, out var chunk))
             _chunks[coord] = chunk = new Chunk3D(coord);
         const int S = Chunk3D.Size;
+        int cellCount = S * S * S;
+        bool extended = data.Length >= cellCount * ChunkCellBytes;
         int i = 0;
         for (int ly = 0; ly < S; ly++)
         for (int lz = 0; lz < S; lz++)
         for (int lx = 0; lx < S; lx++)
         {
             ref var cell = ref chunk.Cells[chunk.Idx(lx, ly, lz)];
-            cell.Type = (MaterialType)data[i++];
+            if (extended)
+            {
+                cell.Type    = (MaterialType)data[i++];
+                cell.Variant = data[i++];
+                cell.Timer   = (short)(data[i] | (data[i + 1] << 8)); i += 2;
+            }
+            else
+            {
+                cell.Type = (MaterialType)data[i++]; // 舊格式：僅 Type
+            }
         }
-        chunk.IsDirty          = true;   // 觸發 mesh rebuild
+        chunk.IsDirty          = true;
         chunk.MeshNeedsRebuild = true;
+        chunk.NeedsSave        = false; // 剛從磁碟讀入，不需要再存
         return true;
     }
 
-    /// <summary>把所有目前在記憶體的 chunk 寫到磁碟（世界退出時呼叫）。</summary>
+    /// <summary>把所有目前在記憶體的 chunk 寫到磁碟（退出鉤子用）。</summary>
     public void SaveAllLoadedChunks(string worldDir)
     {
         foreach (var coord in _chunks.Keys.ToList())
             SaveChunk(coord.X, coord.Y, coord.Z, worldDir);
+    }
+
+    /// <summary>只寫入 NeedsSave==true 的 chunk（增量存檔，30 秒計時器 / 死亡用）。</summary>
+    public void SaveDirtyChunks(string worldDir)
+    {
+        foreach (var (coord, chunk) in _chunks)
+            if (chunk.NeedsSave)
+                SaveChunk(coord.X, coord.Y, coord.Z, worldDir);
     }
 
     // ════════════════════════════════════════════════════════════

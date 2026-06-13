@@ -34,10 +34,7 @@ public static class SpellCaster
             return SpellCastResult.Failed;
         }
 
-        float mpCost = AbilityPointCalculator.CalculateMpCost(spell);
-        if (!SafetyGuard.HasMp(player.Mp, mpCost)) return SpellCastResult.Failed;
-
-        player.Mp -= mpCost;
+        if (!TryConsumeMp(player, spell)) return SpellCastResult.Failed;
         player.SetCastCooldown(spell.CastDelay);
         CombatState.OnSpellCast();
         ApplyGlobalEngravings(spell);
@@ -233,6 +230,34 @@ public static class SpellCaster
         }
     }
 
+    // ── W-6C：依 SpellSlot.ManaTypeKey 消耗 MP ────────────────────
+    // • 所有 slot 皆無 ManaTypeKey → 回退舊邏輯（扣 ActiveManaSlots[0]）
+    // • 有 ManaTypeKey 的 slot → 均分總費用，先全部驗證再統一扣除（原子）
+    private static bool TryConsumeMp(PlayerController player, SpellArray spell)
+    {
+        float totalCost = AbilityPointCalculator.CalculateMpCost(spell);
+        if (totalCost <= 0f) return true;
+
+        var bound = spell.Slots.FindAll(s => s.ManaTypeKey != null);
+
+        if (bound.Count == 0)
+        {
+            if (!SafetyGuard.HasMp(player.Mp, totalCost)) return false;
+            player.Mp -= totalCost;
+            return true;
+        }
+
+        float costPerSlot = totalCost / bound.Count;
+        foreach (var slot in bound)
+        {
+            var ms = player.GetManaSlot(slot.ManaTypeKey!);
+            if (ms == null || ms.Current < costPerSlot) return false;
+        }
+        foreach (var slot in bound)
+            player.GetManaSlot(slot.ManaTypeKey!)!.Current -= costPerSlot;
+        return true;
+    }
+
     // ── 連段執行 ─────────────────────────────────────────────────
 
     private static void TriggerCombo(string name, PlayerController player, TileWorld3D world,
@@ -249,10 +274,7 @@ public static class SpellCaster
         }
         if (next is null) return;
 
-        float cost = AbilityPointCalculator.CalculateMpCost(next);
-        if (!SafetyGuard.HasMp(player.Mp, cost)) return;
-
-        player.Mp -= cost;
+        if (!TryConsumeMp(player, next)) return;
         player.SetCastCooldown(next.CastDelay);
         ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
     }
@@ -499,7 +521,7 @@ public static class SpellCaster
         var rawOrigin = originOverride ?? player.Position;
         var origin = originOverride.HasValue
             ? rawOrigin
-            : new GridPos(rawOrigin.X, rawOrigin.Y + WorldScale.PlayerH / 2, rawOrigin.Z);
+            : new GridPos(rawOrigin.X, rawOrigin.Y + player.BodyH / 2, rawOrigin.Z);
         // Scale radius with tile granularity so explosions are proportional to the player size
         int grain  = WorldScale.Grain;
         int baseR  = (2 + (int)(m.DmgBonus * 3f)) * grain;

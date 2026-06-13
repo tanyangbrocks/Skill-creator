@@ -35,13 +35,21 @@ public partial class Main : Node
     private Node3D         _entitiesRoot = null!;         // 統一開關用父節點
     private MeshInstance3D _playerMesh   = null!;
     private readonly Dictionary<int, MeshInstance3D> _enemyMeshes = new();
+    private readonly HashSet<int> _syncActiveIds = new();   // SyncEnemyMeshes 用，避免每幀 LINQ 分配
+    private readonly List<int>    _syncToRemove  = new();
     private readonly Dictionary<DroppedItem, MeshInstance3D> _itemMeshes = new();
     private readonly List<SpellProjectile> _projectiles = new();
     private readonly SpellRunner     _runner     = new();
     private readonly DroppedItemManager _droppedItems = new();
 
     private Label   _hpLabel    = null!;
-    private Label   _mpLabel    = null!;
+
+    // W-6E：動態 MP 條
+    private Control          _manaHudContainer = null!;
+    private Panel[]          _manaBarFills     = System.Array.Empty<Panel>();
+    private StyleBoxFlat[]   _manaFillStyles   = System.Array.Empty<StyleBoxFlat>();
+    private Label[]          _manaValLabels    = System.Array.Empty<Label>();
+    private string[]         _manaHudKeys      = System.Array.Empty<string>();
     private Label[]  _slotLabels      = null!;
     private string[] _slotLabelCache  = null!;
 
@@ -64,6 +72,11 @@ public partial class Main : Node
     private int             _shapeRadius    = WorldScale.PlayerH / 6 > 0 ? WorldScale.PlayerH / 6 : 1;
     private PanelContainer  _shapePanel     = null!;
     private Label           _shapeIndicator = null!;
+
+    // W-6D：遊戲內技能組切換面板
+    private PanelContainer  _groupPanel     = null!;
+    private Button[]        _groupPanelBtns = null!;
+    private bool            _groupPanelOpen = false;
 
     // 等級 / XP / 境界 / 裝備 HUD
     private Label         _lvLabel           = null!;
@@ -228,13 +241,18 @@ public partial class Main : Node
         // 儲存角色狀態
         if (_charData != null)
         {
-            _charData.Hp    = _player.Hp;
+            _charData.Hp    = _player.IsAlive ? _player.Hp : _player.MaxHp; // 死亡時存 MaxHp，避免讀檔後立刻再死
             _charData.Mp    = _player.Mp;
             _charData.Level = _player.Level;
             _charData.Xp    = _player.Xp;
             _charData.InventorySlots = [.. _player.Inventory.Slots
                 .Select(s => new CharacterSaveData.SlotRecord { ItemId = s.ItemId.ToString(), Count = s.Count })];
-            _charData.ActiveHotbar = _player.Inventory.ActiveHotbarIndex;
+            _charData.ActiveHotbar   = _player.Inventory.ActiveHotbarIndex;
+            _charData.SpellGroupJson = _editor.GetSpellGroupJson();   // W-6F
+            // W-6B：存所有 MP 槽位的 Current 值
+            _charData.ManaCurrents.Clear();
+            foreach (var slot in _player.ActiveManaSlots)
+                _charData.ManaCurrents[slot.ManaTypeKey] = slot.Current;
             FlowSaveSystem.SaveCharacter(_charData);
         }
     }
@@ -282,6 +300,9 @@ public partial class Main : Node
             spawnData = _mapGen.RebuildSpawns(_world3d, savedSpawn);
         }
 
+        // 注入地形高度估算器（讓 GetTilePhysics 對未加載 chunk 給出正確的實心/虛空判斷）
+        _world3d.HeightEstimator = _mapGen.GetHeightAt;
+
         // R-6d：載入放置物件 Registry
         _placedRegistry.Load(_worldData.WorldDir);
 
@@ -308,6 +329,10 @@ public partial class Main : Node
             _camera3d.OrthoSize    = WorldScale.OrthoSize;
         }
 
+        // ── 玩家（先建立，mesh 尺寸依 BodyH）──────────────────────
+        _player      = new PlayerController(spawnData.PlayerSpawn);
+        RespawnPoint = spawnData.PlayerSpawn; // 預設重生點 = 世界初始出生點
+
         // ── 實體 3D 視覺（Phase 2-C）────────────────────────────────
         _entitiesRoot = new Node3D();
         AddChild(_entitiesRoot);
@@ -315,7 +340,7 @@ public partial class Main : Node
         float T = TileWorldConstants.TileSize;
         _playerMesh = new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(WorldScale.PlayerW * T, WorldScale.PlayerH * T, WorldScale.PlayerW * T) },
+            Mesh = new BoxMesh { Size = new Vector3(WorldScale.PlayerW * T, _player.BodyH * T, WorldScale.PlayerW * T) },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.25f, 0.55f, 1.0f),
@@ -324,15 +349,17 @@ public partial class Main : Node
         };
         _entitiesRoot.AddChild(_playerMesh);
 
-        // ── 玩家 ───────────────────────────────────────────────
-        _player      = new PlayerController(spawnData.PlayerSpawn);
-        RespawnPoint = spawnData.PlayerSpawn; // 預設重生點 = 世界初始出生點
-
-        if (!_worldData.IsFirstEnter && charData.InventorySlots.Length > 0)
+        if (!_worldData.IsFirstEnter)
         {
             // 還原存檔角色狀態
-            _player.Hp = charData.Hp;
+            _player.Hp = Math.Max(charData.Hp, 1f); // 防守：Hp≤0 → 以 1 讀入，避免讀檔後立刻死亡
             _player.Mp = charData.Mp;
+            // W-6B：還原各 MP 槽位
+            foreach (var (key, current) in charData.ManaCurrents)
+            {
+                var ms = _player.GetManaSlot(key);
+                if (ms != null) ms.Current = Math.Clamp(current, 0f, ms.Max);
+            }
             _player.RestoreLevel(charData.Level, charData.Xp);
             for (int i = 0; i < Inventory.TotalSize && i < charData.InventorySlots.Length; i++)
             {
@@ -380,7 +407,11 @@ public partial class Main : Node
             _droppedItems.Spawn(pos, mat, reason);
         };
 
-        SpawnEnemies(spawnData.EnemySpawns);
+        var spawner = new MobSpawnController(BuildMobTable());
+        spawner.EnsureChunkAt = (w, cx, cy, cz) =>
+            _mapGen.EnsureChunkSync(w, cx, cy, cz);
+        spawner.GetTerrainY = (wx, wz) => _mapGen.GetHeightAt(wx, wz);
+        _enemies.SetSpawner(spawner);
 
         // ── HUD ────────────────────────────────────────────────
         var hud = new CanvasLayer();
@@ -391,15 +422,21 @@ public partial class Main : Node
         _editor = new AbilityEditorUI();
         _editor.Visible = false;
         hud.AddChild(_editor);
-        _editor.BackPressed += OnEditorBack;
+        _editor.InitSpells(_charData?.SpellGroupJson ?? "");  // W-6F：注入角色技能資料
+        SaveSystem.CleanupLegacy(); // 清除舊版 loadout.json（已改用 CharacterSaveData.SpellGroupJson）
+        _editor.BackPressed     += OnEditorBack;
+        _editor.SpellDataSaved  += OnEditorSpellDataSaved;   // W-6F
 
         // ── 技能創建空間（圓球列表）───────────────────────────
         _spellList = new SpellListUI();
-        _spellList.Loadout  = _editor.Loadout;
-        _spellList.Visible  = false;
+        _spellList.Loadout    = _editor.Loadout;
+        _spellList.SpellGroup = _editor.SpellGroup;     // W-6D
+        _spellList.Visible    = false;
         hud.AddChild(_spellList);
-        _spellList.ActiveSpellClicked += OnListActiveSpellClicked;
-        _spellList.AddSpellRequested  += OnListAddSpellRequested;
+        _spellList.ActiveSpellClicked    += OnListActiveSpellClicked;
+        _spellList.PassiveSpellClicked   += OnListPassiveSpellClicked;
+        _spellList.AddSpellRequested     += OnListAddSpellRequested;
+        _spellList.GroupSwitchRequested  += (idx) => SwitchActiveGroup((int)idx); // W-6D
 
         CombatState.OnHit = (pos, amount, isPlayer) => SpawnDmgNum(pos, amount, isPlayer);
 
@@ -463,10 +500,11 @@ public partial class Main : Node
         toolbar.AddChild(new HSeparator());
         toolbar.AddChild(MakeLbl("模擬速度"));
         var speedRow = new HBoxContainer();
+        var speedGroup = new ButtonGroup();
         foreach (var (label, steps) in new (string, int)[] { ("×1", 1), ("×2", 2), ("×4", 4) })
         {
             var btn = MakeBtn(label, new Color(0.22f, 0.22f, 0.28f));
-            btn.ToggleMode = true; btn.ButtonGroup = new ButtonGroup();
+            btn.ToggleMode = true; btn.ButtonGroup = speedGroup;
             btn.ButtonPressed = (steps == 1);
             var sp = steps;
             btn.Toggled += on => { if (on) _simStepsPerFrame = sp; };
@@ -619,6 +657,9 @@ public partial class Main : Node
         shapeVBox.AddChild(shapeGrid);
         hud.AddChild(_shapePanel);
 
+        // ── W-6D：技能組切換面板（V 鍵開啟，置中）────────────────
+        BuildGroupPanel(hud);
+
         // ── 左下角：形狀指示器（HP 上方）──────────────────────────
         _shapeIndicator = new Label();
         _shapeIndicator.AnchorTop = _shapeIndicator.AnchorBottom = 1f;
@@ -628,20 +669,17 @@ public partial class Main : Node
         _shapeIndicator.Text = $"形狀：{ShapeName(_activeShape)}（r={_shapeRadius}）";
         hud.AddChild(_shapeIndicator);
 
-        // ── 左下角：HP / MP ──────────────────────────────────────
+        // ── 左下角：HP / Mana HUD ─────────────────────────────────
+        // HP 上移到 -92，為下方最多 3 條 mana bar（各 18px）留空間
         _hpLabel = new Label();
         _hpLabel.AnchorTop = _hpLabel.AnchorBottom = 1f;
-        _hpLabel.Position = new Vector2(10, -74);
+        _hpLabel.Position = new Vector2(10, -92);
         _hpLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.35f, 0.35f));
         _hpLabel.AddThemeFontSizeOverride("font_size", 16);
         hud.AddChild(_hpLabel);
 
-        _mpLabel = new Label();
-        _mpLabel.AnchorTop = _mpLabel.AnchorBottom = 1f;
-        _mpLabel.Position = new Vector2(10, -52);
-        _mpLabel.AddThemeColorOverride("font_color", new Color(0.35f, 0.75f, 1.0f));
-        _mpLabel.AddThemeFontSizeOverride("font_size", 16);
-        hud.AddChild(_mpLabel);
+        // W-6E：動態 MP 條（1–3 條，依 ActiveManaSlots 動態重建）
+        BuildManaHud(hud);
 
         // ── 技能欄位（底部中間）──────────────────────────────────
         _slotLabels = new Label[SpellLoadout.MaxSlots];
@@ -885,10 +923,11 @@ public partial class Main : Node
         EventBus.ClearFrame(); // 清除上一幀的廣播訊號
         GameClock.Advance(dt);
         CombatState.Advance(dt);
+        if (_player == null) return;  // gameplay 尚未啟動（或已清除），跳過所有 HUD/世界更新
 
         // 標籤永遠更新
         _hpLabel.Text = $"HP  {_player.Hp:F0} / {_player.MaxHp:F0}";
-        _mpLabel.Text = $"MP  {_player.Mp:F0} / {_player.MaxMp:F0}";
+        RefreshManaHud();
         RefreshSlotLabels();
         RefreshHotbar();
         RefreshLevelHUD();
@@ -1039,8 +1078,11 @@ public partial class Main : Node
             int pCY = _player.Position.Y / Chunk3D.Size;
             int pCZ = _player.Position.Z / Chunk3D.Size;
 
-            // 懶加載：生成玩家附近尚未生成的 chunk（磁碟優先）
-            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 6, maxPerCall: 32);
+            // 非同步生成完成的 chunk 寫入世界（每幀最多 16 個，提升初始加載速度）
+            _mapGen.ApplyPendingChunks(_world3d, maxPerFrame: 16);
+
+            // 懶加載：將玩家附近 chunk 排入非同步生成佇列（磁碟優先）
+            _mapGen.EnsureChunksGenerated(_world3d, pCX, pCY, pCZ, radius: 12, maxPerCall: 64);
 
             // G-4: 每 300 幀卸載遠端 chunk（存磁碟 + 移出記憶體）
             if (++_evictFrame % 300 == 0)
@@ -1053,12 +1095,17 @@ public partial class Main : Node
                 _world3d.Tick(centerCX: pCX, centerCY: pCY, centerCZ: pCZ, simRadius: 6);
 
             // SideScroll2D 模式只渲染 Z=0 那排；其他視角渲染玩家所在 Z 範圍
+            _world3d.FlushNeighborDirty();
             bool in2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
+            int dynMax = (int)Math.Clamp(30 * (1.0 / 60.0) / Math.Max((double)dt, 0.001), 5, 80);
             _renderer3d.RebuildDirtyMeshes(
-                maxPerFrame:  30,
+                maxPerFrame:  dynMax,
                 sideScroll2D: in2D,
-                viewCX: pCX, viewCY: pCY, viewCZ: in2D ? -1 : pCZ, viewRadius: 5);
+                viewCX: pCX, viewCY: pCY, viewCZ: in2D ? -1 : pCZ, viewRadius: WorldScale.MeshRadiusChunks);
         }
+
+        // 採掘 hover 高亮（暫停時也更新，因為是純視覺）
+        _renderer3d.UpdateHighlightMesh(ComputeHighlightTiles(), _world3d);
 
         _enemies.Update(_world3d, _player, dt);
         _runner.Update(dt);
@@ -1077,7 +1124,7 @@ public partial class Main : Node
             float pT = TileWorldConstants.TileSize;
             _playerMesh.Position = new Vector3(
                 _player.Position.X * pT + pT * 0.5f - WorldScale.OriginX,
-                _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
+                _player.Position.Y * pT + _player.BodyH * pT * 0.5f,
                 _player.Position.Z * pT + pT * 0.5f - WorldScale.OriginZ);
             // 第一人稱：相機在玩家頭部往外看，隱藏自身 mesh 避免看到自己的 box
             _playerMesh.Visible = _camera3d.Mode != CameraController.CameraMode.FirstPerson;
@@ -1087,7 +1134,7 @@ public partial class Main : Node
             bool _cam2D = _camera3d.Mode == CameraController.CameraMode.SideScroll2D;
             _camera3d.TargetPosition = new Vector3(
                 _player.Position.X * pT + pT * 0.5f - WorldScale.OriginX,
-                _player.Position.Y * pT + WorldScale.PlayerH * pT * 0.5f,
+                _player.Position.Y * pT + _player.BodyH * pT * 0.5f,
                 _cam2D ? 0f : _player.Position.Z * pT + pT * 0.5f - WorldScale.OriginZ);
         }
 
@@ -1151,7 +1198,7 @@ public partial class Main : Node
         if (Input.IsMouseButtonPressed(MouseButton.Left) && !_mouseOverHotbar && !_inventoryOpen)
         {
             var target = _player.MouseGridPos;
-            if (_player.Position.DistanceTo(target) <= PlayerController.MiningRange)
+            if (_player.Position.DistanceTo(target) <= _player.MiningRange)
             {
                 // R-6b：TickMining 前先查 Registry（完成後中心格已被摧毀，查不到）
                 _placedRegistry.TryGetUnit(target, out var pendingUnit);
@@ -1220,8 +1267,8 @@ public partial class Main : Node
                     foreach (var (ddx, ddy, ddz) in ShapeVoxels.GetOffsets(_activeShape, _shapeRadius))
                     {
                         var p = placeTarget + new GridPos(ddx, ddy, ddz);
-                        if (p != _player.Position
-                            && _player.Position.DistanceTo(p) <= PlayerController.MiningRange
+                        if (!OccupiedByEntity(p)
+                            && _player.Position.DistanceTo(p) <= _player.MiningRange
                             && PlacementValidator.CanPlace(_world3d, p, mat))
                         {
                             _world3d.SetTile(p.X, p.Y, p.Z, mat);
@@ -1379,6 +1426,10 @@ public partial class Main : Node
         else if (k.IsAction(InputBindings.OpenSettings) && !_editorOpen)
         {
             ToggleSettingsPanel();
+        }
+        else if (k.IsAction(InputBindings.SpellGroupSwitch) && !_editorOpen)
+        {
+            ToggleGroupPanel();
         }
         else if (k.IsAction(InputBindings.OpenEditor))
         {
@@ -1595,15 +1646,44 @@ public partial class Main : Node
         };
     }
 
-    private void SpawnEnemies(List<(GridPos Pos, EnemyType Type)> spawns)
+    // 判斷 pos 是否被玩家或存活敵人佔據，用於防止放置時穿模。
+    // 玩家：完整 PlayerW × PlayerH tile 矩形（遊戲為側捲，Z 軸忽略）。
+    // 敵人：以各自的 Position tile 為準。
+    private bool OccupiedByEntity(GridPos pos)
     {
-        foreach (var (pos, type) in spawns)
-            _enemies.Spawn(pos, type);
+        var pp = _player.Position;
+        if (pos.X >= pp.X && pos.X < pp.X + WorldScale.PlayerW &&
+            pos.Y >= pp.Y && pos.Y < pp.Y + _player.BodyH)
+            return true;
+
+        foreach (var e in _enemies.Enemies)
+            if (e.IsAlive && e.Position == pos) return true;
+
+        return false;
     }
+
+    private static MobTableEntry[] BuildMobTable() =>
+    [
+        new(EnemyType.Melee,  SpawnCategory.Common, Weight: 3.0f),
+        new(EnemyType.Ranged, SpawnCategory.Common, Weight: 2.0f),
+        new(EnemyType.Patrol, SpawnCategory.Common, Weight: 1.5f),
+        new(EnemyType.Heavy,  SpawnCategory.Common, Weight: 0.5f),
+    ];
 
     // Phase 2-C：敵人 3D Mesh 同步（建立 / 更新位置 / 隱藏死亡者）
     private void SyncEnemyMeshes()
     {
+        // 清除已從列表移除的怪物 mesh（Common/Area 怪物死亡時會被 EnemyManager 直接移除）
+        if (_enemyMeshes.Count > _enemies.Enemies.Count)
+        {
+            _syncActiveIds.Clear();
+            foreach (var e in _enemies.Enemies) _syncActiveIds.Add(e.Id);
+            _syncToRemove.Clear();
+            foreach (var id in _enemyMeshes.Keys)
+                if (!_syncActiveIds.Contains(id)) _syncToRemove.Add(id);
+            foreach (var id in _syncToRemove) { _enemyMeshes[id].QueueFree(); _enemyMeshes.Remove(id); }
+        }
+
         foreach (var e in _enemies.Enemies)
         {
             if (!_enemyMeshes.TryGetValue(e.Id, out var mesh))
@@ -1616,7 +1696,7 @@ public partial class Main : Node
             if (!e.IsAlive) continue;
 
             float eT = TileWorldConstants.TileSize;
-            float mh = (e.Type is EnemyType.Heavy ? 1.8f : 0.9f) * eT;
+            float mh = WorldScale.Grain * eT; // 1 game unit height
             mesh.Position = new Vector3(
                 e.Position.X * eT + eT * 0.5f - WorldScale.OriginX,
                 e.Position.Y * eT + mh * 0.5f,
@@ -1626,9 +1706,7 @@ public partial class Main : Node
 
     private static MeshInstance3D CreateEnemyMesh(EnemyType type)
     {
-        float eT2 = TileWorldConstants.TileSize;
-        float w = (type is EnemyType.Heavy ? 1.55f : 0.70f) * eT2;
-        float h = (type is EnemyType.Heavy ? 1.80f : 0.90f) * eT2;
+        const float S = WorldScale.Grain * WorldScale.TileSize; // 1 game unit = 1.0f Godot
         var col = type switch
         {
             EnemyType.Melee  => new Color(0.90f, 0.15f, 0.15f), // 紅
@@ -1639,7 +1717,7 @@ public partial class Main : Node
         };
         return new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(w, h, w) },
+            Mesh = new BoxMesh { Size = new Vector3(S, S, S) },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = col,
@@ -1711,10 +1789,17 @@ public partial class Main : Node
         _editor.Visible = true;
     }
 
-    // 圓球列表：點擊「+」→ 新增技能
+    private void OnListPassiveSpellClicked(int passiveIndex)
+    {
+        _spellList.Visible = false;
+        _editor.OpenPassive(passiveIndex);
+        _editor.Visible = true;
+    }
+
+    // 圓球列表：點擊「+」→ 直接開啟編輯器（新技能存檔後才加入列表）
     private void OnListAddSpellRequested()
     {
-        // 優先找第一個空主動槽（Loadout 中未儲存過的槽位）
+        // 優先找第一個空主動槽
         for (int i = 0; i < SpellLoadout.MaxSlots; i++)
         {
             if (_editor.Loadout.GetSlot(i) is null)
@@ -1725,14 +1810,12 @@ public partial class Main : Node
                 return;
             }
         }
-        // 主動全滿：新增被動技能（尚無被動編輯 UI，先建立空物件並提示）
+        // 主動全滿：直接開啟編輯器建立新被動技能
         if (_editor.Loadout.PassiveCount < SpellLoadout.MaxPassiveSlots)
         {
-            var newPassive = new SpellArray();
-            var pt = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == "passive_continuous");
-            if (pt is not null) newPassive.Slots.Add(new SpellSlot { Totem = pt });
-            _editor.Loadout.AddPassive(newPassive);
-            _spellList.Refresh();
+            _spellList.Visible = false;
+            _editor.OpenPassive(-1);
+            _editor.Visible = true;
         }
     }
 
@@ -1749,6 +1832,15 @@ public partial class Main : Node
         _editor.Visible = false;
         _spellList.Refresh();
         _spellList.Visible = true;
+    }
+
+    // W-6F：技能儲存按鈕觸發 → 即時寫入角色存檔
+    private void OnEditorSpellDataSaved(string spellGroupJson)
+    {
+        if (_charData == null) return;
+        _charData.SpellGroupJson = spellGroupJson;
+        FlowSaveSystem.SaveCharacter(_charData);
+        GD.Print("[存檔] 技能組已同步至角色存檔");
     }
 
     // ── Helper ────────────────────────────────────────────────────
@@ -1781,6 +1873,262 @@ public partial class Main : Node
         else
             _camera3d.ApplyMouseCapture(); // 恢復原本的 Captured/Visible 模式
     }
+
+    // ── W-6D：技能組面板 ────────────────────────────────────────────
+
+    private void BuildGroupPanel(CanvasLayer hud)
+    {
+        var bgStyle = new StyleBoxFlat
+        {
+            BgColor              = new Color(0.10f, 0.10f, 0.16f, 0.95f),
+            CornerRadiusTopLeft  = 8, CornerRadiusTopRight  = 8,
+            CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+            BorderWidthTop = 1, BorderWidthBottom = 1,
+            BorderWidthLeft = 1, BorderWidthRight = 1,
+            BorderColor          = new Color(0.35f, 0.50f, 0.80f),
+            ContentMarginLeft    = 14f, ContentMarginRight  = 14f,
+            ContentMarginTop     = 10f, ContentMarginBottom = 12f,
+        };
+        _groupPanel = new PanelContainer();
+        _groupPanel.AnchorLeft = _groupPanel.AnchorRight  = 0.5f;
+        _groupPanel.AnchorTop  = _groupPanel.AnchorBottom = 0.5f;
+        _groupPanel.GrowHorizontal = Control.GrowDirection.Both;
+        _groupPanel.GrowVertical   = Control.GrowDirection.Both;
+        _groupPanel.CustomMinimumSize = new Vector2(240, 0);
+        _groupPanel.AddThemeStyleboxOverride("panel", bgStyle);
+        _groupPanel.Visible = false;
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 6);
+        _groupPanel.AddChild(vbox);
+
+        var title = MakeLbl("切換技能組（V 關閉）");
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.AddThemeColorOverride("font_color", new Color(0.75f, 0.85f, 1.0f));
+        vbox.AddChild(title);
+        vbox.AddChild(new HSeparator());
+
+        _groupPanelBtns = new Button[SpellGroup.MaxGroups];
+        for (int gi = 0; gi < SpellGroup.MaxGroups; gi++)
+        {
+            int captured = gi;
+            var btn = MakeBtn($"技能組 {gi + 1}", new Color(0.16f, 0.20f, 0.32f));
+            btn.Pressed += () => { SwitchActiveGroup(captured); ToggleGroupPanel(); };
+            vbox.AddChild(btn);
+            _groupPanelBtns[gi] = btn;
+        }
+        hud.AddChild(_groupPanel);
+    }
+
+    private void ToggleGroupPanel()
+    {
+        _groupPanelOpen = !_groupPanelOpen;
+        _groupPanel.Visible = _groupPanelOpen;
+        if (_groupPanelOpen)
+        {
+            RefreshGroupPanelBtns();
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+        }
+        else
+        {
+            _camera3d.ApplyMouseCapture();
+        }
+    }
+
+    private void RefreshGroupPanelBtns()
+    {
+        if (_groupPanelBtns == null) return;
+        int active = _editor.SpellGroup.ActiveGroupIndex;
+        for (int i = 0; i < SpellGroup.MaxGroups; i++)
+            _groupPanelBtns[i].Modulate = (i == active)
+                ? new Color(0.40f, 0.85f, 1.00f)
+                : new Color(1f, 1f, 1f);
+    }
+
+    private void SwitchActiveGroup(int index)
+    {
+        _editor.SwitchEditorGroup(index);
+        _spellList.Loadout = _editor.Loadout;
+        _spellList.RefreshGroupDots();
+        if (_spellList.Visible) _spellList.Refresh();
+        UpdateActiveManaSlots();
+    }
+
+    private void UpdateActiveManaSlots()
+    {
+        var usedTypes = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+        var loadout = _editor.SpellGroup.ActiveLoadout;
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+        {
+            var spell = loadout.GetSlot(i);
+            if (spell != null) usedTypes.UnionWith(spell.GetUsedManaTypes());
+        }
+        foreach (var p in loadout.PassiveSpells)
+            usedTypes.UnionWith(p.GetUsedManaTypes());
+
+        // gui_dao 保留作單池向後相容
+        usedTypes.Add("gui_dao");
+
+        var existing = new System.Collections.Generic.Dictionary<string, ManaSlot>(System.StringComparer.Ordinal);
+        foreach (var s in _player.ActiveManaSlots) existing[s.ManaTypeKey] = s;
+
+        _player.ActiveManaSlots.Clear();
+        foreach (var t in ManaTypeRegistry.GetSortedForHud())
+        {
+            if (!usedTypes.Contains(t.Key)) continue;
+            if (!existing.TryGetValue(t.Key, out var slot))
+                slot = new ManaSlot(t.Key, _player.MaxMp, _player.Stats.MpRegenRate);
+            _player.ActiveManaSlots.Add(slot);
+        }
+
+        // HUD 重建（slot 組成改變時觸發）
+        if (_manaHudContainer != null) RebuildManaHud();
+    }
+
+    // ── W-6E：動態 Mana HUD ─────────────────────────────────────────
+
+    private void BuildManaHud(CanvasLayer hud)
+    {
+        _manaHudContainer = new VBoxContainer();
+        _manaHudContainer.AnchorTop = _manaHudContainer.AnchorBottom = 1f;
+        _manaHudContainer.GrowVertical = Control.GrowDirection.Begin;  // 向上生長
+        _manaHudContainer.Position = new Vector2(10, -30);             // 底邊 30px
+        _manaHudContainer.AddThemeConstantOverride("separation", 2);
+        hud.AddChild(_manaHudContainer);
+        RebuildManaHud();
+    }
+
+    private void RebuildManaHud()
+    {
+        foreach (Node c in _manaHudContainer.GetChildren()) c.QueueFree();
+
+        int count = _player.ActiveManaSlots.Count;
+        _manaBarFills  = new Panel[count];
+        _manaFillStyles = new StyleBoxFlat[count];
+        _manaValLabels  = new Label[count];
+        _manaHudKeys    = new string[count];
+
+        const float rowH = 16f;
+        const float barW = 76f;
+        const float barH = 8f;
+        const float lblW = 28f;
+        const float valW = 48f;
+
+        for (int i = 0; i < count; i++)
+        {
+            var slot  = _player.ActiveManaSlots[i];
+            var color = GetManaColor(slot.ManaTypeKey);
+            _manaHudKeys[i] = slot.ManaTypeKey;
+
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 3);
+            row.CustomMinimumSize = new Vector2(0, rowH);
+
+            var nameLbl = new Label();
+            nameLbl.Text = GetManaAbbrev(slot.ManaTypeKey);
+            nameLbl.CustomMinimumSize = new Vector2(lblW, rowH);
+            nameLbl.AddThemeFontSizeOverride("font_size", 10);
+            nameLbl.AddThemeColorOverride("font_color", color);
+            nameLbl.VerticalAlignment = VerticalAlignment.Center;
+            row.AddChild(nameLbl);
+
+            var barBg = new Panel();
+            barBg.CustomMinimumSize = new Vector2(barW, rowH);
+            barBg.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            barBg.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+            {
+                BgColor = new Color(0.08f, 0.08f, 0.14f),
+            });
+
+            var fillStyle = new StyleBoxFlat { BgColor = color };
+            _manaFillStyles[i] = fillStyle;
+            var fill = new Panel();
+            fill.Position = new Vector2(0, (rowH - barH) * 0.5f);
+            fill.Size = new Vector2(barW, barH);
+            fill.AddThemeStyleboxOverride("panel", fillStyle);
+            barBg.AddChild(fill);
+            _manaBarFills[i] = fill;
+            row.AddChild(barBg);
+
+            var valLbl = new Label();
+            valLbl.CustomMinimumSize = new Vector2(valW, rowH);
+            valLbl.AddThemeFontSizeOverride("font_size", 9);
+            valLbl.AddThemeColorOverride("font_color", new Color(0.68f, 0.68f, 0.72f));
+            valLbl.HorizontalAlignment = HorizontalAlignment.Right;
+            valLbl.VerticalAlignment   = VerticalAlignment.Center;
+            _manaValLabels[i] = valLbl;
+            row.AddChild(valLbl);
+
+            _manaHudContainer.AddChild(row);
+        }
+    }
+
+    private void RefreshManaHud()
+    {
+        var slots = _player.ActiveManaSlots;
+
+        // 偵測 slot 組成改變 → 重建
+        bool needsRebuild = slots.Count != _manaHudKeys.Length;
+        if (!needsRebuild)
+            for (int i = 0; i < _manaHudKeys.Length; i++)
+                if (_manaHudKeys[i] != slots[i].ManaTypeKey) { needsRebuild = true; break; }
+        if (needsRebuild) { RebuildManaHud(); return; }
+
+        const float barW = 76f;
+        for (int i = 0; i < slots.Count; i++)
+        {
+            var s     = slots[i];
+            float ratio = s.Max > 0f ? Math.Clamp(s.Current / s.Max, 0f, 1f) : 0f;
+            _manaBarFills[i].Size = new Vector2(barW * ratio, _manaBarFills[i].Size.Y);
+            _manaValLabels[i].Text = $"{s.Current:F0}/{s.Max:F0}";
+        }
+    }
+
+    private static Color GetManaColor(string key) => key switch
+    {
+        "wu_dao"     => new Color(0.95f, 0.50f, 0.15f),
+        "xian_dao"   => new Color(0.95f, 0.88f, 0.25f),
+        "fa_dao"     => new Color(0.65f, 0.30f, 0.95f),
+        "yi_dao"     => new Color(0.28f, 0.85f, 0.40f),
+        "hun_dao"    => new Color(0.25f, 0.75f, 0.85f),
+        "gui_dao"    => new Color(0.35f, 0.50f, 0.90f),
+        "mo_fa"      => new Color(0.70f, 0.18f, 0.80f),
+        "yao_li"     => new Color(0.70f, 0.82f, 0.18f),
+        "ao_shu"     => new Color(0.15f, 0.85f, 0.90f),
+        "shen_sheng" => new Color(0.95f, 0.92f, 0.50f),
+        "yuan_neng"  => new Color(0.90f, 0.55f, 0.18f),
+        "xing_neng"  => new Color(0.58f, 0.75f, 1.00f),
+        "ji_neng"    => new Color(0.48f, 0.65f, 0.48f),
+        "zhi_ye"     => new Color(0.55f, 0.42f, 0.88f),
+        "chao_neng"  => new Color(0.22f, 0.95f, 0.88f),
+        "shen_li"    => new Color(0.95f, 0.95f, 0.78f),
+        "gai_nian"   => new Color(0.75f, 0.52f, 0.92f),
+        "xun_neng"   => new Color(0.28f, 0.85f, 0.68f),
+        _            => new Color(0.58f, 0.58f, 0.62f),
+    };
+
+    private static string GetManaAbbrev(string key) => key switch
+    {
+        "wu_dao"     => "武",
+        "xian_dao"   => "仙",
+        "fa_dao"     => "法",
+        "yi_dao"     => "醫",
+        "hun_dao"    => "魂",
+        "gui_dao"    => "鬼",
+        "mo_fa"      => "魔",
+        "yao_li"     => "妖",
+        "ao_shu"     => "奧",
+        "shen_sheng" => "聖",
+        "yuan_neng"  => "源",
+        "xing_neng"  => "星",
+        "ji_neng"    => "機",
+        "zhi_ye"     => "智",
+        "chao_neng"  => "超",
+        "shen_li"    => "神",
+        "gai_nian"   => "念",
+        "xun_neng"   => "循",
+        _            => key.Length >= 1 ? key[..Math.Min(2, key.Length)] : "?",
+    };
 
     private static string ShapeName(PlacementShape s) => s switch
     {
@@ -2562,5 +2910,47 @@ public partial class Main : Node
         d.Lbl.Text = $"{amount:F0}";
         d.Lbl.AddThemeColorOverride("font_color", d.BaseColor);
         d.Lbl.Visible = true;
+    }
+
+    // ── 採掘 Hover 高亮 ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 計算當前幀應高亮的格集合。
+    /// 條件：非 UI 狀態 + 準心對準可挖掘格 + 距離在採掘範圍內。
+    /// 完美移除模式下命中 PlacedUnit 時回傳整個 Unit 的格子。
+    /// </summary>
+    private HashSet<GridPos>? ComputeHighlightTiles()
+    {
+        if (_mouseOverHotbar || _inventoryOpen) return null;
+
+        var target = _player.MouseGridPos;
+        var mat    = _world3d.GetTile(target.X, target.Y, target.Z);
+        if (mat == MaterialType.Air) return null;
+
+        var matData = MaterialRegistry.Get(mat);
+        if (!matData.IsMineable) return null;
+        if (matData.RequiredToolTier > _player.Inventory.ActiveToolTier) return null;
+        if (_player.Position.DistanceTo(target) > _player.MiningRange) return null;
+
+        // 完美移除模式：命中 PlacedUnit → 整個 Unit 一起高亮
+        if (_perfectRemove && _placedRegistry.TryGetUnit(target, out var unit))
+        {
+            var set = new HashSet<GridPos>();
+            foreach (var p in unit.Tiles)
+                if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                    set.Add(p);
+            return set.Count > 0 ? set : null;
+        }
+
+        // 一般形狀採掘：中心格 + 形狀偏移內所有非空格
+        var tiles = new HashSet<GridPos> { target };
+        foreach (var (dx, dy, dz) in ShapeVoxels.GetOffsets(_activeShape))
+        {
+            if (dx == 0 && dy == 0 && dz == 0) continue;
+            var p = target + new GridPos(dx, dy, dz);
+            if (_world3d.GetTile(p.X, p.Y, p.Z) != MaterialType.Air)
+                tiles.Add(p);
+        }
+        return tiles;
     }
 }

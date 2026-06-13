@@ -10,20 +10,28 @@ public partial class AbilityEditorUI : Control
 {
     // 從圓球列表返回時發出
     [Signal] public delegate void BackPressedEventHandler();
+    // W-6F：技能資料已儲存（攜帶 JSON，Main.cs 負責寫入角色存檔）
+    [Signal] public delegate void SpellDataSavedEventHandler(string spellGroupJson);
 
-    // 技能欄位（共 MaxSlots 個槽位）
-    public SpellLoadout Loadout { get; } = new();
+    // W-6D：最多 5 個技能組，每組各自持有一個 SpellLoadout
+    public SpellGroup   SpellGroup { get; } = new();
+    // 向後相容：Main.cs / SpellListUI 等直接取用當前組的 Loadout
+    public SpellLoadout Loadout    => SpellGroup.ActiveLoadout;
 
     // ── 狀態 ──────────────────────────────────────────────────────
     private readonly SpellArray[] _spells =
         new SpellArray[SpellLoadout.MaxSlots];
     private int _activeEditorSlot = 0;
+    // 被動技能編輯模式
+    private bool       _editingPassive = false;
+    private int        _passiveEditIdx = -1;   // -1 = 新建被動
+    private SpellArray _passiveBuffer  = new();
     // 容器導覽棧：每層記錄（該層的 SpellArray, 顯示標籤）
     private readonly List<(SpellArray arr, string label)> _navStack = new();
     // 當前編輯目標：主體 或 容器效果深處
     private SpellArray _spell => _navStack.Count > 0
         ? _navStack[^1].arr
-        : _spells[_activeEditorSlot];
+        : (_editingPassive ? _passiveBuffer : _spells[_activeEditorSlot]);
 
     // 由 Main.cs 每幀更新，用於刻印庫境界門檻顯示
     public  int       PlayerLevel   { get; set; } = 1;
@@ -49,32 +57,60 @@ public partial class AbilityEditorUI : Control
     private int           _activeSubTab   = 0;
     private VBoxContainer _leftContent    = null!;
     private VBoxContainer _subLabelCol    = null!;
-    private readonly Button[] _leftTabBtns = new Button[3];
+    private readonly Button[] _leftTabBtns  = new Button[3];
+    private Button[]          _groupDots    = null!;
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
     {
         for (int i = 0; i < _spells.Length; i++) _spells[i] = new SpellArray();
-
-        // 讀取上次存檔
-        var totemMap   = TotemLibrary.AllTotems.ToDictionary(t => t.Id);
-        var engraveMap = TotemLibrary.AllEngravings.ToDictionary(e => e.Id);
-        var (saved, savedActive, savedPassive) = SaveSystem.Load(totemMap, engraveMap);
-        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
-        {
-            if (saved[i] is { } s)
-            {
-                _spells[i] = s;
-                Loadout.SetSlot(i, s);
-            }
-        }
-        foreach (var p in savedPassive)
-            Loadout.AddPassive(p);
-        _activeEditorSlot = savedActive;
-
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         BuildUI();
         RefreshAll();
+        // 技能資料由 Main.cs 在場景建立後呼叫 InitSpells(json) 注入
+    }
+
+    /// <summary>
+    /// W-6F：由 Main.cs 在場景建立後呼叫，將角色技能資料注入編輯器。
+    /// json 為空字串表示新角色（全空白）。
+    /// </summary>
+    public void InitSpells(string json)
+    {
+        _editingPassive = false;
+        _passiveEditIdx = -1;
+        var totemMap   = TotemLibrary.AllTotems.ToDictionary(t => t.Id);
+        var engraveMap = TotemLibrary.AllEngravings.ToDictionary(e => e.Id);
+
+        // 清空所有 5 組
+        for (int g = 0; g < SpellGroup.MaxGroups; g++)
+            SpellGroup.GetGroup(g).ClearAll();
+
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            int activeGroupIdx = SaveSystem.LoadGroupFromString(json, SpellGroup, totemMap, engraveMap);
+            SpellGroup.SetActiveGroup(activeGroupIdx);
+        }
+
+        // 同步當前組到 _spells 緩衝
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+            _spells[i] = Loadout.GetSlot(i) ?? new SpellArray();
+        _activeEditorSlot = Loadout.ActiveIndex;
+        _navStack.Clear();
+
+        RefreshAll();
+    }
+
+    /// <summary>W-6F：序列化目前所有技能組為 JSON，供 Main.cs 存入角色存檔。</summary>
+    public string GetSpellGroupJson()
+    {
+        // 被動編輯中：不把 _spells 緩衝寫回主動槽（避免覆蓋原有主動技能）
+        if (!_editingPassive)
+        {
+            for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+                Loadout.SetSlot(i, _spells[i]);
+            Loadout.ActiveIndex = _activeEditorSlot;
+        }
+        return SaveSystem.SaveGroupToString(SpellGroup);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -127,7 +163,7 @@ public partial class AbilityEditorUI : Control
         _backBtn.Pressed += () =>
         {
             if (_navStack.Count > 0) { _navStack.RemoveAt(_navStack.Count - 1); RefreshAll(); }
-            else                     { EmitSignal(SignalName.BackPressed); }
+            else                     { TryExitEditor(); }
         };
         row.AddChild(_backBtn);
 
@@ -150,6 +186,25 @@ public partial class AbilityEditorUI : Control
         var flex = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         row.AddChild(flex);
 
+        // ── W-6D：技能組切換圓點（1–5）──
+        var groupRow = new HBoxContainer();
+        groupRow.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        groupRow.AddThemeConstantOverride("separation", 3);
+        _groupDots = new Button[SpellGroup.MaxGroups];
+        for (int gi = 0; gi < SpellGroup.MaxGroups; gi++)
+        {
+            int captured = gi;
+            var dot = Btn($"{gi + 1}", new Color(0.20f, 0.20f, 0.30f));
+            dot.CustomMinimumSize = new Vector2(26, 26);
+            dot.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            dot.TooltipText       = $"技能組 {gi + 1}（點擊切換）";
+            dot.Pressed           += () => SwitchEditorGroup(captured);
+            groupRow.AddChild(dot);
+            _groupDots[gi] = dot;
+        }
+        row.AddChild(groupRow);
+        HSpacer(row, 4);
+
         var gearBtn = Btn("⚙", new Color(0.18f, 0.18f, 0.24f));
         gearBtn.CustomMinimumSize = new Vector2(30, 30);
         gearBtn.SizeFlagsVertical = SizeFlags.ShrinkCenter;
@@ -165,6 +220,76 @@ public partial class AbilityEditorUI : Control
         row.AddChild(_status);
 
         HSpacer(row, 12);
+    }
+
+    // ── W-6D：技能組切換 ──────────────────────────────────────────────
+
+    /// <summary>切換到指定技能組（編輯器內點圓點或外部呼叫）。</summary>
+    public void SwitchEditorGroup(int index)
+    {
+        if (index == SpellGroup.ActiveGroupIndex) return;
+        _editingPassive = false;
+        _passiveEditIdx = -1;
+
+        // 把當前 _spells[] 緩衝寫回當前 Loadout
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+            SpellGroup.ActiveLoadout.SetSlot(i, _spells[i]);
+
+        SpellGroup.SetActiveGroup(index);
+
+        // 從新 Loadout 還原 _spells[] 緩衝
+        for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+            _spells[i] = SpellGroup.ActiveLoadout.GetSlot(i) ?? new SpellArray();
+        _activeEditorSlot = SpellGroup.ActiveLoadout.ActiveIndex;
+        _navStack.Clear();
+
+        RefreshAll();
+    }
+
+    private void RefreshGroupDots()
+    {
+        if (_groupDots == null) return;
+        for (int i = 0; i < SpellGroup.MaxGroups; i++)
+        {
+            bool active = (i == SpellGroup.ActiveGroupIndex);
+            _groupDots[i].Modulate = active
+                ? new Color(0.40f, 0.85f, 1.00f)   // 亮藍 = 當前組
+                : new Color(0.50f, 0.50f, 0.60f);   // 灰 = 其他組
+        }
+    }
+
+    /// <summary>嘗試關閉編輯器；若有技能整構 MP 種類超限，顯示非阻斷性警告。</summary>
+    private void TryExitEditor()
+    {
+        var violating = new List<int>();
+        for (int g = 0; g < SpellGroup.MaxGroups; g++)
+        {
+            var ld = SpellGroup.GetGroup(g);
+            for (int i = 0; i < SpellLoadout.MaxSlots; i++)
+            {
+                var spell = ld.GetSlot(i);
+                if (spell != null && !spell.IsValidManaTypeCount())
+                {
+                    violating.Add(g + 1);
+                    break;
+                }
+            }
+        }
+        if (violating.Count > 0)
+        {
+            var nums = string.Join("、", violating);
+            var dlg = new AcceptDialog
+            {
+                Title      = "⚠ MP 種類超限",
+                DialogText = $"技能組 {nums} 中有技能整構使用超過 {SpellArray.MaxManaTypes} 種 MP，\n超限技能整構在遊戲中將以「禁用」狀態執行。",
+            };
+            AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(360, 0));
+            dlg.Confirmed      += () => dlg.QueueFree();
+            dlg.Canceled       += () => dlg.QueueFree();
+            dlg.CloseRequested += () => dlg.QueueFree();
+        }
+        EmitSignal(SignalName.BackPressed);
     }
 
     // ── 設定 Popup ────────────────────────────────────────────────────
@@ -235,8 +360,9 @@ public partial class AbilityEditorUI : Control
     private string BuildBreadcrumb()
     {
         var parts = new List<string>();
-        string rootName = _spells[_activeEditorSlot].Name is { Length: > 0 } n
-            ? n : $"槽位 {_activeEditorSlot + 1}";
+        string rootName = _editingPassive
+            ? (_passiveBuffer.Name is { Length: > 0 } pn ? pn : "被動技能")
+            : (_spells[_activeEditorSlot].Name is { Length: > 0 } n ? n : $"槽位 {_activeEditorSlot + 1}");
         parts.Add(rootName);
         foreach (var (_, lbl) in _navStack)
             parts.Add(lbl);
@@ -870,6 +996,7 @@ public partial class AbilityEditorUI : Control
         RefreshCost();
         RefreshDescription();
         SyncCanvas();
+        RefreshGroupDots();
     }
 
     private void RefreshCost()
@@ -1057,18 +1184,29 @@ public partial class AbilityEditorUI : Control
             return;
         }
 
-        // ── 儲存 ──
-        Loadout.SetSlot(_activeEditorSlot, _spell);
-        var allSpells = Enumerable.Range(0, SpellLoadout.MaxSlots)
-                                  .Select(i => Loadout.GetSlot(i))
-                                  .ToArray();
-        SaveSystem.Save(allSpells, _activeEditorSlot, Loadout.PassiveSpells);
-
-        GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 技能整構「{_spell.Name}」  " +
-                 $"主被動：{(_spell.IsPassive ? "被動" : "主動")}  " +
-                 $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
-                 $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}");
-        _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存";
+        // ── 儲存（W-6F：序列化後通知 Main.cs 寫入角色存檔）──
+        if (_editingPassive)
+        {
+            if (_passiveEditIdx < 0)
+                Loadout.AddPassive(_passiveBuffer);
+            else
+                Loadout.ReplacePassive(_passiveEditIdx, _passiveBuffer);
+            string pName = _passiveBuffer.Name is { Length: > 0 } pn ? pn : "被動技能";
+            GD.Print($"[儲存] 被動 ← 技能整構「{pName}」  AP：{AbilityPointCalculator.CalculateTotalCost(_passiveBuffer)}");
+            _status.Text = $"✓ 被動「{pName}」已存";
+            _editingPassive = false;
+            _passiveEditIdx = -1;
+        }
+        else
+        {
+            Loadout.SetSlot(_activeEditorSlot, _spell);
+            GD.Print($"[儲存] 槽位 {_activeEditorSlot + 1} ← 技能整構「{_spell.Name}」  " +
+                     $"主被動：{(_spell.IsPassive ? "被動" : "主動")}  " +
+                     $"AP：{AbilityPointCalculator.CalculateTotalCost(_spell)}  " +
+                     $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}");
+            _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存";
+        }
+        EmitSignal(SignalName.SpellDataSaved, GetSpellGroupJson());
     }
 
     private void SelectEditorSlot(int i)
@@ -1082,8 +1220,29 @@ public partial class AbilityEditorUI : Control
     public void OpenSlot(int index)
     {
         if (index < 0 || index >= _spells.Length) return;
+        _editingPassive = false;
+        _passiveEditIdx = -1;
         _activeEditorSlot = index;
         _navStack.Clear();
+        RefreshAll();
+    }
+
+    // 開啟被動技能編輯（passiveIdx=-1 = 新建；>=0 = 編輯現有）
+    public void OpenPassive(int passiveIdx)
+    {
+        _editingPassive = true;
+        _passiveEditIdx = passiveIdx;
+        _navStack.Clear();
+        if (passiveIdx >= 0)
+        {
+            _passiveBuffer = Loadout.GetPassive(passiveIdx) ?? new SpellArray();
+        }
+        else
+        {
+            _passiveBuffer = new SpellArray();
+            var pt = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == "passive_continuous");
+            if (pt is not null) _passiveBuffer.Slots.Add(new SpellSlot { Totem = pt });
+        }
         RefreshAll();
     }
 

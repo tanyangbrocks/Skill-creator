@@ -12,8 +12,8 @@ public class DroppedItemManager
     // 由 TileWorld.OnTileDestroyed 事件觸發，依 DestroyReason 分流
     public void Spawn(GridPos pos, MaterialType mat, DestroyReason reason)
     {
-        if (reason == DestroyReason.Explosion)
-            return; // 爆炸碎片由爆炸端批次計算，呼叫 SpawnFragments
+        if (reason == DestroyReason.Explosion || reason == DestroyReason.ShapeMining)
+            return; // 爆炸/形狀採掘：由呼叫端批次處理掉落，per-tile 不生成
 
         var data = MaterialRegistry.Get(mat);
         if (!data.IsMineable || data.DefaultDrops.Length == 0) return;
@@ -54,10 +54,11 @@ public class DroppedItemManager
 
             if (!item.IsAlive) { _items.RemoveAt(i); continue; }
 
-            // 自動拾取：玩家 2 格以內
-            int dx = Math.Abs(item.Position.X - player.Position.X);
-            int dy = Math.Abs(item.Position.Y - player.Position.Y);
-            if (dx <= 2 && dy <= 2)
+            // 自動拾取：以玩家腳底為基準，半徑 BodyH 格以內（3D）
+            var feet = new GridPos(player.Position.X,
+                                   player.Position.Y + player.BodyH,
+                                   player.Position.Z);
+            if (feet.DistanceTo(item.Position) <= player.BodyH)
             {
                 int added = player.Inventory.TryAdd(item.Stack.ItemId, item.Stack.Count);
                 if (added > 0)
