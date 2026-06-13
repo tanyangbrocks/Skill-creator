@@ -280,6 +280,11 @@ public static class SaveSystem
         foreach (var sd in dto.SpellSlots)
         {
             var slot = new SpellSlot { Name = sd.Name, ManaTypeKey = sd.ManaTypeKey };
+            if (slot.ManaTypeKey != null && ManaTypeRegistry.Get(slot.ManaTypeKey) == null)
+            {
+                GD.PushWarning($"[SaveSystem] 未知 ManaTypeKey '{slot.ManaTypeKey}'，已清除");
+                slot.ManaTypeKey = null;
+            }
             if (sd.TotemId is not null && totemMap.TryGetValue(sd.TotemId, out var t))
                 slot.Totem = t;
             foreach (var ed in sd.Engravings)

@@ -45,8 +45,9 @@ public partial class AbilityEditorUI : Control
     private LineEdit      _nameInput      = null!;
     private Label         _apValue        = null!;
     private ProgressBar   _apBar          = null!;
-    private Label         _mpValue        = null!;
+    private VBoxContainer _mpBreakdown    = null!;
     private Label         _descLabel      = null!;
+    private SpinBox       _baseMpCostSpin = null!;
     private Label         _status         = null!;
     private ScriptCanvas  _canvas         = null!;
     // Header 導覽元素
@@ -59,6 +60,7 @@ public partial class AbilityEditorUI : Control
     private VBoxContainer _subLabelCol    = null!;
     private readonly Button[] _leftTabBtns  = new Button[3];
     private Button[]          _groupDots    = null!;
+    private bool              _isDirty      = false;
 
     // ── 初始化 ────────────────────────────────────────────────────
     public override void _Ready()
@@ -98,6 +100,7 @@ public partial class AbilityEditorUI : Control
         _navStack.Clear();
 
         RefreshAll();
+        _isDirty = false;
     }
 
     /// <summary>W-6F：序列化目前所有技能組為 JSON，供 Main.cs 存入角色存檔。</summary>
@@ -172,7 +175,7 @@ public partial class AbilityEditorUI : Control
         _nameInput.PlaceholderText = "輸入技能整構名稱（必填）";
         _nameInput.CustomMinimumSize = new Vector2(180, 34);
         _nameInput.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-        _nameInput.TextChanged += t => { _spell.Name = t; RefreshDescription(); };
+        _nameInput.TextChanged += t => { _spell.Name = t; _isDirty = true; RefreshDescription(); };
         row.AddChild(_nameInput);
 
         // ── 麵包屑（depth>0）──
@@ -258,8 +261,39 @@ public partial class AbilityEditorUI : Control
         }
     }
 
-    /// <summary>嘗試關閉編輯器；若有技能整構 MP 種類超限，顯示非阻斷性警告。</summary>
+    /// <summary>嘗試關閉編輯器；若有未儲存變更先詢問，再檢查 MP 種類超限。</summary>
     private void TryExitEditor()
+    {
+        if (_isDirty)
+        {
+            var dlg = new ConfirmationDialog
+            {
+                Title      = "未儲存的變更",
+                DialogText = "技能整構尚未儲存，是否儲存後離開？",
+            };
+            dlg.OkButtonText     = "儲存並離開";
+            dlg.CancelButtonText = "捨棄變更";
+            AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(320, 0));
+            dlg.Confirmed += () =>
+            {
+                bool ok = SaveSpell();
+                dlg.QueueFree();
+                if (ok) DoExitEditor();
+            };
+            dlg.Canceled += () =>
+            {
+                _isDirty = false;
+                dlg.QueueFree();
+                DoExitEditor();
+            };
+            dlg.CloseRequested += () => dlg.QueueFree();
+            return;
+        }
+        DoExitEditor();
+    }
+
+    private void DoExitEditor()
     {
         var violating = new List<int>();
         for (int g = 0; g < SpellGroup.MaxGroups; g++)
@@ -647,6 +681,7 @@ public partial class AbilityEditorUI : Control
         SyncCanvas();
         RefreshCost();
         RefreshDescription();
+        _isDirty = true;
     }
 
     private void AddTotemBlock(TotemData totem)
@@ -662,6 +697,7 @@ public partial class AbilityEditorUI : Control
         SyncCanvas();
         RefreshCost();
         RefreshDescription();
+        _isDirty = true;
     }
 
     // 積木庫（依子標籤分組過濾，可拖放至畫布）
@@ -810,6 +846,7 @@ public partial class AbilityEditorUI : Control
         SyncCanvas();
         RefreshCost();
         RefreshDescription();
+        _isDirty = true;
     }
 
     // ── 中央積木序列區 ─────────────────────────────────────────────
@@ -830,12 +867,14 @@ public partial class AbilityEditorUI : Control
             RefreshHeaderState();
             RefreshCost();
             RefreshDescription();
+            _isDirty = true;
             if (inserted) SyncCanvas();
         };
         _canvas.ParamChanged += () =>
         {
             SyncSlotsFromBlocks();
             RefreshCost();
+            _isDirty = true;
         };
         // 調色盤拖放落點 → 技能因子：浮動積木停在落點並預插動作刻印；其餘積木：浮動積木
         _canvas.PaletteBlockDropped = (node, localPos) =>
@@ -862,6 +901,7 @@ public partial class AbilityEditorUI : Control
                     _canvas.SyncFrom(_spell.Blocks, GetSlotOptions, localPos);
                     RefreshCost();
                     RefreshDescription();
+                    _isDirty = true;
                 }
                 else
                 {
@@ -942,15 +982,37 @@ public partial class AbilityEditorUI : Control
         vbox.AddChild(new HSeparator());
         VSpacer(vbox, 4);
 
-        // MP
-        var mpRow = new HBoxContainer();
-        HSpacer(mpRow, 8);
-        mpRow.AddChild(Lbl("MP 消耗："));
-        _mpValue = new Label();
-        _mpValue.Text = "0";
-        _mpValue.AddThemeFontSizeOverride("font_size", 18);
-        mpRow.AddChild(_mpValue);
-        vbox.AddChild(mpRow);
+        // 基礎 MP 消耗（設計者填寫；ActivationType 乘數由計算層套用）
+        var baseMpRow = new HBoxContainer();
+        HSpacer(baseMpRow, 8);
+        baseMpRow.AddChild(Lbl("基礎消耗："));
+        _baseMpCostSpin = new SpinBox { MinValue = 0, MaxValue = 9999, Step = 1,
+            CustomMinimumSize = new Vector2(70, 0) };
+        _baseMpCostSpin.ValueChanged += v =>
+        {
+            _spell.BaseMpCost = (float)v;
+            RefreshCost();
+            _isDirty = true;
+        };
+        baseMpRow.AddChild(_baseMpCostSpin);
+        baseMpRow.AddChild(Lbl(" MP"));
+        vbox.AddChild(baseMpRow);
+
+        VSpacer(vbox, 4);
+        vbox.AddChild(new HSeparator());
+        VSpacer(vbox, 4);
+
+        // MP 消耗：逐類型 read-only 顯示（由 CalculateSlotCostByType 提供）
+        VSpacer(vbox, 2);
+        vbox.AddChild(SectionLbl("  MP 消耗"));
+        VSpacer(vbox, 2);
+        var mpBreakdownMargin = new MarginContainer();
+        mpBreakdownMargin.AddThemeConstantOverride("margin_left",  8);
+        mpBreakdownMargin.AddThemeConstantOverride("margin_right", 8);
+        _mpBreakdown = new VBoxContainer();
+        _mpBreakdown.AddThemeConstantOverride("separation", 2);
+        mpBreakdownMargin.AddChild(_mpBreakdown);
+        vbox.AddChild(mpBreakdownMargin);
 
         VSpacer(vbox, 4);
         vbox.AddChild(new HSeparator());
@@ -958,20 +1020,22 @@ public partial class AbilityEditorUI : Control
         vbox.AddChild(SectionLbl("  技能整構摘要"));
         VSpacer(vbox, 2);
 
+        // 可捲動描述區（填滿剩餘空間）
+        var descScroll = new ScrollContainer();
+        descScroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+        descScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
         var descMargin = new MarginContainer();
         descMargin.AddThemeConstantOverride("margin_left",  8);
         descMargin.AddThemeConstantOverride("margin_right", 8);
+        descMargin.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         _descLabel = new Label();
         _descLabel.AutowrapMode = TextServer.AutowrapMode.Word;
         _descLabel.AddThemeFontSizeOverride("font_size", 11);
         _descLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.7f));
+        _descLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         descMargin.AddChild(_descLabel);
-        vbox.AddChild(descMargin);
-
-        // 彈性空白 → 按鈕推到底
-        var flex = new Control();
-        flex.SizeFlagsVertical = SizeFlags.ExpandFill;
-        vbox.AddChild(flex);
+        descScroll.AddChild(descMargin);
+        vbox.AddChild(descScroll);
 
         // 儲存按鈕
         var saveMargin = new MarginContainer();
@@ -980,7 +1044,7 @@ public partial class AbilityEditorUI : Control
         saveMargin.AddThemeConstantOverride("margin_bottom", 12);
         var saveBtn = Btn("儲存技能整構", new Color(0.15f, 0.35f, 0.55f));
         saveBtn.CustomMinimumSize = new Vector2(0, 38);
-        saveBtn.Pressed += SaveSpell;
+        saveBtn.Pressed += () => SaveSpell();
         saveMargin.AddChild(saveBtn);
         vbox.AddChild(saveMargin);
     }
@@ -991,6 +1055,7 @@ public partial class AbilityEditorUI : Control
 
     private void RefreshAll()
     {
+        SyncSlotsFromBlocks();   // 確保載入後 BlockNode.Params["manaTypeKey"] 已補全再建 Canvas
         RefreshHeaderState();
         if (_nameInput != null) _nameInput.Text = _spell.Name;
         RefreshCost();
@@ -1001,8 +1066,9 @@ public partial class AbilityEditorUI : Control
 
     private void RefreshCost()
     {
+        _baseMpCostSpin?.SetValueNoSignal(_spell.BaseMpCost);
+
         int ap   = AbilityPointCalculator.CalculateTotalCost(_spell);
-        float mp = AbilityPointCalculator.CalculateMpCost(_spell);
         bool over = AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel);
         int cap = LvCap(PlayerLevel);
 
@@ -1014,7 +1080,39 @@ public partial class AbilityEditorUI : Control
         _apBar.MaxValue = cap;
         _apBar.Value = Math.Min(ap, cap);
 
-        _mpValue.Text = $"{mp:F0}";
+        RefreshMpBreakdown();
+    }
+
+    private void RefreshMpBreakdown()
+    {
+        if (_mpBreakdown is null) return;
+        foreach (var child in _mpBreakdown.GetChildren()) child.QueueFree();
+
+        var byType = AbilityPointCalculator.CalculateSlotCostByType(_spell);
+        if (byType.Count == 0)
+        {
+            // 沒有已綁定類型時，顯示總量作為後備
+            float mp = AbilityPointCalculator.CalculateMpCost(_spell);
+            var fallback = Lbl($"{mp:F0} 點");
+            fallback.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.7f));
+            _mpBreakdown.AddChild(fallback);
+            return;
+        }
+
+        foreach (var (key, cost) in byType)
+        {
+            string name = ManaTypeRegistry.Get(key)?.DisplayName ?? key;
+            var lbl = Lbl($"{name}：{cost:F0} 點");
+            lbl.AddThemeColorOverride("font_color", new Color(0.7f, 0.85f, 1f));
+            _mpBreakdown.AddChild(lbl);
+        }
+
+        if (_spell.HasUnboundMpBlocks())
+        {
+            var warn = Lbl("⚠ 部分插槽未指定 MP 種類");
+            warn.AddThemeColorOverride("font_color", new Color(1f, 0.55f, 0.3f));
+            _mpBreakdown.AddChild(warn);
+        }
     }
 
     private void RefreshDescription()
@@ -1035,6 +1133,8 @@ public partial class AbilityEditorUI : Control
     // 從 canvas 積木掃描 Totem/Engraving 積木，重建 Slots + GlobalEngravings + Container
     private void SyncSlotsFromBlocks()
     {
+        var oldSlots = _spell.Slots.ToList();
+        int slotIdx = 0;
         _spell.Slots.Clear();
         _spell.GlobalEngravings.Clear();
         TotemData? firstNonPassive = null;
@@ -1056,7 +1156,13 @@ public partial class AbilityEditorUI : Control
                 }
                 if (totem is not null)
                 {
-                    _spell.Slots.Add(new SpellSlot { Totem = totem });
+                    // 遷移：首次載入時 BlockNode.Params 無 manaTypeKey，從 oldSlots 補入
+                    if (!b.Params.ContainsKey("manaTypeKey") && slotIdx < oldSlots.Count)
+                        b.Params["manaTypeKey"] = (object?)oldSlots[slotIdx].ManaTypeKey;
+                    string? manaKey = b.Params.TryGetValue("manaTypeKey", out var manaObj) ? manaObj?.ToString() : null;
+                    var newSlot = new SpellSlot { Totem = totem, ManaTypeKey = manaKey };
+                    slotIdx++;
+                    _spell.Slots.Add(newSlot);
                     if (firstNonPassive is null && totem.Type != TotemType.Passive)
                         firstNonPassive = totem;
                 }
@@ -1148,7 +1254,7 @@ public partial class AbilityEditorUI : Control
     // 顏色同樣委託給 ScratchCanvas._descs，與積木頭部色塊保持一致
     private static Color BlockTypeColor(BlockType type) => ScratchCanvas.BlockColor(type);
 
-    private void SaveSpell()
+    private bool SaveSpell()
     {
         // 先同步 Slots / GlobalEngravings / Container
         SyncSlotsFromBlocks();
@@ -1159,8 +1265,7 @@ public partial class AbilityEditorUI : Control
         if (string.IsNullOrWhiteSpace(_spell.Name))
             errors.Add("• 請填寫技能整構名稱（必填）");
 
-        // 主動技能必須有發動方式（此處用 ActivationType 有無 None 值判斷）
-        // ActivationType 預設為 Instant，無 None 值，故無需額外驗證
+        // ActivationType 無 None 值（預設 Instant），發動方式由積木在執行時設定，無需此處驗證
 
         if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel))
         {
@@ -1181,7 +1286,7 @@ public partial class AbilityEditorUI : Control
             dlg.Confirmed    += () => dlg.QueueFree();
             dlg.Canceled     += () => dlg.QueueFree();
             dlg.CloseRequested += () => dlg.QueueFree();
-            return;
+            return false;
         }
 
         // ── 儲存（W-6F：序列化後通知 Main.cs 寫入角色存檔）──
@@ -1206,7 +1311,9 @@ public partial class AbilityEditorUI : Control
                      $"MP：{AbilityPointCalculator.CalculateMpCost(_spell):F0}");
             _status.Text = $"✓ 槽位 {_activeEditorSlot + 1}「{_spell.Name}」已存";
         }
+        _isDirty = false;
         EmitSignal(SignalName.SpellDataSaved, GetSpellGroupJson());
+        return true;
     }
 
     private void SelectEditorSlot(int i)

@@ -16,7 +16,7 @@ public class SpellArray
     // 全域刻印（影響整個技能整構所有技能因子）
     public List<EngraveData> GlobalEngravings { get; } = new();
 
-    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Declare;
+    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Instant;
 
     // 施放方式：直接施放 或 透過哪個容器執行
     public ContainerType Container { get; set; } = ContainerType.DirectCast;
@@ -25,7 +25,7 @@ public class SpellArray
     public float CastDelay { get; set; } = 0.3f;
 
     // 基礎 MP 消耗（設計者設定，發動類型乘數由 AbilityPointCalculator 套用）
-    public float BaseMpCost { get; set; } = 10f;
+    public float BaseMpCost { get; set; } = 0f;
 
     // 連段：InvokeSpell 指向的下一個技能整構名稱（null = 連段終止）
     public string? NextInCombo { get; set; }
