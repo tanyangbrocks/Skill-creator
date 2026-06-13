@@ -160,7 +160,7 @@ public partial class Main : Node
 	private struct ActiveDmgNum
 	{
 		public Label   Lbl;
-		public Vector2 WorldPx;
+		public Vector3 WorldPos3;
 		public float   Timer;
 		public float   RiseY;
 		public bool    Active;
@@ -1158,9 +1158,7 @@ public partial class Main : Node
 					continue;
 				}
 
-				// WorldPx 現在存放世界單位座標，透過 CameraController 投影到螢幕
-				var worldPos3d = new Vector3(_dmgPool[i].WorldPx.X, _dmgPool[i].WorldPx.Y, 0f);
-				var screenPos  = _camera3d.WorldToScreen(worldPos3d);
+				var screenPos  = _camera3d.WorldToScreen(_dmgPool[i].WorldPos3);
 				screenPos.Y   -= _dmgPool[i].RiseY;
 				_dmgPool[i].Lbl.Position = screenPos;
 
@@ -1648,7 +1646,7 @@ public partial class Main : Node
 
 	// 判斷 pos 是否被玩家或存活敵人佔據，用於防止放置時穿模。
 	// 玩家：完整 PlayerW × PlayerH tile 矩形（遊戲為側捲，Z 軸忽略）。
-	// 敵人：以各自的 Position tile 為準。
+	// 敵人：與 HitsEnemy 一致的碰撞盒（Heavy = 2×2，其他 = 1×1），精確 Z 對齊。
 	private bool OccupiedByEntity(GridPos pos)
 	{
 		var pp = _player.Position;
@@ -1657,8 +1655,15 @@ public partial class Main : Node
 			return true;
 
 		foreach (var e in _enemies.Enemies)
-			if (e.IsAlive && e.Position == pos) return true;
-
+		{
+			if (!e.IsAlive) continue;
+			int ew = e.Type == EnemyType.Heavy ? 2 : 1;
+			int eh = e.Type == EnemyType.Heavy ? 2 : 1;
+			if (pos.X >= e.Position.X && pos.X < e.Position.X + ew &&
+				pos.Y >= e.Position.Y - (eh - 1) && pos.Y <= e.Position.Y &&
+				pos.Z == e.Position.Z)
+				return true;
+		}
 		return false;
 	}
 
@@ -2901,7 +2906,10 @@ public partial class Main : Node
 
 		ref var d = ref _dmgPool[slot];
 		float dT = TileWorldConstants.TileSize;
-		d.WorldPx   = new Vector2(pos.X * dT + dT * 0.5f - WorldScale.OriginX, pos.Y * dT + dT * 0.5f);
+		d.WorldPos3 = new Vector3(
+			pos.X * dT + dT * 0.5f - WorldScale.OriginX,
+			pos.Y * dT + dT * 0.5f,
+			pos.Z * dT + dT * 0.5f - WorldScale.OriginZ);
 		d.Timer     = DmgNumDuration;
 		d.RiseY     = 0f;
 		d.Active    = true;

@@ -15,7 +15,7 @@ public enum EnemyType
     Heavy,   // 重裝：高 HP、緩慢、重擊
 }
 
-public class Enemy : IElementalTarget, ISnapshottable
+public class Enemy : IElementalTarget, ISnapshottable, ICreature
 {
     private static int _nextId = 0;
 

@@ -7,11 +7,14 @@ using SkillCreator.Snapshot;
 using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
-public class PlayerController : IElementalTarget, ISnapshottable
+public class PlayerController : IElementalTarget, ISnapshottable, ICreature
 {
     // ── IElementalTarget 實作（W-3）─────────────────────────────────
     int  IElementalTarget.EntityId => -1;  // 玩家固定 -1
     void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
+
+    // ── ICreature 實作 ──────────────────────────────────────────────
+    public int Id => -1;
 
     /// <summary>玩家身上的元素 Aura 與元素狀態效果管理器。</summary>
     public ElementalAuraComponent Aura  { get; } = new();

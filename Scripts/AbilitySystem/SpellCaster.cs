@@ -50,12 +50,17 @@ public static class SpellCaster
                 float fdz = mouseDelta.Z;
                 if (Math.Abs(fdx) < 0.001f && Math.Abs(fdy) < 0.001f && Math.Abs(fdz) < 0.001f)
                     fdx = player.Facing.X;
-                // 起點：XZ 方向偏移 2 格，垂直方向只在向上時往上偏移
-                int sdx    = Math.Sign(fdx) != 0 ? Math.Sign(fdx) : 0;
-                int sdz    = Math.Sign(fdz) != 0 ? Math.Sign(fdz) : 0;
-                int startY = player.Position.Y + (fdy < 0f ? -1 : 0);
-                var start  = new GridPos(player.Position.X + sdx * 2, startY,
-                                         player.Position.Z + sdz);
+                // 起點：從玩家視覺 mesh 中心出發，各軸偏移 halfBody+1 格確保不在 mesh 內
+                // playerMesh 半寬 = PlayerW/2 = 8 tiles；半高 = BodyH/2 = 16 tiles
+                int sdx   = Math.Sign(fdx);
+                int sdy   = Math.Sign(fdy);
+                int sdz   = Math.Sign(fdz);
+                int halfW = WorldScale.PlayerW / 2;   // 8
+                int halfH = player.BodyH / 2;         // 16
+                int startX = player.Position.X + sdx * (halfW + 1);
+                int startY = player.Position.Y + halfH + sdy * (halfH + 1);
+                int startZ = player.Position.Z + sdz * (halfW + 1);
+                var start  = new GridPos(startX, startY, startZ);
                 return new SpellCastResult
                 {
                     Ok         = true,
@@ -242,8 +247,10 @@ public static class SpellCaster
 
         if (bound.Count == 0)
         {
-            if (!SafetyGuard.HasMp(player.Mp, totalCost)) return false;
-            player.Mp -= totalCost;
+            // 無 ManaTypeKey 的整構：回退到 ActiveManaSlots[0]（即 gui_dao 預設槽）
+            var def = player.ActiveManaSlots.Count > 0 ? player.ActiveManaSlots[0] : null;
+            if (def == null || !SafetyGuard.HasMp(def.Current, totalCost)) return false;
+            def.Current -= totalCost;
             return true;
         }
 
