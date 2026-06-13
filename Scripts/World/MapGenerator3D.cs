@@ -101,6 +101,24 @@ public class MapGenerator3D
         int W = _worldW, H = _worldH, D = _worldD;
         int initW = Math.Min(W, Chunk3D.Size * 3);
         int initD = Math.Min(D, Chunk3D.Size);
+
+        // FloodFill3D 需要真實 tile 資料；載入世界後 chunks 仍在磁碟，必須先同步預載
+        if (WorldDir.Length > 0)
+        {
+            int cxMax = CeilDiv(initW, Chunk3D.Size);
+            int cyMax = CeilDiv(H,     Chunk3D.Size);
+            int czMax = CeilDiv(initD, Chunk3D.Size);
+            for (int cz = 0; cz < czMax; cz++)
+            for (int cy = 0; cy < cyMax; cy++)
+            for (int cx = 0; cx < cxMax; cx++)
+            {
+                var coord = new Vector3I(cx, cy, cz);
+                if (_generatedChunks.Contains(coord)) continue;
+                if (world.TryLoadChunk(cx, cy, cz, WorldDir))
+                    _generatedChunks.Add(coord);
+            }
+        }
+
         var rng     = new Random(_worldSeed);
         var heights = GenerateHeightmap(initW, initD);
         return BuildSpawns(world, heights, playerSpawn, initW, H, initD, rng);
@@ -133,6 +151,7 @@ public class MapGenerator3D
         SealBedrock(world, initW, H, initD);
         PlaceOreVeins(world, _heights, initW, H, initD, rng);
         AddDecor(world, _heights, initW, H, initD, rng);
+        AddSurfaceWater(world, _heights, initW, initD);
 
         // 標記初始已生成的 chunks（僅出生區 3×all×1）
         for (int cz = 0; cz < CeilDiv(initD, Chunk3D.Size); cz++)
@@ -237,12 +256,20 @@ public class MapGenerator3D
             if ((uint)wx >= (uint)W || (uint)wz >= (uint)D) continue;
             int h = GetHeightAt(wx, wz);
 
+            // 地表凹陷：四方鄰居 h 值都比自己小（Y 軸向下，h 大 = 視覺低）→ 地表格改為水
+            bool isSurfaceBasin =
+                GetHeightAt(Math.Max(0, wx - 1), wz) < h &&
+                GetHeightAt(Math.Min(W - 1, wx + 1), wz) < h &&
+                GetHeightAt(wx, Math.Max(0, wz - 1)) < h &&
+                GetHeightAt(wx, Math.Min(D - 1, wz + 1)) < h;
+
             for (int ly = 0; ly < S; ly++)
             {
                 int wy = wy0 + ly;
                 if ((uint)wy >= (uint)H || wy < h) continue;
                 if (IsCaveAt(wx, wy, wz, h)) continue;  // G-2: 噪音洞穴 → Air
                 var mat = wy <= h + 2 ? MaterialType.Dirt : MaterialType.Stone;
+                if (isSurfaceBasin && wy == h) mat = MaterialType.Water;
                 world.SetTile(wx, wy, wz, mat);
             }
         }
@@ -581,6 +608,27 @@ public class MapGenerator3D
                 if (!world.InBounds(px, y, pz)) continue;
                 if (world.GetTile(px, y, pz) == MaterialType.Air)
                     world.SetTile(px, y, pz, MaterialType.Water);
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  Step 7-B — 地表水池（local-min basin detection）
+    // ════════════════════════════════════════════════════════════
+
+    // 找出地形凹陷（四方鄰居 Y 值都比自己小，即視覺最低點），置換地表 Dirt → Water。
+    // 因為 Y 軸向下，h 值較大 = 視覺上較低，local-max(h) = 地形盆地。
+    private static void AddSurfaceWater(TileWorld3D world, int[,] heights, int W, int D)
+    {
+        for (int x = 1; x < W - 1; x++)
+        for (int z = 1; z < D - 1; z++)
+        {
+            int h = heights[x, z];
+            // h > all 4 cardinal neighbors' h → local maximum in Y = terrain depression
+            if (h > heights[x - 1, z] && h > heights[x + 1, z] &&
+                h > heights[x, z - 1] && h > heights[x, z + 1])
+            {
+                world.SetTile(x, h, z, MaterialType.Water);
             }
         }
     }
