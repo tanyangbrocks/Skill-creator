@@ -494,9 +494,15 @@ public static class SpellCaster
     private static void ExecuteArea(string shape, SpellSlot slot, PlayerController player,
         TileWorld3D world, GridPos? originOverride)
     {
-        var m      = ReadMods(slot);
-        var origin = originOverride ?? player.Position;
-        int baseR  = 2 + (int)(m.DmgBonus * 3f);
+        var m       = ReadMods(slot);
+        // Body-centre origin: when firing from player (not a fixed hit-point), shift Y to mid-body
+        var rawOrigin = originOverride ?? player.Position;
+        var origin = originOverride.HasValue
+            ? rawOrigin
+            : new GridPos(rawOrigin.X, rawOrigin.Y + WorldScale.PlayerH / 2, rawOrigin.Z);
+        // Scale radius with tile granularity so explosions are proportional to the player size
+        int grain  = WorldScale.Grain;
+        int baseR  = (2 + (int)(m.DmgBonus * 3f)) * grain;
         int fx     = player.Facing.X;
         int fy     = player.Facing.Y;
         int px     = -fy; // XY 平面垂直方向

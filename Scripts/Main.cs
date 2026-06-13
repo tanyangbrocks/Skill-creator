@@ -20,6 +20,7 @@ public partial class Main : Node
     private MapGenerator3D           _mapGen      = null!;
     private SkyController            _sky         = null!;
     private WorldSaveData?           _worldData;            // G-5: 當前世界存檔
+    private CharacterSaveData?       _charData;             // G-5: 當前角色存檔
     private int                      _evictFrame;           // G-4: 幀計數（LRU 卸載用）
     private int                      _simStepsPerFrame = 1;
     private bool                     _simPaused        = false;
@@ -53,6 +54,8 @@ public partial class Main : Node
     private float            _placeCooldown   = 0f;
     private bool             _mouseOverHotbar = false; // 滑鼠在熱鍵欄上時暫停採掘/放置
     private Label            _paintModeLabel  = null!;
+    private Label            _xrayLabel       = null!;
+    private bool             _xray            = false;
     private PanelContainer   _paintToolPanel  = null!;
     private PanelContainer   _devToolsPanel   = null!;
 
@@ -207,12 +210,33 @@ public partial class Main : Node
     }
 
     // ── 存檔 ──────────────────────────────────────────────────────
-    private void SaveAll()
+    private void SaveAll(bool fullChunkSave = false)
     {
         if (_worldData == null || _world3d == null) return;
-        _world3d.SaveAllLoadedChunks(_worldData.WorldDir);
+        if (fullChunkSave)
+            _world3d.SaveAllLoadedChunks(_worldData.WorldDir);
+        else
+            _world3d.SaveDirtyChunks(_worldData.WorldDir);
         _placedRegistry.Save(_worldData.WorldDir);
+
+        // 更新玩家當前位置（供下次讀取作為出生點）
+        _worldData.SpawnX = _player.Position.X;
+        _worldData.SpawnY = _player.Position.Y;
+        _worldData.SpawnZ = _player.Position.Z;
         FlowSaveSystem.SaveWorld(_worldData);
+
+        // 儲存角色狀態
+        if (_charData != null)
+        {
+            _charData.Hp    = _player.Hp;
+            _charData.Mp    = _player.Mp;
+            _charData.Level = _player.Level;
+            _charData.Xp    = _player.Xp;
+            _charData.InventorySlots = [.. _player.Inventory.Slots
+                .Select(s => new CharacterSaveData.SlotRecord { ItemId = s.ItemId.ToString(), Count = s.Count })];
+            _charData.ActiveHotbar = _player.Inventory.ActiveHotbarIndex;
+            FlowSaveSystem.SaveCharacter(_charData);
+        }
     }
 
     // 視窗關閉前強制存檔（退出鉤子）
@@ -220,14 +244,15 @@ public partial class Main : Node
     {
         if (what == NotificationWMCloseRequest)
         {
-            SaveAll();
+            SaveAll(fullChunkSave: true);
             GetTree().Quit();
         }
     }
 
-    private void StartGameplay(CharacterSaveData _charData, WorldSaveData worldData)
+    private void StartGameplay(CharacterSaveData charData, WorldSaveData worldData)
     {
         _worldData = worldData;  // G-5: 儲存到欄位，供 _Process 使用
+        _charData  = charData;
 
         // ── 3D 世界 + 渲染器 + 鏡頭 ───────────────────────────
         _world3d = new TileWorld3D(WorldScale.WorldW, WorldScale.WorldH, WorldScale.WorldD);
@@ -253,11 +278,8 @@ public partial class Main : Node
         {
             // 正常路徑：只初始化地形參數（供 GetHeightAt 確定性查詢），不重跑 FillAll/CA
             _mapGen.InitTerrainParams(_world3d, _worldData.Seed);
-            spawnData = new MapGenerator3D.SpawnData
-            {
-                PlayerSpawn = new GridPos(_worldData.SpawnX, _worldData.SpawnY, _worldData.SpawnZ),
-                EnemySpawns = [],
-            };
+            var savedSpawn = new GridPos(_worldData.SpawnX, _worldData.SpawnY, _worldData.SpawnZ);
+            spawnData = _mapGen.RebuildSpawns(_world3d, savedSpawn);
         }
 
         // R-6d：載入放置物件 Registry
@@ -305,13 +327,31 @@ public partial class Main : Node
         // ── 玩家 ───────────────────────────────────────────────
         _player      = new PlayerController(spawnData.PlayerSpawn);
         RespawnPoint = spawnData.PlayerSpawn; // 預設重生點 = 世界初始出生點
-        // 初始道具（prototype 用；合成系統完成後可移除）
-        _player.Inventory.TryAdd(ItemId.ToolBasicPick,      1);
-        _player.Inventory.TryAdd(ItemId.ToolBasicAxe,       1);
-        _player.Inventory.TryAdd(ItemId.ToolIronPick,       1);
-        _player.Inventory.TryAdd(ItemId.EquipBasicSword,    1);
-        _player.Inventory.TryAdd(ItemId.EquipLeatherArmor,  1);
-        _player.Inventory.TryAdd(ItemId.EquipAmulet,        1);
+
+        if (!_worldData.IsFirstEnter && charData.InventorySlots.Length > 0)
+        {
+            // 還原存檔角色狀態
+            _player.Hp = charData.Hp;
+            _player.Mp = charData.Mp;
+            _player.RestoreLevel(charData.Level, charData.Xp);
+            for (int i = 0; i < Inventory.TotalSize && i < charData.InventorySlots.Length; i++)
+            {
+                var slot = charData.InventorySlots[i];
+                if (Enum.TryParse<ItemId>(slot.ItemId, out var id))
+                    _player.Inventory.Slots[i] = new ItemStack(id, slot.Count);
+            }
+            _player.Inventory.ActiveHotbarIndex = charData.ActiveHotbar;
+        }
+        else
+        {
+            // 初始道具（prototype 用；合成系統完成後可移除）
+            _player.Inventory.TryAdd(ItemId.ToolBasicPick,      1);
+            _player.Inventory.TryAdd(ItemId.ToolBasicAxe,       1);
+            _player.Inventory.TryAdd(ItemId.ToolIronPick,       1);
+            _player.Inventory.TryAdd(ItemId.EquipBasicSword,    1);
+            _player.Inventory.TryAdd(ItemId.EquipLeatherArmor,  1);
+            _player.Inventory.TryAdd(ItemId.EquipAmulet,        1);
+        }
 
         // 初始裝備自動穿戴（對應裝備欄空時）
         for (int i = 0; i < Inventory.TotalSize; i++)
@@ -656,6 +696,17 @@ public partial class Main : Node
         _paintModeLabel.AddThemeFontSizeOverride("font_size", 13);
         _paintModeLabel.Visible = false;
         hud.AddChild(_paintModeLabel);
+
+        // X-ray 模式指示器（Tab 切換）
+        _xrayLabel = new Label();
+        _xrayLabel.Text = "X-Ray  [Tab 關閉]";
+        _xrayLabel.AnchorLeft = _xrayLabel.AnchorRight = 0.5f;
+        _xrayLabel.AnchorTop  = _xrayLabel.AnchorBottom = 0f;
+        _xrayLabel.Position   = new Vector2(-80f, 24f);
+        _xrayLabel.AddThemeColorOverride("font_color", new Color(0.3f, 0.9f, 1.0f));
+        _xrayLabel.AddThemeFontSizeOverride("font_size", 13);
+        _xrayLabel.Visible = false;
+        hud.AddChild(_xrayLabel);
 
         // 傷害數字物件池
         _dmgPool = new ActiveDmgNum[DmgPoolSize];
@@ -1016,6 +1067,7 @@ public partial class Main : Node
         for (int i = _projectiles.Count - 1; i >= 0; i--)
             if (!_projectiles[i].IsAlive) _projectiles.RemoveAt(i);
         foreach (var p in _projectiles) p.Update(_world3d, _enemies, dt);
+        _renderer3d.SetProjectiles(_projectiles);
 
         // 物理
         _player.ApplyPhysics(_world3d, dt);
@@ -1278,6 +1330,12 @@ public partial class Main : Node
         else if (k.IsAction(InputBindings.TogglePaint))
         {
             _paintToolPanel.Visible  = !_paintToolPanel.Visible; // 3D 模式：只切換面板顯示
+        }
+        else if (k.IsAction(InputBindings.ToggleXray))
+        {
+            _xray = !_xray;
+            _renderer3d.XrayZRadius = _xray ? 0 : -1;
+            _xrayLabel.Visible = _xray;
         }
         else if (k.IsAction(InputBindings.ShapeMenu) && !_editorOpen)
         {

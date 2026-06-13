@@ -706,6 +706,11 @@ public partial class AbilityEditorUI : Control
             RefreshDescription();
             if (inserted) SyncCanvas();
         };
+        _canvas.ParamChanged += () =>
+        {
+            SyncSlotsFromBlocks();
+            RefreshCost();
+        };
         // 調色盤拖放落點 → 技能因子：浮動積木停在落點並預插動作刻印；其餘積木：浮動積木
         _canvas.PaletteBlockDropped = (node, localPos) =>
         {

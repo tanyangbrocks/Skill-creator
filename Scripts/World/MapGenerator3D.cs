@@ -89,6 +89,23 @@ public class MapGenerator3D
         InitNoises(seed);
     }
 
+    /// <summary>
+    /// 重新計算敵人出生點（載入已有世界時使用）。
+    /// 需在 InitTerrainParams 之後呼叫；世界 tile 資料必須已從磁碟載入。
+    /// </summary>
+    public SpawnData RebuildSpawns(TileWorld3D world, GridPos playerSpawn)
+    {
+        if (_worldW == 0)
+            return new SpawnData { PlayerSpawn = playerSpawn, EnemySpawns = [] };
+
+        int W = _worldW, H = _worldH, D = _worldD;
+        int initW = Math.Min(W, Chunk3D.Size * 3);
+        int initD = Math.Min(D, Chunk3D.Size);
+        var rng     = new Random(_worldSeed);
+        var heights = GenerateHeightmap(initW, initD);
+        return BuildSpawns(world, heights, playerSpawn, initW, H, initD, rng);
+    }
+
     public SpawnData Generate(TileWorld3D world, int seed = 12345)
     {
         var rng  = new Random(seed);
@@ -142,23 +159,22 @@ public class MapGenerator3D
         int maxCZ = CeilDiv(D, Chunk3D.Size) - 1;
         int generated = 0;
 
-        for (int dz = 0; dz <= radius && generated < maxPerCall; dz++)
-        for (int dy = -radius; dy <= radius && generated < maxPerCall; dy++)
-        for (int dx = -radius; dx <= radius && generated < maxPerCall; dx++)
+        // Chebyshev shell：先生成最近的 shell，確保各方向均勻擴展，不偏 Z 方向
+        for (int shell = 0; shell <= radius && generated < maxPerCall; shell++)
+        for (int dz = -shell; dz <= shell && generated < maxPerCall; dz++)
+        for (int dy = -shell; dy <= shell && generated < maxPerCall; dy++)
+        for (int dx = -shell; dx <= shell && generated < maxPerCall; dx++)
         {
-            // 優先生成 Z+ 方向（玩家按 W 前進），再生成 Z-
-            foreach (int sz in dz == 0 ? new[] { 0 } : new[] { 1, -1 })
-            {
-                var coord = new Vector3I(cx + dx, cy + dy, cz + dz * sz);
-                if (coord.X < 0 || coord.Y < 0 || coord.Z < 0) continue;
-                if (coord.X > maxCX || coord.Y > maxCY || coord.Z > maxCZ) continue;
-                if (!_generatedChunks.Add(coord)) continue; // 已生成
-                // G-3: 磁碟優先；若磁碟沒有才程序生成
-                bool fromDisk = WorldDir.Length > 0
-                    && world.TryLoadChunk(coord.X, coord.Y, coord.Z, WorldDir);
-                if (!fromDisk) GenerateChunkLazy(world, coord);
-                if (++generated >= maxPerCall) return;
-            }
+            if (Math.Max(Math.Max(Math.Abs(dx), Math.Abs(dy)), Math.Abs(dz)) != shell) continue;
+            var coord = new Vector3I(cx + dx, cy + dy, cz + dz);
+            if (coord.X < 0 || coord.Y < 0 || coord.Z < 0) continue;
+            if (coord.X > maxCX || coord.Y > maxCY || coord.Z > maxCZ) continue;
+            if (!_generatedChunks.Add(coord)) continue; // 已生成
+            // G-3: 磁碟優先；若磁碟沒有才程序生成
+            bool fromDisk = WorldDir.Length > 0
+                && world.TryLoadChunk(coord.X, coord.Y, coord.Z, WorldDir);
+            if (!fromDisk) GenerateChunkLazy(world, coord);
+            if (++generated >= maxPerCall) return;
         }
     }
 
@@ -181,9 +197,9 @@ public class MapGenerator3D
     public int GetHeightAt(int x, int z)
     {
         float n = _heightNoise!.GetNoise2D(x, z);  // [-1, 1]
-        // mean 0.35 → 平均地表在 35% 深度；振幅 0.20 → ±320 tile = ±10 倍玩家身高
-        float raw = _worldH * 0.35f + n * (_worldH * 0.20f);
-        return Math.Clamp((int)raw, (int)(_worldH * 0.10f), (int)(_worldH * 0.57f));
+        // mean 0.30 → 平均地表在 30% 深度；振幅 0.08 → ±128 tile = ±4 倍玩家身高
+        float raw = _worldH * 0.30f + n * (_worldH * 0.08f);
+        return Math.Clamp((int)raw, (int)(_worldH * 0.15f), (int)(_worldH * 0.45f));
     }
 
     /// <summary>
@@ -192,18 +208,18 @@ public class MapGenerator3D
     /// </summary>
     private bool IsCaveAt(int x, int y, int z, int surfaceH)
     {
-        // 地表以下 4 格才有洞穴，岩床保留
-        if (y <= surfaceH + 4 || y >= _worldH - 8) return false;
+        // 地表以下 PlayerH 格才有洞穴（確保地表有一整個玩家身高的實心「地殼」）
+        if (y <= surfaceH + WorldScale.PlayerH || y >= _worldH - 8) return false;
 
         // 細蠕蟲隧道：兩個偏移 noise 場同時接近 0 → 形成隧道軸線
-        // a²+b² < 0.025 → 隧道截面約 20-30 tiles（適合 PlayerH=32）
         float a = _caveThin!.GetNoise3D(x, y, z);
         float b = _caveThin!.GetNoise3D(x + 317, y + 131, z + 247);
-        if (a * a + b * b < 0.025f) return true;
+        if (a * a + b * b < 0.020f) return true;
 
         // 大洞穴：noise 高值區域，Y 方向壓縮 0.6× 讓洞穴橫向更寬
+        // 0.80 → 約 10% 密度（Minecraft 地下洞穴約 5-10%）
         float c = _caveWide!.GetNoise3D(x, y * 0.6f, z);
-        if (c > 0.75f) return true;
+        if (c > 0.80f) return true;
 
         return false;
     }

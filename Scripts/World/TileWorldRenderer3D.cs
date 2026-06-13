@@ -20,10 +20,17 @@ public partial class TileWorldRenderer3D : Node3D
     private StandardMaterial3D _matOpaque      = null!;
     private StandardMaterial3D _matTransparent = null!;
 
+    /// <summary>X-ray 模式的 Z 可見半徑（chunk 單位）。-1 = 關閉；0 = 玩家 Z ±1 chunk。</summary>
+    public int XrayZRadius { get; set; } = -1;
+
     // 每 chunk 兩個 MeshInstance3D（不透明 O + 半透明 T）
     private readonly Dictionary<Vector3I, (MeshInstance3D O, MeshInstance3D T)> _meshes   = new();
     // 正在執行的任務（coord → Task）；僅主執行緒存取
     private readonly Dictionary<Vector3I, Task<ChunkTaskResult>>                 _inFlight = new();
+    // 投射物視覺：每個 SpellProjectile 對應一個 MeshInstance3D 球體
+    private readonly List<MeshInstance3D>  _projMeshes = new();
+    private SphereMesh?                    _projSphereMesh;
+    private StandardMaterial3D?            _projMat;
 
     // 並行度：最多 ProcessorCount-1 個 worker，保留主執行緒 CPU，上限 8
     // 注意：用 System.Environment 避免與 Godot.Environment 衝突
@@ -75,6 +82,35 @@ public partial class TileWorldRenderer3D : Node3D
         };
     }
 
+    /// <summary>每幀同步投射物位置到 3D 球體標記。</summary>
+    public void SetProjectiles(System.Collections.Generic.List<SkillCreator.AbilitySystem.SpellProjectile> projectiles)
+    {
+        float T = WorldScale.TileSize;
+        // 確保有足夠的 MeshInstance3D 節點
+        while (_projMeshes.Count < projectiles.Count)
+        {
+            _projSphereMesh ??= new SphereMesh { Radius = WorldScale.PlayerH * T * 0.25f, Height = WorldScale.PlayerH * T * 0.5f, RadialSegments = 8, Rings = 4 };
+            _projMat        ??= new StandardMaterial3D { VertexColorUseAsAlbedo = false, AlbedoColor = new Color(1f, 0.8f, 0.1f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, Transparency = BaseMaterial3D.TransparencyEnum.Alpha };
+            var mi = new MeshInstance3D { Mesh = _projSphereMesh, MaterialOverride = _projMat };
+            AddChild(mi);
+            _projMeshes.Add(mi);
+        }
+        // 更新現有節點（超出數量的隱藏）
+        for (int i = 0; i < _projMeshes.Count; i++)
+        {
+            if (i < projectiles.Count && projectiles[i].IsAlive)
+            {
+                var p = projectiles[i].Position;
+                _projMeshes[i].Position = new Vector3(p.X * T - WorldScale.OriginX, p.Y * T, p.Z * T - WorldScale.OriginZ);
+                _projMeshes[i].Visible = true;
+            }
+            else
+            {
+                _projMeshes[i].Visible = false;
+            }
+        }
+    }
+
     /// <summary>
     /// 每幀 Tick 後呼叫。
     /// Pass 0：收集已完成任務 → 套用 GPU mesh。
@@ -101,17 +137,21 @@ public partial class TileWorldRenderer3D : Node3D
         }
         foreach (var c in done) _inFlight.Remove(c);
 
-        // ── Pass 1：LOD ───────────────────────────────────────────────────────
+        // ── Pass 1：LOD（含 X-ray Z 縮減）────────────────────────────────────
         if (viewRadius >= 0 && viewCX >= 0)
         {
-            int hideR = viewRadius + 1;
+            int xyR = viewRadius + 1;
+            int zR  = XrayZRadius >= 0 ? XrayZRadius + 1 : xyR;
             foreach (var (coord, pair) in _meshes)
             {
                 bool inRange =
-                    Math.Abs(coord.X - viewCX) <= hideR &&
-                    Math.Abs(coord.Y - viewCY) <= hideR &&
-                    (viewCZ < 0 || Math.Abs(coord.Z - viewCZ) <= hideR);
+                    Math.Abs(coord.X - viewCX) <= xyR &&
+                    Math.Abs(coord.Y - viewCY) <= xyR &&
+                    (viewCZ < 0 || Math.Abs(coord.Z - viewCZ) <= zR);
+                // 雙向：隱藏超出範圍的 chunk；X-ray 關閉時同步恢復已有 mesh 的 chunk
                 if (!inRange) { pair.O.Visible = false; pair.T.Visible = false; }
+                else { if (pair.O.Mesh != null) pair.O.Visible = true;
+                       if (pair.T.Mesh != null) pair.T.Visible = true; }
             }
         }
 
