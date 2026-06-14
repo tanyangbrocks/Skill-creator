@@ -16,7 +16,7 @@ public class SpellArray
     // 全域刻印（影響整個技能整構所有技能因子）
     public List<EngraveData> GlobalEngravings { get; } = new();
 
-    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Declare;
+    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.None;
 
     // 施放方式：直接施放 或 透過哪個容器執行
     public ContainerType Container { get; set; } = ContainerType.DirectCast;
@@ -25,7 +25,7 @@ public class SpellArray
     public float CastDelay { get; set; } = 0.3f;
 
     // 基礎 MP 消耗（設計者設定，發動類型乘數由 AbilityPointCalculator 套用）
-    public float BaseMpCost { get; set; } = 10f;
+    public float BaseMpCost { get; set; } = 0f;
 
     // 連段：InvokeSpell 指向的下一個技能整構名稱（null = 連段終止）
     public string? NextInCombo { get; set; }
@@ -40,6 +40,34 @@ public class SpellArray
     public SpellArray? ContainerEffect { get; set; }
 
     public bool IsValid => !string.IsNullOrWhiteSpace(Name) && Slots.Any(s => !s.IsEmpty);
+
+    // W-6B：每個技能整構最多可使用的 MP 種類（日後可隨種族/特異體質擴充，不要 hardcode 數字）
+    public const int MaxManaTypes = 3;
+
+    /// <summary>
+    /// 收集此技能整構（含容器效果）所有插槽中已指定的 ManaTypeKey（去重）。
+    /// </summary>
+    public HashSet<string> GetUsedManaTypes(bool recursive = true)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var slot in Slots)
+            if (slot.ManaTypeKey != null) result.Add(slot.ManaTypeKey);
+        if (recursive && ContainerEffect != null)
+            result.UnionWith(ContainerEffect.GetUsedManaTypes(recursive));
+        return result;
+    }
+
+    /// <summary>此技能整構使用的 MP 種類數是否在上限內。</summary>
+    public bool IsValidManaTypeCount(int limit = MaxManaTypes) =>
+        GetUsedManaTypes().Count <= limit;
+
+    /// <summary>
+    /// 是否存在「有 MP 積木但尚未指定 ManaTypeKey」的技能因子（含容器效果遞迴檢查）。
+    /// 供編輯器紅光警告與儲存驗證使用。
+    /// </summary>
+    public bool HasUnboundMpBlocks() =>
+        Slots.Any(s => s.HasAnyMpBlocks && s.ManaTypeKey == null) ||
+        (ContainerEffect?.HasUnboundMpBlocks() ?? false);
 
     /// <summary>
     /// W-3c：技能整構攜帶的主要元素屬性（供投射物 Apply Aura 使用）。

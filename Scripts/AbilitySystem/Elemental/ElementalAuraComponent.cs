@@ -76,6 +76,14 @@ public sealed class ElementalAuraComponent
     public void ApplyImmediate(ElementType element, float duration, IElementalTarget target)
         => ApplyInternal(element, duration, target);
 
+    /// <summary>直接套用凍結（orange_freeze / red_stun 刻印）；跳過元素反應機制。</summary>
+    public void ApplyFreeze(float duration, IElementalTarget target)
+        => AddEffect(new FrozenEffect { RemainingDuration = duration }, target);
+
+    /// <summary>直接套用蔓生緩速（orange_slow 刻印）；跳過元素反應機制。</summary>
+    public void ApplySlow(float duration, IElementalTarget target)
+        => AddEffect(new GrowthSlowEffect { RemainingDuration = duration }, target);
+
     // ── 快照 API（S-5）────────────────────────────────────────────────────
 
     /// <summary>擷取當前 Aura 與效果的不可變快照。</summary>

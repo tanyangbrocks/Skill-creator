@@ -46,7 +46,8 @@ public static class SpellDescriptionGenerator
             sb.Append(Ct.GetValueOrDefault(spell.Container, ""));
             sb.Append("  ");
         }
-        sb.Append(Act.GetValueOrDefault(spell.ActivationType, ""));
+        if (spell.ActivationType != AbilityActivationType.None)
+            sb.Append(Act.GetValueOrDefault(spell.ActivationType, ""));
         sb.AppendLine($"  MP {mp:F0}");
         if (spell.IsPassive) sb.AppendLine("[被動]");
 
@@ -107,11 +108,12 @@ public static class SpellDescriptionGenerator
 
         float mp = AbilityPointCalculator.CalculateMpCost(spell);
         string passiveStr = spell.IsPassive ? "被動" : "主動";
-        string actStr     = Act.GetValueOrDefault(spell.ActivationType, "宣告型");
+        string actStr     = Act.GetValueOrDefault(spell.ActivationType, "");
         string ctStr = spell.Container != ContainerType.DirectCast
             ? Ct.GetValueOrDefault(spell.Container, "") + "，" : "";
 
-        sb.Append($"{passiveStr}技能，{actStr}，{ctStr}消耗 MP {mp:F0}。");
+        string actPart = actStr.Length > 0 ? $"{actStr}，" : "";
+        sb.Append($"{passiveStr}技能，{actPart}{ctStr}消耗 MP {mp:F0}。");
 
         var nonEmpty = spell.Slots.Where(s => !s.IsEmpty).ToList();
         if (nonEmpty.Count > 0)

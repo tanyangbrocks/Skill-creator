@@ -9,9 +9,12 @@ public class DroppedItemManager
 
     public IReadOnlyList<DroppedItem> Items => _items;
 
-    // 由 TileWorld.OnTileDestroyed 事件觸發（爆炸使用 Set 直接清格，不觸發此事件，故不掉落）
-    public void Spawn(GridPos pos, MaterialType mat)
+    // 由 TileWorld.OnTileDestroyed 事件觸發，依 DestroyReason 分流
+    public void Spawn(GridPos pos, MaterialType mat, DestroyReason reason)
     {
+        if (reason == DestroyReason.Explosion || reason == DestroyReason.ShapeMining)
+            return; // 爆炸/形狀採掘：由呼叫端批次處理掉落，per-tile 不生成
+
         var data = MaterialRegistry.Get(mat);
         if (!data.IsMineable || data.DefaultDrops.Length == 0) return;
 
@@ -24,7 +27,25 @@ public class DroppedItemManager
         }
     }
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    /// <summary>
+    /// 爆炸/採掘結束後批次呼叫：依 tileCount 換算 material unit，產生對應碎片數量。
+    /// 1 unit ≈ 1000 tiles；Mining=100 碎片/unit（全回收），Explosion=20~80 碎片/unit。
+    /// </summary>
+    public void SpawnFragments(GridPos center, MaterialType mat, int tileCount, DestroyReason reason)
+    {
+        var data = MaterialRegistry.Get(mat);
+        if (data.FragmentItem == ItemId.None) return;
+
+        float units = tileCount / 1000f;
+        int fragments = reason == DestroyReason.Mining
+            ? (int)(units * 100)
+            : (int)(units * _rng.Next(20, 81));
+        if (fragments <= 0) return;
+
+        _items.Add(new DroppedItem(center, new ItemStack(data.FragmentItem, fragments)));
+    }
+
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         for (int i = _items.Count - 1; i >= 0; i--)
         {
@@ -33,10 +54,11 @@ public class DroppedItemManager
 
             if (!item.IsAlive) { _items.RemoveAt(i); continue; }
 
-            // 自動拾取：玩家 2 格以內
-            int dx = Math.Abs(item.Position.X - player.Position.X);
-            int dy = Math.Abs(item.Position.Y - player.Position.Y);
-            if (dx <= 2 && dy <= 2)
+            // 自動拾取：以玩家腳底為基準，半徑 BodyH 格以內（3D）
+            var feet = new GridPos(player.Position.X,
+                                   player.Position.Y + player.BodyH,
+                                   player.Position.Z);
+            if (feet.DistanceTo(item.Position) <= player.BodyH)
             {
                 int added = player.Inventory.TryAdd(item.Stack.ItemId, item.Stack.Count);
                 if (added > 0)

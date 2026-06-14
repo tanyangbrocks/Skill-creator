@@ -13,6 +13,16 @@ public static class SpellCaster
     // MaxComboDepth 統一定義於 SafetyGuard.MaxComboDepth
     private const int MeleeRange    = 3;   // Contact 容器掃描格數
 
+    // act_fire_projectile 在 slot 執行路徑中無法直接回傳投射物；
+    // 暫存於此靜態欄位，由 Main.cs 在每幀結束前 TakePendingProjectiles() 收集。
+    private static List<SpellProjectile>? _pendingProjectiles;
+    internal static List<SpellProjectile> TakePendingProjectiles()
+    {
+        var r = _pendingProjectiles ?? new List<SpellProjectile>();
+        _pendingProjectiles = null;
+        return r;
+    }
+
     // 施放結果（成功 + 可能產生的投射物）
     public readonly struct SpellCastResult
     {
@@ -23,7 +33,7 @@ public static class SpellCaster
 
     // runner != null 時，DirectCast 技能整構提交給 Runner 做跨幀執行（Wait 真實計時）
     // runner == null 時維持同步執行（Projectile/Contact 命中時使用）
-    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld world,
+    public static SpellCastResult TryCast(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
         if (!player.CanCast) return SpellCastResult.Failed;
@@ -34,10 +44,7 @@ public static class SpellCaster
             return SpellCastResult.Failed;
         }
 
-        float mpCost = AbilityPointCalculator.CalculateMpCost(spell);
-        if (!SafetyGuard.HasMp(player.Mp, mpCost)) return SpellCastResult.Failed;
-
-        player.Mp -= mpCost;
+        if (!TryConsumeMp(player, spell)) return SpellCastResult.Failed;
         player.SetCastCooldown(spell.CastDelay);
         CombatState.OnSpellCast();
         ApplyGlobalEngravings(spell);
@@ -46,20 +53,28 @@ public static class SpellCaster
         {
             case ContainerType.Projectile:
             {
-                // 投射物方向：以滑鼠游標位置為準（精確浮點，非 8 方向），游標與玩家重疊時 fallback 至 Facing
+                // 投射物方向：以滑鼠游標位置為準（精確浮點，含 3D Z 方向）
                 var mouseDelta = player.MouseGridPos - player.Position;
                 float fdx = mouseDelta.X;
                 float fdy = mouseDelta.Y;
-                if (Math.Abs(fdx) < 0.001f && Math.Abs(fdy) < 0.001f)
+                float fdz = mouseDelta.Z;
+                if (Math.Abs(fdx) < 0.001f && Math.Abs(fdy) < 0.001f && Math.Abs(fdz) < 0.001f)
                     fdx = player.Facing.X;
-                // 起點：橫向偏移 2 格，垂直方向只在向上時往上偏移（避免往下生成在地板裡）
-                int sdx    = Math.Sign(fdx) != 0 ? Math.Sign(fdx) : 0;
-                int startY = player.Position.Y + (fdy < 0f ? -1 : 0);
-                var start  = new GridPos(player.Position.X + sdx * 2, startY);
+                // 起點：從玩家視覺 mesh 中心出發，各軸偏移 halfBody+1 格確保不在 mesh 內
+                // playerMesh 半寬 = PlayerW/2 = 8 tiles；半高 = BodyH/2 = 16 tiles
+                int sdx   = Math.Sign(fdx);
+                int sdy   = Math.Sign(fdy);
+                int sdz   = Math.Sign(fdz);
+                int halfW = WorldScale.PlayerW / 2;   // 8
+                int halfH = player.BodyH / 2;         // 16
+                int startX = player.Position.X + sdx * (halfW + 1);
+                int startY = player.Position.Y + halfH + sdy * (halfH + 1);
+                int startZ = player.Position.Z + sdz * (halfW + 1);
+                var start  = new GridPos(startX, startY, startZ);
                 return new SpellCastResult
                 {
                     Ok         = true,
-                    Projectile = new SpellProjectile(start, fdx, fdy, spell, player, enemies, loadout, runner),
+                    Projectile = new SpellProjectile(start, fdx, fdy, fdz, spell, player, enemies, loadout, runner),
                 };
             }
 
@@ -87,7 +102,7 @@ public static class SpellCaster
     // ── 召喚物容器（TODO-STUB：佔位）──────────────────────────────
     // 最終應由召喚物 AI 實體裝載 SpellArray 並在其行動時執行；
     // 目前直接在玩家位置執行效果作為佔位，等召喚物 AI 系統完成後替換。
-    private static void ExecuteSummonContainer(SpellArray spell, PlayerController player, TileWorld world,
+    private static void ExecuteSummonContainer(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
     {
         if (runner != null)
@@ -98,7 +113,7 @@ public static class SpellCaster
 
     // ── Contact 容器：近戰範圍命中 ────────────────────────────────
 
-    private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld world,
+    private static void ExecuteContactHit(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, SpellRunner? runner = null)
     {
         int fx = player.Facing.X;
@@ -152,7 +167,7 @@ public static class SpellCaster
     // atHitPoint：效果中心即 player.Position（投射物命中 / 接觸命中時為 true）
     //             technique_slash 等會用此 flag 把爆炸 offset 改為 0，避免偏移到命中點之外
     // hitTarget：投射物/接觸命中的敵人快照，預設 CurrentIterEntity 讓 固定傷害 積木可對其扣血
-    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld world,
+    public static void ExecuteEffects(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, int comboDepth = 0,
         bool atHitPoint = false, EntityInfo? hitTarget = null)
     {
@@ -213,7 +228,7 @@ public static class SpellCaster
             loop.Step(ctx, 0f);
 
             if (ctx.PendingInvokeTotem != null)
-                ConsumeInvokeTotem(ctx, slotByRef, player, world, atHitPoint);
+                ConsumeInvokeTotem(ctx, slotByRef, player, world, atHitPoint, enemies);
 
             if (ctx.PendingInvokeSpell != null)
             {
@@ -230,9 +245,39 @@ public static class SpellCaster
         }
     }
 
+    // ── W-6C：依 SpellSlot.ManaTypeKey 消耗 MP ────────────────────
+    // • 所有 slot 皆無 ManaTypeKey → 回退舊邏輯（扣 ActiveManaSlots[0]）
+    // • 有 ManaTypeKey 的 slot → 均分總費用，先全部驗證再統一扣除（原子）
+    private static bool TryConsumeMp(PlayerController player, SpellArray spell)
+    {
+        float totalCost = AbilityPointCalculator.CalculateMpCost(spell);
+        if (totalCost <= 0f) return true;
+
+        var bound = spell.Slots.FindAll(s => s.ManaTypeKey != null);
+
+        if (bound.Count == 0)
+        {
+            // 無 ManaTypeKey 的整構：回退到 ActiveManaSlots[0]（即 gui_dao 預設槽）
+            var def = player.ActiveManaSlots.Count > 0 ? player.ActiveManaSlots[0] : null;
+            if (def == null || !SafetyGuard.HasMp(def.Current, totalCost)) return false;
+            def.Current -= totalCost;
+            return true;
+        }
+
+        float costPerSlot = totalCost / bound.Count;
+        foreach (var slot in bound)
+        {
+            var ms = player.GetManaSlot(slot.ManaTypeKey!);
+            if (ms == null || ms.Current < costPerSlot) return false;
+        }
+        foreach (var slot in bound)
+            player.GetManaSlot(slot.ManaTypeKey!)!.Current -= costPerSlot;
+        return true;
+    }
+
     // ── 連段執行 ─────────────────────────────────────────────────
 
-    private static void TriggerCombo(string name, PlayerController player, TileWorld world,
+    private static void TriggerCombo(string name, PlayerController player, TileWorld3D world,
         EnemyManager? enemies, SpellLoadout? loadout, int depth)
     {
         if (loadout is null || depth >= SafetyGuard.MaxComboDepth) return;
@@ -246,10 +291,7 @@ public static class SpellCaster
         }
         if (next is null) return;
 
-        float cost = AbilityPointCalculator.CalculateMpCost(next);
-        if (!SafetyGuard.HasMp(player.Mp, cost)) return;
-
-        player.Mp -= cost;
+        if (!TryConsumeMp(player, next)) return;
         player.SetCastCooldown(next.CastDelay);
         ExecuteEffects(next, player, world, enemies, loadout, depth + 1);
     }
@@ -289,7 +331,7 @@ public static class SpellCaster
 
     internal static void ConsumeInvokeTotem(
         ExecutionContext ctx, Dictionary<string, SpellSlot> slotByRef,
-        PlayerController player, TileWorld world, bool atHitPoint)
+        PlayerController player, TileWorld3D world, bool atHitPoint, EnemyManager? enemies = null)
     {
         string name = ctx.PendingInvokeTotem!;
         ctx.PendingInvokeTotem = null;
@@ -298,7 +340,7 @@ public static class SpellCaster
             ? ctx.CurrentIterEntity.Value.Position
             : ctx.FixedOrigin;
         if (slotByRef.TryGetValue(name, out var slot))
-            ResolveTotem(name, slot, ctx, player, world,
+            ResolveTotem(name, slot, ctx, player, world, enemies,
                 atHitPoint: ctx.CurrentIterEntity.HasValue || atHitPoint || ctx.FixedOrigin.HasValue);
         else
             ctx.DoneTotems.Add(name);
@@ -382,10 +424,11 @@ public static class SpellCaster
     // ── 技能因子解析：觸發條件 or 執行效果 ──────────────────────────────
 
     internal static void ResolveTotem(string name, SpellSlot slot,
-        ExecutionContext ctx, PlayerController player, TileWorld world, bool atHitPoint = false)
+        ExecutionContext ctx, PlayerController player, TileWorld3D world,
+        EnemyManager? enemies = null, bool atHitPoint = false)
     {
         // 所有技能因子類型均為執行型（無條件評估），直接執行並記錄命中
-        ExecuteSlot(slot, player, world, atHitPoint, ctx.EffectOriginOverride);
+        ExecuteSlot(slot, player, world, enemies, atHitPoint, ctx.EffectOriginOverride);
         ctx.HitTotems.Add(name);
         ctx.DoneTotems.Add(name);
     }
@@ -393,9 +436,14 @@ public static class SpellCaster
     // ── 分派到各類型技能因子執行器 ─────────────────────────────────────
 
     // Design B：以 Action 刻印 Id 驅動技能因子行為
-    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld world,
-        bool atHitPoint = false, GridPos? originOverride = null)
+    private static void ExecuteSlot(SpellSlot slot, PlayerController player, TileWorld3D world,
+        EnemyManager? enemies = null, bool atHitPoint = false, GridPos? originOverride = null)
     {
+        var m = ReadMods(slot);
+
+        // yellow_hp_cost：施放前扣 HP
+        if (m.HpCost > 0f) player.TakeDamage(m.HpCost);
+
         // 1. 先從插槽刻印找 OnCast Action 刻印
         string? actionId = null;
         foreach (var e in slot.LocalEngravings)
@@ -407,25 +455,33 @@ public static class SpellCaster
         if (actionId == null && slot.Totem != null)
             TotemLibrary.DefaultActionEngraveId.TryGetValue(slot.Totem.Id, out actionId);
 
-        if (actionId != null) { DispatchAction(actionId, slot, player, world, atHitPoint, originOverride); return; }
+        var origin = originOverride ?? player.Position;
+
+        if (actionId != null)
+        {
+            DispatchAction(actionId, slot, player, world, atHitPoint, originOverride, enemies);
+            ApplyModsToNearbyEnemies(m, origin, enemies, world);
+            return;
+        }
 
         // 3. 向後相容：舊存檔無 Action 刻印時以技能因子類型執行
         if (slot.Totem == null) return;
         switch (slot.Totem.Type)
         {
-            case TotemType.Area:         ExecuteArea(slot, player, world, originOverride);                  break;
-            case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride); break;
-            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride);       break;
-            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                 break;
-            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                          break;
-            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);                break;
-            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);                break;
+            case TotemType.Area:         ExecuteArea("act_area_around", slot, player, world, originOverride); break;
+            case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride);   break;
+            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride, enemies); break;
+            case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                   break;
+            case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                            break;
+            case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);                  break;
+            case TotemType.Domain:       ExecuteDomain(slot, player, world, originOverride);                  break;
         }
+        ApplyModsToNearbyEnemies(m, origin, enemies, world);
     }
 
     // 以 act_* 刻印 Id 分派到對應執行器
     private static void DispatchAction(string actionId, SpellSlot slot, PlayerController player,
-        TileWorld world, bool atHitPoint, GridPos? originOverride)
+        TileWorld3D world, bool atHitPoint, GridPos? originOverride, EnemyManager? enemies = null)
     {
         switch (actionId)
         {
@@ -433,7 +489,7 @@ public static class SpellCaster
             case "act_area_around":
             case "act_area_distant":
             case "act_area_beam":
-                ExecuteArea(slot, player, world, originOverride);
+                ExecuteArea(actionId, slot, player, world, originOverride);
                 break;
 
             case "act_technique_sword":
@@ -443,7 +499,7 @@ public static class SpellCaster
                 break;
 
             case "act_fire_projectile":
-                ExecuteProjectileTotem(slot, player, world, originOverride);
+                ExecuteProjectileTotem(slot, player, world, originOverride, enemies);
                 break;
 
             case "act_morph_apply":
@@ -474,18 +530,106 @@ public static class SpellCaster
         }
     }
 
-    private static void ExecuteArea(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    private static void ExecuteArea(string shape, SpellSlot slot, PlayerController player,
+        TileWorld3D world, GridPos? originOverride)
     {
-        // TODO-STUB: 範圍形狀施放（扇形/周身/遠距圓形/射線衝擊），目前以爆炸佔位
-        var origin = originOverride ?? player.Position;
-        world.Explode(origin.X, origin.Y, 2);
+        var m       = ReadMods(slot);
+        // Body-centre origin: when firing from player (not a fixed hit-point), shift Y to mid-body
+        var rawOrigin = originOverride ?? player.Position;
+        var origin = originOverride.HasValue
+            ? rawOrigin
+            : new GridPos(rawOrigin.X, rawOrigin.Y + player.BodyH / 2, rawOrigin.Z);
+        // Scale radius with tile granularity so explosions are proportional to the player size
+        int grain  = WorldScale.Grain;
+        int baseR  = (2 + (int)(m.DmgBonus * 3f)) * grain;
+        int fx     = player.Facing.X;
+        int fy     = player.Facing.Y;
+        int px     = -fy; // XY 平面垂直方向
+        int py     =  fx;
+
+        switch (shape)
+        {
+            case "act_area_around":
+                world.Explode(origin.X, origin.Y, origin.Z, baseR + 1);
+                ApplyElement(world, origin, baseR + 1, m);
+                break;
+
+            case "act_area_fan":
+            {
+                int fanRange = 8 + baseR;
+                for (int d = 1; d <= fanRange; d++)
+                {
+                    int spread = (d + 1) / 2;
+                    bool blocked = true;
+                    for (int s = -spread; s <= spread; s++)
+                    {
+                        int tx = origin.X + fx * d + px * s;
+                        int ty = origin.Y + fy * d + py * s;
+                        if (!world.InBounds(tx, ty, origin.Z)) continue;
+                        if (world.GetTile(tx, ty, origin.Z) == MaterialType.Stone) continue;
+                        blocked = false;
+                        world.Explode(tx, ty, origin.Z, 1);
+                        ApplyElement(world, new GridPos(tx, ty, origin.Z), 1, m);
+                    }
+                    if (blocked) break;
+                }
+                break;
+            }
+
+            case "act_area_distant":
+            {
+                int distRange = 16 + baseR * 2;
+                var target = new GridPos(origin.X + fx * distRange, origin.Y + fy * distRange, origin.Z);
+                world.Explode(target.X, target.Y, target.Z, baseR + 2);
+                ApplyElement(world, target, baseR + 2, m);
+                break;
+            }
+
+            case "act_area_beam":
+            {
+                int beamLen = 18 + baseR;
+                for (int i = 1; i <= beamLen; i++)
+                {
+                    int tx = origin.X + fx * i;
+                    int ty = origin.Y + fy * i;
+                    if (!world.InBounds(tx, ty, origin.Z)) break;
+                    for (int s = -1; s <= 1; s++)
+                    {
+                        int bx = tx + px * s;
+                        int by = ty + py * s;
+                        var mat = world.GetTile(bx, by, origin.Z);
+                        if (mat != MaterialType.Stone)
+                            world.SetTile(bx, by, origin.Z,
+                                m.Water || m.Ice ? MaterialType.Water : MaterialType.Fire);
+                    }
+                    if (world.GetTile(tx, ty, origin.Z) == MaterialType.Stone) break;
+                }
+                break;
+            }
+        }
     }
 
-    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld world, GridPos? originOverride)
+    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player,
+        TileWorld3D world, GridPos? originOverride, EnemyManager? enemies)
     {
-        // TODO-STUB: 投射物技能因子（能量/實物投射），目前以爆炸佔位
+        // 建立命中時施放 act_area_around 的迷你技能整構，繼承來源槽位的 modifier 刻印
+        var hitSlot = new SpellSlot();
+        foreach (var e in slot.LocalEngravings)
+            if (e.Category == EngraveCategory.Modifier) hitSlot.LocalEngravings.Add(e);
+        hitSlot.LocalEngravings.Add(new EngraveData
+            { Id = "act_area_around", Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast });
+        var hitSpell = new SpellArray();
+        hitSpell.Slots.Add(hitSlot);
+
+        // 發射起點：身體側緣外一格，身體中段高度
         var origin = originOverride ?? player.Position;
-        world.Explode(origin.X, origin.Y, 1);
+        int fx = player.Facing.X != 0 ? player.Facing.X : 1;
+        int halfW = WorldScale.PlayerW / 2;
+        int halfH = player.BodyH / 2;
+        var start  = new GridPos(origin.X + fx * (halfW + 1), origin.Y + halfH, origin.Z);
+
+        _pendingProjectiles ??= new List<SpellProjectile>();
+        _pendingProjectiles.Add(new SpellProjectile(start, fx, 0f, 0f, hitSpell, player, enemies));
     }
 
     // ════════════════════════════════════════════════════════════
@@ -495,7 +639,13 @@ public static class SpellCaster
     private struct Mods
     {
         public float DmgBonus; public int Multi;
-        public bool Fire, Water, Ice, Thunder;
+        public bool  Fire, Water, Ice, Thunder;
+        public float PushDist;   // orange_push
+        public float PullDist;   // orange_pull
+        public float SlowDur;    // orange_slow
+        public float FreezeDur;  // orange_freeze
+        public float StunDur;    // red_stun
+        public float HpCost;     // yellow_hp_cost
     }
 
     private static Mods ReadMods(SpellSlot slot)
@@ -505,20 +655,72 @@ public static class SpellCaster
         {
             switch (e.Id)
             {
-                case "white_dmg":    m.DmgBonus = e.CalculateEffect();              break;
-                case "blue_multi":   m.Multi    = Math.Max(1,(int)e.CalculateEffect()); break;
-                case "elem_fire":    m.Fire     = true;                             break;
-                case "elem_water":   m.Water    = true;                             break;
-                case "elem_ice":     m.Ice      = true;                             break;
-                case "elem_thunder": m.Thunder  = true;                             break;
+                case "white_dmg":      m.DmgBonus  = e.CalculateEffect();               break;
+                case "blue_multi":     m.Multi     = Math.Max(1,(int)e.CalculateEffect()); break;
+                case "elem_fire":      m.Fire      = true;                               break;
+                case "elem_water":     m.Water     = true;                               break;
+                case "elem_ice":       m.Ice       = true;                               break;
+                case "elem_thunder":   m.Thunder   = true;                               break;
+                case "orange_push":    m.PushDist  = e.CalculateEffect();               break;
+                case "orange_pull":    m.PullDist  = e.CalculateEffect();               break;
+                case "orange_slow":    m.SlowDur   = Math.Max(0.5f, e.CalculateEffect()); break;
+                case "orange_freeze":  m.FreezeDur = Math.Max(0.5f, e.CalculateEffect()); break;
+                case "red_stun":       m.StunDur   = Math.Max(0.5f, e.CalculateEffect()); break;
+                case "yellow_hp_cost": m.HpCost    = e.CalculateEffect();               break;
             }
         }
         return m;
     }
 
+    // 套用 orange/red/yellow 對敵人的位移與狀態效果
+    private static void ApplyModsToNearbyEnemies(
+        in Mods m, GridPos origin, EnemyManager? enemies, TileWorld3D world)
+    {
+        if (enemies == null) return;
+        bool hasEffect = m.PushDist > 0f || m.PullDist > 0f ||
+                         m.SlowDur  > 0f || m.FreezeDur > 0f || m.StunDur > 0f;
+        if (!hasEffect) return;
+
+        int radius = 4 + (int)(m.DmgBonus * 3f);
+        foreach (var e in enemies.Enemies)
+        {
+            if (!e.IsAlive) continue;
+            int distXZ = Math.Abs(e.Position.X - origin.X) + Math.Abs(e.Position.Z - origin.Z);
+            if (distXZ > radius) continue;
+
+            if (m.FreezeDur > 0f) e.Aura.ApplyFreeze(m.FreezeDur, e);
+            if (m.StunDur   > 0f) e.Aura.ApplyFreeze(m.StunDur,   e);
+            if (m.SlowDur   > 0f) e.Aura.ApplySlow(m.SlowDur, e);
+
+            if (m.PushDist > 0f)
+            {
+                int dx = Math.Sign(e.Position.X - origin.X);
+                int dz = Math.Sign(e.Position.Z - origin.Z);
+                if (dx == 0 && dz == 0) dx = 1;
+                for (int s = 0; s < (int)m.PushDist; s++)
+                {
+                    var nxt = new GridPos(e.Position.X + dx, e.Position.Y, e.Position.Z + dz);
+                    if (world.GetTile(nxt.X, nxt.Y, nxt.Z) == MaterialType.Air) e.Position = nxt;
+                    else break;
+                }
+            }
+            if (m.PullDist > 0f)
+            {
+                int dx = Math.Sign(origin.X - e.Position.X);
+                int dz = Math.Sign(origin.Z - e.Position.Z);
+                for (int s = 0; s < (int)m.PullDist; s++)
+                {
+                    var nxt = new GridPos(e.Position.X + dx, e.Position.Y, e.Position.Z + dz);
+                    if (world.GetTile(nxt.X, nxt.Y, nxt.Z) == MaterialType.Air) e.Position = nxt;
+                    else break;
+                }
+            }
+        }
+    }
+
     // ── 武技 ──────────────────────────────────────────────────────
 
-    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteTechnique(SpellSlot slot, PlayerController player, TileWorld3D world,
         bool atHitPoint = false, GridPos? originOverride = null)
     {
         var m = ReadMods(slot);
@@ -537,30 +739,30 @@ public static class SpellCaster
                 case "technique_sword":
                 {
                     var sHit = new GridPos(p.X + fx * (slashOfs + rep * 3),
-                                           p.Y + fy * (slashOfs + rep * 3));
-                    world.Explode(sHit.X, sHit.Y, r);
+                                           p.Y + fy * (slashOfs + rep * 3), p.Z);
+                    world.Explode(sHit.X, sHit.Y, sHit.Z, r);
                     ApplyElement(world, sHit, r, m);
                     break;
                 }
                 case "technique_punch":
                 {
                     int pOfs = atHitPoint ? 0 : 2;
-                    var pHit = new GridPos(p.X + fx * (pOfs + rep * 2), p.Y);
-                    world.Explode(pHit.X, pHit.Y, Math.Max(1, r - 1));
+                    var pHit = new GridPos(p.X + fx * (pOfs + rep * 2), p.Y, p.Z);
+                    world.Explode(pHit.X, pHit.Y, pHit.Z, Math.Max(1, r - 1));
                     ApplyElement(world, pHit, Math.Max(1, r - 1), m);
                     break;
                 }
                 case "technique_shield": // TODO-STUB: 防禦/反擊，暫以前方衝擊波佔位
                 {
-                    var shHit = new GridPos(p.X + fx * (slashOfs + rep * 2), p.Y);
-                    world.Explode(shHit.X, shHit.Y, r + 1);
+                    var shHit = new GridPos(p.X + fx * (slashOfs + rep * 2), p.Y, p.Z);
+                    world.Explode(shHit.X, shHit.Y, shHit.Z, r + 1);
                     break;
                 }
                 // ── 舊武技技能因子（向後相容）────────────────────────────
                 case "technique_slash":
                     var hit = new GridPos(p.X + fx * (slashOfs + rep * 3),
-                                         p.Y + fy * (slashOfs + rep * 3));
-                    world.Explode(hit.X, hit.Y, r);
+                                         p.Y + fy * (slashOfs + rep * 3), p.Z);
+                    world.Explode(hit.X, hit.Y, hit.Z, r);
                     ApplyElement(world, hit, r, m);
                     break;
 
@@ -569,16 +771,16 @@ public static class SpellCaster
                     for (int i = 1; i <= range; i++)
                     {
                         int tx = p.X + fx * i, ty = p.Y + fy * i;
-                        var mat = world.TypeAt(tx, ty);
+                        var mat = world.GetTile(tx, ty, p.Z);
                         if (mat == MaterialType.Stone) break;
-                        world.Set(tx, ty, m.Water || m.Ice ? MaterialType.Water : MaterialType.Fire);
+                        world.SetTile(tx, ty, p.Z, m.Water || m.Ice ? MaterialType.Water : MaterialType.Fire);
                         if (mat != MaterialType.Air) break;
                     }
                     break;
 
                 case "technique_area":
                     int ar = r + 2 + rep;
-                    world.Explode(p.X + fx * rep * 2, p.Y + fy * rep * 2, ar);
+                    world.Explode(p.X + fx * rep * 2, p.Y + fy * rep * 2, p.Z, ar);
                     ApplyElement(world, p, ar, m);
                     if (!m.Water && !m.Ice)
                         world.SpawnEffect("fire", p, new Dictionary<string, object?> { ["radius"] = r });
@@ -588,25 +790,25 @@ public static class SpellCaster
                     for (int i = 1; i <= 25 + rep * 8; i++)
                     {
                         int tx = p.X + fx * i, ty = p.Y + fy * i;
-                        if (!world.InBoundsPublic(tx, ty)) break;
+                        if (!world.InBounds(tx, ty, p.Z)) break;
                         for (int dy = -1; dy <= 1; dy++)
-                            if (world.TypeAt(tx, ty + dy) != MaterialType.Stone)
-                                world.Set(tx, ty + dy, m.Water ? MaterialType.Water : MaterialType.Fire);
+                            if (world.GetTile(tx, ty + dy, p.Z) != MaterialType.Stone)
+                                world.SetTile(tx, ty + dy, p.Z, m.Water ? MaterialType.Water : MaterialType.Fire);
                     }
                     break;
 
                 case "technique_chain":
                     for (int c = 0; c < 3 + rep; c++)
                     {
-                        var cp = new GridPos(p.X + fx * (3 + c * 3), p.Y + fy * (3 + c * 3));
-                        world.Explode(cp.X, cp.Y, Math.Max(1, r - c));
+                        var cp = new GridPos(p.X + fx * (3 + c * 3), p.Y + fy * (3 + c * 3), p.Z);
+                        world.Explode(cp.X, cp.Y, cp.Z, Math.Max(1, r - c));
                     }
                     break;
             }
         }
     }
 
-    private static void ApplyElement(TileWorld world, GridPos pos, int radius, in Mods m)
+    private static void ApplyElement(TileWorld3D world, GridPos pos, int radius, in Mods m)
     {
         if (m.Fire)  world.SpawnEffect("fire",  pos, new Dictionary<string, object?> { ["radius"] = radius });
         if (m.Water) world.SpawnEffect("water", pos, new Dictionary<string, object?> { ["radius"] = radius });
@@ -614,7 +816,7 @@ public static class SpellCaster
 
     // ── 變幻 ──────────────────────────────────────────────────────
 
-    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteMorph(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var p = originOverride ?? player.Position;
@@ -625,7 +827,7 @@ public static class SpellCaster
                 world.SpawnEffect("water", p, new Dictionary<string, object?> { ["radius"] = 1 });
                 break;
             case "morph_flight":
-                world.Explode(p.X, p.Y + 3, 2);
+                world.Explode(p.X, p.Y + 3, p.Z, 2);
                 break;
             case "morph_invisible":
                 world.SpawnEffect("water", p, new Dictionary<string, object?> { ["radius"] = 2 });
@@ -635,7 +837,7 @@ public static class SpellCaster
 
     // ── 位移 ──────────────────────────────────────────────────────
 
-    private static void ExecuteDisplacement(SpellSlot slot, PlayerController player, TileWorld world)
+    private static void ExecuteDisplacement(SpellSlot slot, PlayerController player, TileWorld3D world)
     {
         int fx = player.Facing.X, fy = player.Facing.Y;
         switch (slot.Totem!.Id)
@@ -643,23 +845,23 @@ public static class SpellCaster
             case "displace_dash":
                 for (int i = 0; i < 10; i++)
                 {
-                    var n = new GridPos(player.Position.X + fx, player.Position.Y + fy);
-                    if (world.TypeAt(n.X, n.Y) != MaterialType.Air) break;
+                    var n = new GridPos(player.Position.X + fx, player.Position.Y + fy, player.Position.Z);
+                    if (world.GetTile(n.X, n.Y, n.Z) != MaterialType.Air) break;
                     player.Position = n;
                 }
                 break;
             case "displace_teleport":
                 for (int i = 20; i >= 1; i--)
                 {
-                    var tp = new GridPos(player.Position.X + fx * i, player.Position.Y + fy * i);
-                    if (world.TypeAt(tp.X, tp.Y) == MaterialType.Air) { player.Position = tp; break; }
+                    var tp = new GridPos(player.Position.X + fx * i, player.Position.Y + fy * i, player.Position.Z);
+                    if (world.GetTile(tp.X, tp.Y, tp.Z) == MaterialType.Air) { player.Position = tp; break; }
                 }
                 break;
             case "displace_dodge":
                 for (int i = 0; i < 5; i++)
                 {
-                    var b = new GridPos(player.Position.X - fx, player.Position.Y - fy);
-                    if (world.TypeAt(b.X, b.Y) != MaterialType.Air) break;
+                    var b = new GridPos(player.Position.X - fx, player.Position.Y - fy, player.Position.Z);
+                    if (world.GetTile(b.X, b.Y, b.Z) != MaterialType.Air) break;
                     player.Position = b;
                 }
                 break;
@@ -668,12 +870,12 @@ public static class SpellCaster
 
     // ── 召喚 ──────────────────────────────────────────────────────
 
-    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteSummon(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var origin = originOverride ?? player.Position;
         var sp = new GridPos(origin.X + player.Facing.X * 4,
-                             origin.Y + player.Facing.Y * 4);
+                             origin.Y + player.Facing.Y * 4, origin.Z);
         switch (slot.Totem!.Id)
         {
             case "summon_minion":
@@ -681,7 +883,7 @@ public static class SpellCaster
                 break;
             case "summon_turret":
                 for (int dy = -1; dy <= 1; dy++)
-                    world.Set(sp.X, sp.Y + dy, MaterialType.Stone);
+                    world.SetTile(sp.X, sp.Y + dy, sp.Z, MaterialType.Stone);
                 break;
             case "summon_guardian":
                 world.SpawnEffect("water", sp, new Dictionary<string, object?> { ["radius"] = 2 });
@@ -691,7 +893,7 @@ public static class SpellCaster
 
     // ── 領域 ──────────────────────────────────────────────────────
 
-    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld world,
+    private static void ExecuteDomain(SpellSlot slot, PlayerController player, TileWorld3D world,
         GridPos? originOverride = null)
     {
         var pos = originOverride ?? player.Position;

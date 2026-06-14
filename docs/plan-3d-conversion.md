@@ -325,18 +325,33 @@ public static readonly (int dx, int dy, int dz)[] Neighbors6 =
 ### Phase 2 — 渲染 + 玩家/敵人（6-8 週）
 **目標：可以跑起來看到效果**
 
-- [ ] `TileWorldRenderer` 重寫為 `TileWorldRenderer3D`
-  - 方案：C# ArrayMesh + Greedy Meshing（per chunk）
-  - 每個 chunk 一個 MeshInstance3D
-  - Dirty chunk → 非同步重建 Mesh（背景執行緒）
-  - Variant 用頂點顏色（`SurfaceTool.AddColor`）
-- [ ] Camera3D 實作（俯視 45° 或第三人稱）
-- [ ] 滑鼠 → 世界座標（Camera3D 射線投影）
-- [ ] `PlayerController` 改 3D 座標
+#### 渲染 / 鏡頭
+- [x] `TileWorldRenderer3D`（ArrayMesh + Greedy Meshing per chunk）
+- [x] Camera3D 四視角（TPS / FPS / Isometric / SideScroll2D，Tab 循環）
+- [x] 滑鼠 → 世界座標（Camera3D 射線投影，SideScroll2D 模式）
+- [x] WASD 相機相對方向移動（斜向支援，Camera.Yaw 計算 fwd/right 向量）
+- [x] 第一人稱 FPS：相機置於眼部往外看；切入 FPS 隱藏玩家 mesh
+
+#### 玩家
+- [x] `PlayerController` 改 3D 座標（X/Y/Z，`TryMoveDepth`，跳躍物理）
+- [x] `Facing` 改 3D（X/Y/Z，`TryMoveDir` 更新 XZ 面向）
+- [x] 地形跨坡：一格爬升邏輯（`TryMoveDir`）
+
+#### 敵人 / AI
 - [ ] `Enemy` / `EnemyManager` 改 3D 座標
   - 先用「平面追逐」（XZ 平面，保持現有邏輯）
-- [ ] `SpellCaster` / `SpellRunner` 座標改 3D
-- [ ] **驗收標準**：玩家可在 3D 世界中移動、施放技能、擊殺敵人
+  - 敵人 mesh Z 跟隨 enemy.Position.Z ← 已完成視覺部分，AI 邏輯待補
+
+#### 技能系統
+- [ ] `SpellCaster` / `SpellRunner` 投射物方向改用 3D Facing / Camera 方向
+- [ ] 投射物在玩家實際 Z 層飛行（`EnemyProjectile` / `SpellProjectile` Z 同步）
+- [ ] CA 特效在玩家實際 Z 層播放（爆炸、採礦粉塵、元素反應）
+
+#### 採掘 / 互動
+- [ ] 3D 視角下採掘目標定位：從相機方向做 3D DDA Raycast，取最近實體格
+  - SideScroll2D 模式維持現有滑鼠 XY 投影邏輯
+
+- [ ] **驗收標準**：玩家可在 3D 世界中自由移動、施放技能擊殺敵人、採掘方塊
 
 ---
 
@@ -354,22 +369,30 @@ public static readonly (int dx, int dy, int dz)[] Neighbors6 =
 
 ---
 
-### Phase 4 — 雙層架構 + AAA 視覺（長期，12-20 週）
-**目標：高精度視覺 + 完整破壞系統**
+---
 
-- [ ] 雙層架構框架
-  - 高精度 Visual Mesh（城堡、角色模型等）作為 Child Node
-  - 隱形 Physics Voxel Layer 作為對照
-  - 鏈結機制：voxel 移除 → visual mesh vertex mask 更新
-- [ ] 碎石系統（Debris）
-  - 爆炸後 spawn `RigidBody3D` 碎石
-  - 碎石可撿起（進物品欄）、可扔出（物理飛行）
-  - 碎石 Pool（上限 200 個同時存在，距離超過回收）
-- [ ] Godot 4 `SDFGI` / `VoxelGI` 接入（已內建，直接啟用）
-- [ ] 升級渲染到 DDA Raymarching Shader（Teardown 風格，選項）
+## 未來方向（AAA 視覺，時機成熟再規劃）
+
+> 以下為長期願景，不列入當前 Phase 排程。待 Phase 3 效能穩定後再評估優先序。
+
+### 雙層架構 + 高精度視覺
+
+- 高精度 Visual Mesh（城堡、角色模型等）+ 隱形 Physics Voxel Layer 雙層鏈結
+- 碎石系統（Debris Pool，RigidBody3D，上限 200 個）
+- 建築連通性分析（爆炸後整片牆倒塌成獨立 RigidBody）
+
+### 渲染升級
+
+- Godot 4 `SDFGI` / `VoxelGI` 接入（內建，啟用即可）
+- DDA Raymarching Shader（Teardown 風格，完全選擇性）
   - 參考：[viktor-ferenczi/godot-voxel](https://github.com/viktor-ferenczi/godot-voxel)
-- [ ] 建築連通性分析（爆炸後判斷哪些結構體斷裂 → 分裂為獨立 RigidBody）
-- [ ] **驗收標準**：技能可摧毀有精美建模的城堡，牆體爆炸崩塌，碎石可撿拾扔出
+- GPU path tracing（Godot 4.4+ Vulkan RT，實驗中）
+
+### 飛行機制（與技能系統整合後）
+
+- 玩家 / 投射物往立體空間任意方向移動（`TryMove3D(dx, dy, dz)`，浮點座標）
+- Camera pitch 軸直接對應垂直飛行方向
+- 重力可由技能 / 狀態動態切換
 
 ---
 

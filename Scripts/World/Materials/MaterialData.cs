@@ -27,10 +27,26 @@ public record MaterialData(
     // ── 採掘掉落表 ─────────────────────────────────────────────
     public ItemDrop[] DefaultDrops { get; init; } = Array.Empty<ItemDrop>();
 
+    // ── 碎片掉落（R-5：外力摧毀時的碎片物品類型，None = 不掉碎片）─
+    public ItemId FragmentItem { get; init; } = ItemId.None;
+
     // ── 元素屬性（W-3 元素碰撞系統）───────────────────────────
     /// <summary>
     /// 材質格天生帶有的元素屬性（永久，不被消耗）。
     /// None = 無元素性（如空氣、灰燼）。
     /// </summary>
     public ElementType NativeElement { get; init; } = ElementType.None;
+
+    // ── 渲染屬性 ─────────────────────────────────────────────
+    /// <summary>
+    /// 材質不透明度（0 = 全透明，1 = 完全不透明）。
+    /// IsTransparent=true 的材質會走獨立的半透明 mesh pass（CullMode=Disabled + AlphaBlend）。
+    /// </summary>
+    public float Opacity       { get; init; } = 1.0f;
+
+    /// <summary>
+    /// 是否需要半透明渲染（水、火、蒸汽等）。
+    /// true → 進入透明 pass；false → 進入不透明 pass（CullMode=Back，效能較好）。
+    /// </summary>
+    public bool  IsTransparent { get; init; } = false;
 }

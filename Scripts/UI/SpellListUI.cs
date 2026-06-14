@@ -11,9 +11,13 @@ using SkillCreator.AbilitySystem.Data;
 public partial class SpellListUI : Control
 {
     [Signal] public delegate void ActiveSpellClickedEventHandler(int slotIndex);
+    [Signal] public delegate void PassiveSpellClickedEventHandler(int passiveIndex);
     [Signal] public delegate void AddSpellRequestedEventHandler();
+    // W-6D：技能組切換（Main.cs 訂閱後呼叫 SwitchActiveGroup）
+    [Signal] public delegate void GroupSwitchRequestedEventHandler(int index);
 
-    public SpellLoadout? Loadout { get; set; }
+    public SpellLoadout? Loadout    { get; set; }
+    public SpellGroup?   SpellGroup { get; set; }   // W-6D：技能組切換用
 
     private HBoxContainer  _circleRow   = null!;
     private Button         _addFloatBtn = null!;
@@ -21,6 +25,7 @@ public partial class SpellListUI : Control
     private double         _msgTimer    = 0;
     private PanelContainer _tooltip     = null!;
     private Label          _tooltipLbl  = null!;
+    private Button[]       _groupDots   = null!;    // W-6D：header 圓點
 
     private const float CircleSize    = 260f;
     private const float CircleSpacing = 22f;
@@ -37,6 +42,17 @@ public partial class SpellListUI : Control
     {
         RebuildCircles();
         UpdateFloatBtn();
+        RefreshGroupDots();
+    }
+
+    public void RefreshGroupDots()
+    {
+        if (_groupDots == null || SpellGroup == null) return;
+        int active = SpellGroup.ActiveGroupIndex;
+        for (int i = 0; i < SpellGroup.MaxGroups; i++)
+            _groupDots[i].Modulate = (i == active)
+                ? new Color(0.40f, 0.85f, 1.00f)   // 亮藍 = 當前組
+                : new Color(0.55f, 0.55f, 0.65f);   // 灰 = 其他組
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -74,6 +90,25 @@ public partial class SpellListUI : Control
             title.AddThemeFontSizeOverride("font_size", 22);
             title.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             row.AddChild(title);
+
+            // ── W-6D：技能組圓點（1–5）──
+            Spacer(row, 16);
+            var dotBox = new HBoxContainer();
+            dotBox.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            dotBox.AddThemeConstantOverride("separation", 4);
+            _groupDots = new Button[SpellGroup.MaxGroups];
+            for (int gi = 0; gi < SpellGroup.MaxGroups; gi++)
+            {
+                int captured = gi;
+                var dot = new Button { Text = $"{gi + 1}" };
+                dot.CustomMinimumSize = new Vector2(28, 28);
+                dot.TooltipText       = $"技能組 {gi + 1}";
+                dot.AddThemeColorOverride("font_color", new Color(0.75f, 0.75f, 0.85f));
+                dot.Pressed += () => EmitSignal(SignalName.GroupSwitchRequested, captured);
+                dotBox.AddChild(dot);
+                _groupDots[gi] = dot;
+            }
+            row.AddChild(dotBox);
 
             row.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
 
@@ -245,7 +280,8 @@ public partial class SpellListUI : Control
             bool over = i >= SpellLoadout.MaxPassiveSlots;
 
             var circle = MakeSpellCircle(spell, isPassive: true, isOverLimit: over);
-            circle.Pressed += () => ShowMsg("被動技能編輯將於 Stage 3 支援");
+            int pi = i;
+            circle.Pressed      += () => EmitSignal(SignalName.PassiveSpellClicked, pi);
             circle.MouseEntered += () => ShowTooltip(spell, isPassive: true);
             circle.MouseExited  += HideTooltip;
             _circleRow.AddChild(circle);

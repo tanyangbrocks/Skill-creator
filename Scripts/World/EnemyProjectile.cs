@@ -18,13 +18,13 @@ public sealed class EnemyProjectile
 
     public EnemyProjectile(GridPos start, int dir, float damage)
     {
-        Position   = new GridPos(start.X + dir, start.Y);  // 從身前一格出發
+        Position   = new GridPos(start.X + dir, start.Y, start.Z);
         _dir       = dir;
         _damage    = damage;
         _remaining = MaxRange;
     }
 
-    public void Update(TileWorld world, PlayerController player, float delta)
+    public void Update(TileWorld3D world, PlayerController player, float delta)
     {
         if (!IsAlive) return;
 
@@ -32,10 +32,10 @@ public sealed class EnemyProjectile
         if (_moveTimer > 0f) return;
         _moveTimer = MoveInterval;
 
-        var next = new GridPos(Position.X + _dir, Position.Y);
+        var next = new GridPos(Position.X + _dir, Position.Y, Position.Z);
 
-        if (!world.InBoundsPublic(next.X, next.Y)) { IsAlive = false; return; }
-        if (world.TypeAt(next.X, next.Y) != MaterialType.Air) { IsAlive = false; return; }
+        if (!world.InBounds(next.X, next.Y, next.Z)) { IsAlive = false; return; }
+        if (world.GetTile(next.X, next.Y, next.Z) != MaterialType.Air) { IsAlive = false; return; }
 
         // 命中玩家
         if (next == player.Position || Position == player.Position)

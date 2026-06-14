@@ -12,11 +12,13 @@ public class SpellProjectile
     public GridPos Position { get; private set; }
     public bool    IsAlive  { get; private set; } = true;
 
-    // 浮點位置 + 正規化方向向量，讓投射物沿玩家→游標真實直線飛行
+    // 浮點位置 + 正規化 3D 方向向量
     private float _posX;
     private float _posY;
+    private float _posZ;
     private readonly float             _dirX;
     private readonly float             _dirY;
+    private readonly float             _dirZ;
     private readonly SpellArray        _spell;
     private readonly PlayerController  _caster;
     private readonly EnemyManager?     _enemies;
@@ -29,16 +31,19 @@ public class SpellProjectile
     private const float MoveInterval = 0.06f;
     private const int   MaxRange     = 55;
 
-    public SpellProjectile(GridPos start, float dirX, float dirY, SpellArray spell, PlayerController caster,
+    public SpellProjectile(GridPos start, float dirX, float dirY, float dirZ,
+        SpellArray spell, PlayerController caster,
         EnemyManager? enemies = null, SpellLoadout? loadout = null, SpellRunner? runner = null)
     {
-        float len = MathF.Sqrt(dirX * dirX + dirY * dirY);
-        if (len < 0.001f) { dirX = 1f; dirY = 0f; }
-        else { dirX /= len; dirY /= len; }
+        float len = MathF.Sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        if (len < 0.001f) { dirX = 1f; dirY = 0f; dirZ = 0f; }
+        else { dirX /= len; dirY /= len; dirZ /= len; }
         _dirX = dirX;
         _dirY = dirY;
+        _dirZ = dirZ;
         _posX = start.X + 0.5f;
         _posY = start.Y + 0.5f;
+        _posZ = start.Z + 0.5f;
         Position       = start;
         _spell         = spell;
         _caster        = caster;
@@ -48,7 +53,7 @@ public class SpellProjectile
         _remainingTiles= MaxRange;
     }
 
-    public void Update(TileWorld world, EnemyManager enemies, float delta)
+    public void Update(TileWorld3D world, EnemyManager enemies, float delta)
     {
         if (!IsAlive) return;
 
@@ -58,33 +63,33 @@ public class SpellProjectile
 
         _posX += _dirX;
         _posY += _dirY;
-        var next = new GridPos((int)MathF.Floor(_posX), (int)MathF.Floor(_posY));
+        _posZ += _dirZ;
+        var next = new GridPos((int)MathF.Floor(_posX), (int)MathF.Floor(_posY), (int)MathF.Floor(_posZ));
 
-        if (!world.InBoundsPublic(next.X, next.Y)) { IsAlive = false; return; }
+        if (!world.InBounds(next.X, next.Y, next.Z)) { IsAlive = false; return; }
 
         // 命中非空氣地塊
-        if (world.TypeAt(next.X, next.Y) != MaterialType.Air)
+        if (world.GetTile(next.X, next.Y, next.Z) != MaterialType.Air)
         {
             // W-3c：技能元素作用於命中的材質格
             var tileElem = _spell.PrimaryElement;
             if (tileElem != ElementType.None)
-                world.ApplyElementalImpact(next.X, next.Y, tileElem);
+                world.ApplyElementalImpact(next.X, next.Y, next.Z, tileElem);
 
             HitAt(next, world, enemies);
             return;
         }
 
-        // 命中敵人
+        // 命中敵人（Heavy 是 2×2 大小，需檢查整個碰撞盒）
         foreach (var e in enemies.Enemies)
         {
-            if (e.IsAlive && (e.Position == next || e.Position == Position))
+            if (e.IsAlive && (HitsEnemy(e, next) || HitsEnemy(e, Position)))
             {
                 // W-3c：技能元素作用於命中的敵人（Apply Aura）
                 var hitElem = _spell.PrimaryElement;
                 if (hitElem != ElementType.None)
                     e.Aura.ApplyImmediate(hitElem, ElementalAuraComponent.DefaultAuraDuration, e);
 
-                // 傳遞命中實體資訊，讓 VM 的固定傷害積木可以對其扣血
                 HitAt(next, world, enemies, new EntityInfo(e.Id, e.Position, e.Hp, e.MaxHp));
                 return;
             }
@@ -94,7 +99,17 @@ public class SpellProjectile
         if (--_remainingTiles <= 0) IsAlive = false;
     }
 
-    private void HitAt(GridPos pos, TileWorld world, EnemyManager enemies, EntityInfo? hitTarget = null)
+    // 投射物格子 p 是否落在敵人的碰撞盒內（Heavy 佔 2 寬 × 2 高）
+    private static bool HitsEnemy(Enemy e, GridPos p)
+    {
+        int w = e.Type == EnemyType.Heavy ? 2 : 1;
+        int h = e.Type == EnemyType.Heavy ? 2 : 1;
+        return p.X >= e.Position.X && p.X < e.Position.X + w
+            && p.Y >= e.Position.Y - (h - 1) && p.Y <= e.Position.Y
+            && p.Z == e.Position.Z;
+    }
+
+    private void HitAt(GridPos pos, TileWorld3D world, EnemyManager enemies, EntityInfo? hitTarget = null)
     {
         if (_runner != null)
         {

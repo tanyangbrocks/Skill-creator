@@ -29,7 +29,7 @@ public sealed class SpellRunner
         public ExecutionLoop                  Loop;
         public Dictionary<string, SpellSlot>  SlotByRef;
         public PlayerController               Player;
-        public TileWorld                      World;
+        public TileWorld3D                    World;
         public EnemyManager?                  Enemies;
         public SpellLoadout?                  Loadout;
         public int                            ComboDepth;
@@ -40,7 +40,7 @@ public sealed class SpellRunner
 
         public ActiveSpell(ExecutionContext ctx, ExecutionLoop loop,
             Dictionary<string, SpellSlot> slotByRef,
-            PlayerController player, TileWorld world,
+            PlayerController player, TileWorld3D world,
             EnemyManager? enemies, SpellLoadout? loadout,
             int comboDepth, bool atHitPoint)
         {
@@ -58,7 +58,7 @@ public sealed class SpellRunner
 
     // ── 提交一個新技能整構（DirectCast 施放時呼叫）────────────────────
 
-    public void Submit(SpellArray spell, PlayerController player, TileWorld world,
+    public void Submit(SpellArray spell, PlayerController player, TileWorld3D world,
         EnemyManager? enemies = null, SpellLoadout? loadout = null,
         int comboDepth = 0, bool atHitPoint = false, GridPos? fixedOrigin = null,
         EntityInfo? hitTarget = null)
@@ -158,7 +158,7 @@ public sealed class SpellRunner
             // InvokeTotem：共用 helper 自動處理 ForEach 定位（EffectOriginOverride）
             if (s.Ctx.PendingInvokeTotem != null)
             {
-                SpellCaster.ConsumeInvokeTotem(s.Ctx, s.SlotByRef, s.Player, s.World, s.AtHitPoint);
+                SpellCaster.ConsumeInvokeTotem(s.Ctx, s.SlotByRef, s.Player, s.World, s.AtHitPoint, s.Enemies);
                 continue;
             }
 

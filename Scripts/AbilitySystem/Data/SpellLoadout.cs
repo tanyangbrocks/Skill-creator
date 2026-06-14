@@ -47,6 +47,21 @@ public class SpellLoadout
     /// <summary>移除被動技能；回傳是否成功。</summary>
     public bool RemovePassive(SpellArray spell) => _passiveSpells.Remove(spell);
 
+    /// <summary>清空所有主動槽位與被動列表（讀取新存檔前使用）。</summary>
+    public void ClearAll()
+    {
+        for (int i = 0; i < MaxSlots; i++) _slots[i] = null;
+        _passiveSpells.Clear();
+        ActiveIndex = 0;
+    }
+
     public SpellArray? GetPassive(int i) =>
         i >= 0 && i < _passiveSpells.Count ? _passiveSpells[i] : null;
+
+    /// <summary>替換指定索引的被動技能（編輯後回寫）。</summary>
+    public void ReplacePassive(int idx, SpellArray spell)
+    {
+        if ((uint)idx < (uint)_passiveSpells.Count)
+            _passiveSpells[idx] = spell;
+    }
 }

@@ -30,7 +30,7 @@ public static class SnapshotManager
     /// </summary>
     public static void TakeSnapshot(
         GridPos center, int radius,
-        PlayerController player, EnemyManager? enemies, TileWorld world)
+        PlayerController player, EnemyManager? enemies, TileWorld3D world)
     {
         var entities = new List<EntitySnapshot> { player.TakeSnapshot() };
         if (enemies != null)
@@ -50,7 +50,7 @@ public static class SnapshotManager
     /// </summary>
     public static void ApplyLatest(
         PlayerController player, EnemyManager? enemies,
-        TileWorld world, SpellRunner runner)
+        TileWorld3D world, SpellRunner runner)
     {
         if (_stack.Count == 0) return;
 

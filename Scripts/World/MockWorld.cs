@@ -16,7 +16,7 @@ public class MockWorld : IWorldInterface
     private int _nextId = 1;
 
     public event Action<WorldEntity, WorldEntity, float>? OnEntityHit;
-    public event Action<GridPos, MaterialType>? OnTileDestroyed;
+    public event Action<GridPos, MaterialType, DestroyReason>? OnTileDestroyed;
     public event Action<WorldEntity>? OnEntityDied;
     public event Action<string, object?>? OnPlayerAction;
 
@@ -85,12 +85,12 @@ public class MockWorld : IWorldInterface
         _          => null,
     };
 
-    public void DestroyTile(GridPos pos)
+    public void DestroyTile(GridPos pos, DestroyReason reason = DestroyReason.Mining)
     {
         if (pos.X < 0 || pos.X >= Width || pos.Y < 0 || pos.Y >= Height) return;
         if (_grid[pos.X, pos.Y] != TileState.Destructible) return;
         _grid[pos.X, pos.Y] = TileState.Empty;
-        OnTileDestroyed?.Invoke(pos, MaterialType.Wood);
+        OnTileDestroyed?.Invoke(pos, MaterialType.Wood, reason);
     }
 
     public void ApplyForce(WorldEntity entity, float dx, float dy)

@@ -18,6 +18,8 @@ using SkillCreator.AbilitySystem.VM;
 public partial class ScriptCanvas : Control
 {
     public event Action? Changed;
+    /// <summary>積木參數（SpinBox / OptionButton 等）改變時觸發，不重建 UI。</summary>
+    public event Action? ParamChanged;
     public Action<BlockNode>?          BlockDoubleClicked  { get; set; }
     public Action<BlockNode, Vector2>? PaletteBlockDropped { get; set; }
 
@@ -189,7 +191,8 @@ public partial class ScriptCanvas : Control
             onChanged: s => { if (captMain) Changed?.Invoke(); },
             onHeaderDrag: StartScriptDrag,
             onBlockSplitDrag: StartSplitDrag,
-            onDoubleClick: BlockDoubleClicked);
+            onDoubleClick: BlockDoubleClicked,
+            onParamChanged: _ => ParamChanged?.Invoke());
         script.Position = localPos;
         _freeCanvas.AddChild(script);
         _scripts.Add(script);

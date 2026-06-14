@@ -26,4 +26,15 @@ public enum ItemId
     OreCopperRaw,    // 生銅礦（銅礦掉落）
     OreIronRaw,      // 生鐵礦（鐵礦掉落）
     OreMagicCrystal, // 魔晶石（魔晶礦掉落）
+
+    // ── 材質碎片（R-5，不可放置，合成原料）────────────────────
+    FragmentDirt,
+    FragmentStone,
+    FragmentSand,
+    FragmentWood,
+    FragmentAsh,
+    FragmentCoal,
+    FragmentCopper,
+    FragmentIron,
+    FragmentMagicCrystal,
 }

@@ -2,6 +2,7 @@ namespace SkillCreator.UI;
 
 using Godot;
 using SkillCreator.AbilitySystem.VM;
+using SkillCreator.AbilitySystem.Data;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ScratchCanvas — Scratch 式積木序列編輯器
@@ -291,7 +292,16 @@ public partial class ScratchCanvas : Control
         List<BlockNode> parent, int indent)
     {
         if (_descs.TryGetValue(block.Type, out var desc))
+        {
             desc.BuildUI?.Invoke(row, block, _getSlotOpts);
+            // Totem 卡的 manaTypeKey OptionButton 變動必須觸發重整右側 MP 分解
+            if (block.Type == BlockType.Totem)
+            {
+                foreach (var child in row.GetChildren())
+                    if (child is OptionButton opt)
+                        opt.ItemSelected += _ => OnChanged();
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -811,6 +821,24 @@ public partial class ScratchCanvas : Control
                 string tid = b.Params.TryGetValue("totemId", out var v) ? v?.ToString() ?? "" : "";
                 if (tid == "custom")
                     r.AddChild(SmallEdit(b, "customName", "技能因子名稱", 80));
+                // MP 類型綁定下拉（非 Passive 因子顯示）
+                var td = TotemLibrary.AllTotems.FirstOrDefault(t => t.Id == tid);
+                if (tid.Length > 0 && td?.Type != TotemType.Passive)
+                {
+                    var keyList  = new List<string?> { null };
+                    var nameList = new List<string>  { "─" };
+                    foreach (var mt in ManaTypeRegistry.GetSortedForHud())
+                    { keyList.Add(mt.Key); nameList.Add(mt.DisplayName); }
+                    var opt = new OptionButton();
+                    opt.AddThemeFontSizeOverride("font_size", 10);
+                    opt.CustomMinimumSize = new Vector2(80, 0);
+                    opt.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+                    for (int i = 0; i < nameList.Count; i++) opt.AddItem(nameList[i], i);
+                    string? cur = b.Params.TryGetValue("manaTypeKey", out var mk) ? mk?.ToString() : null;
+                    int si = keyList.IndexOf(cur); opt.Selected = si >= 0 ? si : 0;
+                    opt.ItemSelected += idx => b.Params["manaTypeKey"] = (object?)keyList[(int)idx];
+                    r.AddChild(opt);
+                }
             }) },
         { BlockType.Engraving, new(CEngrave, "◆ 刻印",
             () => B(BlockType.Engraving, ("engraveId", ""), ("pts", 0f)),

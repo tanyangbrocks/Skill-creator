@@ -1,16 +1,20 @@
 namespace SkillCreator.World;
 
 using SkillCreator.AbilitySystem;
+using SkillCreator.AbilitySystem.Data;
 using SkillCreator.AbilitySystem.Elemental;
 using SkillCreator.Snapshot;
 using SkillCreator.World.Items;
 using SkillCreator.World.Materials;
 
-public class PlayerController : IElementalTarget, ISnapshottable
+public class PlayerController : IElementalTarget, ISnapshottable, ICreature
 {
     // ── IElementalTarget 實作（W-3）─────────────────────────────────
     int  IElementalTarget.EntityId => -1;  // 玩家固定 -1
     void IElementalTarget.TakeDirectDamage(float amount) => TakeDamage(amount);
+
+    // ── ICreature 實作 ──────────────────────────────────────────────
+    public int Id => -1;
 
     /// <summary>玩家身上的元素 Aura 與元素狀態效果管理器。</summary>
     public ElementalAuraComponent Aura  { get; } = new();
@@ -25,19 +29,47 @@ public class PlayerController : IElementalTarget, ISnapshottable
     // Facing 只追蹤水平方向，確保投射物永遠往左/右打
     public GridPos Facing       { get; private set; } = new GridPos(1, 0);
     // 滑鼠對應的世界格座標（由 Main._Process 每幀更新）
-    public GridPos MouseGridPos { get; set; }
+    public GridPos MouseGridPos    { get; set; }
+    // 滑鼠指向格的面法線（由 Main._Process 每幀更新；SideScroll2D 預設朝上 -Y）
+    public GridPos MouseFaceNormal { get; set; } = new GridPos(0, -1, 0);
 
     public Inventory       Inventory  { get; } = new();
     public PlayerEquipment Equipment  { get; } = new();
-    public const float MiningRange = 5f;
+    // ── 碰撞體尺寸（預設 = WorldScale，角色創建時可覆寫）───────────────
+    /// <summary>玩家實際身高（tile）。角色創建時可自訂；世界生成用 WorldScale.PlayerH。</summary>
+    public int   BodyH       { get; set; } = WorldScale.PlayerH;
+    public const int BodyW  = 1;
+    public float MiningRange => BodyH * 6f;  // ~6× player height in tiles
+    private const int StepH = WorldScale.Grain / 8;         // 可跨上 1/8 遊戲單位的台階（2 tiles at Grain=16）
+
+    // 檢查從 (x, yHead) 向下 height 格是否全為 Air。
+    private static bool ColumnClear(TileWorld3D w, int x, int yHead, int height, int z)
+    {
+        for (int i = 0; i < height; i++)
+            if (w.GetTile(x, yHead + i, z) != MaterialType.Air)
+                return false;
+        return true;
+    }
 
     public float Hp { get; set; }
     /// <summary>最大 HP（由 Stats.MaxHpBase 決定；不再是 const，支援動態調整）。</summary>
     public float MaxHp => Stats.MaxHpBase;
 
-    public float Mp { get; set; }
-    /// <summary>最大 MP = Stats.MaxMpBase + 裝備加成。</summary>
+    // W-6C：每種已解鎖的 MP 類型對應一個獨立槽位
+    public List<ManaSlot> ActiveManaSlots { get; private set; } = new();
+
+    // 向後相容：委派給 ActiveManaSlots[0]（預設 gui_dao）
+    public float Mp
+    {
+        get => ActiveManaSlots.Count > 0 ? ActiveManaSlots[0].Current : 0f;
+        set { if (ActiveManaSlots.Count > 0) ActiveManaSlots[0].Current = Math.Clamp(value, 0f, MaxMp); }
+    }
+
+    /// <summary>最大 MP = Stats.MaxMpBase + 裝備加成（向後相容，對應 ActiveManaSlots[0].Max）。</summary>
     public float MaxMp => Stats.MaxMpBase + Equipment.TotalMpBonus;
+
+    /// <summary>依 ManaTypeKey 查詢 ActiveManaSlots。</summary>
+    public ManaSlot? GetManaSlot(string key) => ActiveManaSlots.Find(s => s.ManaTypeKey == key);
 
     // ── XP / 等級 / 境界（星盟通用戰力等級）──────────────────────
     public int   Level { get; private set; } = 1;
@@ -164,8 +196,9 @@ public class PlayerController : IElementalTarget, ISnapshottable
     public PlayerController(GridPos startPos)
     {
         Position = startPos;
-        Hp = Stats.MaxHpBase;  // 初始滿 HP
-        Mp = MaxMp;
+        Hp = Stats.MaxHpBase;
+        ActiveManaSlots.Add(new ManaSlot("gui_dao", MaxMp, Stats.MpRegenRate));
+        // Mp property 現委派至 ActiveManaSlots[0].Current（= MaxMp）
     }
 
     /// <summary>
@@ -173,9 +206,9 @@ public class PlayerController : IElementalTarget, ISnapshottable
     /// · 氧氣：站在 Water 格 → 缺氧
     /// · 體溫：基礎室溫 + 元素 Aura 溫度偏移（Fire 加熱 / Ice‧Water 降溫）
     /// </summary>
-    public void UpdateEnvironment(TileWorld world)
+    public void UpdateEnvironment(TileWorld3D world)
     {
-        var tile = world.TypeAt(Position.X, Position.Y);
+        var tile = world.GetTile(Position.X, Position.Y + BodyH - 1, Position.Z);
         State.IsOxygenDeprived  = tile == MaterialType.Water;
         State.AmbientTemperature = CharacterState.DefaultAmbientTemp + Aura.AuraTemperatureShift;
     }
@@ -188,58 +221,164 @@ public class PlayerController : IElementalTarget, ISnapshottable
         if (survivalDmg > 0f) Hp = MathF.Max(0f, Hp - survivalDmg);
         if (_moveCooldown > 0f) _moveCooldown -= delta;
         if (_castCooldown > 0f) _castCooldown -= delta;
-        Mp = MathF.Min(MaxMp, Mp + Stats.MpRegenRate * delta);  // W-5a：MpRegen 來自 Stats
-        if (Mp > MaxMp) Mp = MaxMp; // 裝備卸下時上限可能縮小
+        // W-6C：slot[0] 的 Max/RegenRate 每幀同步，確保裝備變動時正確
+        if (ActiveManaSlots.Count > 0)
+        {
+            ActiveManaSlots[0].Max      = MaxMp;
+            ActiveManaSlots[0].RegenRate = Stats.MpRegenRate;
+        }
+        foreach (var slot in ActiveManaSlots) slot.Tick(delta);
     }
 
-    // 水平移動（A/D），同時更新朝向
-    public bool TryMove(TileWorld world, int dx, int dy)
+    // 水平移動（A/D），同時更新朝向；支援地形跨坡（最多 StepH 格）
+    public bool TryMove(TileWorld3D world, int dx, int dy)
     {
         if (!CanMove || Aura.IsImmobilized) return false;
-        var next = new GridPos(Position.X + dx, Position.Y + dy);
-        if (world.TypeAt(next.X, next.Y) != MaterialType.Air) return false;
+        int nx = Position.X + dx, ny = Position.Y + dy, nz = Position.Z;
 
-        Position = next;
-        if (dx != 0) Facing = new GridPos(Math.Sign(dx), 0); // 只有水平移動才更新 Facing
-        // W-5a 移速倍率（Stats）+ W-3 元素減速（Aura）
+        if (!ColumnClear(world, nx, ny, BodyH, nz))
+        {
+            if (dy != 0) return false;
+            bool stepped = false;
+            for (int s = 1; s <= StepH; s++)
+            {
+                // target column clear + head clearance at current X
+                if (ColumnClear(world, nx, ny - s, BodyH, nz)
+                 && ColumnClear(world, Position.X, Position.Y - s, s, nz))
+                { ny -= s; stepped = true; break; }
+            }
+            if (!stepped) return false;
+        }
+
+        Position = new GridPos(nx, ny, nz);
+        if (dx != 0) Facing = new GridPos(Math.Sign(dx), 0);
+        _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
+        return true;
+    }
+
+    /// <summary>
+    /// 相機相對方向移動（WASD 換算後呼叫）。
+    /// dx/dz 各為 -1/0/1，支援斜向（dx 和 dz 同時非零）。
+    /// 每次消耗一個 moveCooldown；Facing 更新為實際移動的 XZ 方向。
+    /// 含爬坡：整批移動最多爬升 StepH 格，不會雙重爬坡。
+    /// </summary>
+    public bool TryMoveDir(TileWorld3D world, int dx, int dz)
+    {
+        if (!CanMove || Aura.IsImmobilized) return false;
+        if (dx == 0 && dz == 0) return false;
+
+        int px = Position.X, py = Position.Y, pz = Position.Z;
+        int nx = px, ny = py, nz = pz;
+        bool stepped = false;
+
+        // ── X 軸（含爬坡）────────────────────────────────────────────────────
+        if (dx != 0)
+        {
+            int tx = px + dx;
+            if (ColumnClear(world, tx, ny, BodyH, pz))
+            {
+                nx = tx;
+            }
+            else
+            {
+                for (int s = 1; s <= StepH && !stepped; s++)
+                {
+                    if (ColumnClear(world, tx, py - s, BodyH, pz)
+                     && ColumnClear(world, px, py - s, s, pz))
+                    { nx = tx; ny = py - s; stepped = true; }
+                }
+            }
+        }
+
+        // ── Z 軸（含爬坡；step-up 從原始 py 計算，防二次爬坡）──────────────
+        if (dz != 0)
+        {
+            int tz = pz + dz;
+            if (ColumnClear(world, nx, ny, BodyH, tz))
+            {
+                nz = tz;
+            }
+            else if (!stepped)
+            {
+                for (int s = 1; s <= StepH; s++)
+                {
+                    if (ColumnClear(world, nx, py - s, BodyH, tz)
+                     && ColumnClear(world, nx, py - s, s, pz))
+                    { nz = tz; ny = py - s; stepped = true; break; }
+                }
+            }
+        }
+
+        if (nx == px && ny == py && nz == pz) return false;
+
+        Position = new GridPos(nx, ny, nz);
+        int fDx = nx - px, fDz = nz - pz;
+        if (fDx != 0 || fDz != 0)
+            Facing = new GridPos(Math.Sign(fDx), 0, Math.Sign(fDz));
+        _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
+        return true;
+    }
+
+    // 深度移動（W/S，TPS/FPS 模式），在世界 Z 軸方向前進後退
+    // 支援地形跨坡：前方被阻擋時最多爬升 StepH 格
+    public bool TryMoveDepth(TileWorld3D world, int dz)
+    {
+        if (!CanMove || Aura.IsImmobilized) return false;
+        int nz = Position.Z + dz;
+        if ((uint)nz >= (uint)world.Depth) return false;
+
+        int py = Position.Y, ny = py;
+        if (!ColumnClear(world, Position.X, py, BodyH, nz))
+        {
+            bool stepped = false;
+            for (int s = 1; s <= StepH; s++)
+            {
+                if (py - s < 0) break; // 步階不能爬出世界上界
+                if (ColumnClear(world, Position.X, py - s, BodyH, nz)
+                 && ColumnClear(world, Position.X, py - s, s, Position.Z))
+                { ny = py - s; stepped = true; break; }
+            }
+            if (!stepped) return false;
+        }
+
+        Position = new GridPos(Position.X, ny, nz);
         _moveCooldown = MoveInterval / Stats.MoveSpeedMult * (1f + Aura.SpeedPenalty);
         return true;
     }
 
     // 重力 + 跳躍物理（每幀由 Main._Process 呼叫）
-    public void ApplyPhysics(TileWorld world, float delta)
+    public void ApplyPhysics(TileWorld3D world, float delta)
     {
-        _vy     = Math.Clamp(_vy + Gravity * delta, -MaxFallSpeed, MaxFallSpeed);
+        int pz = Position.Z;
+        _vy     = Math.Min(_vy + Gravity * delta, MaxFallSpeed); // 只限制下落速，跳躍不受 MaxFallSpeed 截斷
         _fractY += _vy * delta;
 
-        // 向下移動
+        // 向下移動（查腳底 Y+BodyH）：用 GetTile，未載入 chunk（天空）視為 Air，
+        // 防止下落時被未載入的空中 chunk 當 Stone 地板卡在半空中。
+        // 靜止時防沉入地下由下方的 GetTilePhysics 靜態落地檢查負責。
         while (_fractY >= 1f)
         {
-            var below = new GridPos(Position.X, Position.Y + 1);
-            if (world.TypeAt(below.X, below.Y) != MaterialType.Air)
+            if (world.GetTile(Position.X, Position.Y + BodyH, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = below;
+            Position = new GridPos(Position.X, Position.Y + 1, pz);
             _fractY -= 1f;
         }
-        // 向上移動（跳躍弧線）
+        // 向上移動（查頭頂 Y-1）：用 GetTile 讓未載入 chunk（天空）視為 Air，
+        // 避免 GetTilePhysics 把未載入天空 chunk 當 Stone 頂板阻擋跳躍
         while (_fractY <= -1f)
         {
-            var above = new GridPos(Position.X, Position.Y - 1);
-            if (world.TypeAt(above.X, above.Y) != MaterialType.Air)
+            if (world.GetTile(Position.X, Position.Y - 1, pz) != MaterialType.Air)
             { _vy = 0f; _fractY = 0f; return; }
-            Position = above;
+            Position = new GridPos(Position.X, Position.Y - 1, pz);
             _fractY += 1f;
         }
         // 已落地時歸零，防止 _vy 持續累積
-        if (_vy > 0f && world.TypeAt(Position.X, Position.Y + 1) != MaterialType.Air)
+        if (_vy > 0f && world.GetTilePhysics(Position.X, Position.Y + BodyH, pz) != MaterialType.Air)
         { _vy = 0f; _fractY = 0f; }
     }
 
-    public bool IsOnGround(TileWorld world)
-    {
-        var below = new GridPos(Position.X, Position.Y + 1);
-        return world.TypeAt(below.X, below.Y) != MaterialType.Air;
-    }
+    public bool IsOnGround(TileWorld3D world)
+        => world.GetTilePhysics(Position.X, Position.Y + BodyH, Position.Z) != MaterialType.Air;
 
     public void StartJump()
     {
@@ -248,6 +387,20 @@ public class PlayerController : IElementalTarget, ISnapshottable
     }
 
     public void SetCastCooldown(float seconds) => _castCooldown = seconds;
+
+    public void RestoreLevel(int level, float xp) { Level = level; Xp = xp; }
+
+    /// <summary>在指定位置復活：HP / MP 回滿，物理速度歸零，冷卻清除。</summary>
+    public void Respawn(GridPos spawnPos)
+    {
+        Position  = spawnPos;
+        Hp        = MaxHp;
+        foreach (var s in ActiveManaSlots) s.Current = s.Max;
+        _vy       = 0f;
+        _fractY   = 0f;
+        _moveCooldown = 0f;
+        _castCooldown = 0f;
+    }
 
     // ── ISnapshottable（S-7）──────────────────────────────────────
 
@@ -285,16 +438,16 @@ public class PlayerController : IElementalTarget, ISnapshottable
         MiningProgress = 0f;
     }
 
-    // 回傳 true 代表本幀破壞了方塊
-    public bool TickMining(TileWorld world, GridPos target, float delta)
+    // 回傳挖到的材質（本幀破壞中心格），null 代表仍在進行中
+    public MaterialType? TickMining(TileWorld3D world, GridPos target, float delta)
     {
-        var mat  = world.TypeAt(target.X, target.Y);
+        var mat  = world.GetTile(target.X, target.Y, target.Z);
         var data = MaterialRegistry.Get(mat);
 
         if (!data.IsMineable || data.RequiredToolTier > Inventory.ActiveToolTier)
         {
             CancelMining();
-            return false;
+            return null;
         }
 
         // 換了目標 → 重置進度
@@ -309,10 +462,11 @@ public class PlayerController : IElementalTarget, ISnapshottable
 
         if (MiningProgress >= data.Hardness)
         {
-            world.DestroyTile(target);
+            // ShapeMining：中心格靜默破壞，由 Main.cs 統一 spawn 1 個掉落物
+            world.DestroyTile(target, DestroyReason.ShapeMining);
             CancelMining();
-            return true;
+            return mat;
         }
-        return false;
+        return null;
     }
 }

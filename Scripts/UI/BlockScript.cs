@@ -11,6 +11,7 @@ public partial class BlockScript : Control
 
     private readonly Func<List<(string display, string key)>>? _getSlotOpts;
     private readonly Action<BlockScript>                        _onChanged;
+    private readonly Action<BlockScript>?                       _onParamChanged;
     private readonly Action<BlockScript, Vector2>               _onHeaderDrag;
     private readonly Action<BlockScript, int, Vector2>          _onBlockSplitDrag;
     private readonly Action<BlockNode>?                         _onDoubleClick;
@@ -26,11 +27,13 @@ public partial class BlockScript : Control
         Action<BlockScript> onChanged,
         Action<BlockScript, Vector2> onHeaderDrag,
         Action<BlockScript, int, Vector2> onBlockSplitDrag,
-        Action<BlockNode>? onDoubleClick = null)
+        Action<BlockNode>? onDoubleClick = null,
+        Action<BlockScript>? onParamChanged = null)
     {
         Blocks            = blocks;
         _getSlotOpts      = getSlotOpts;
         _onChanged        = onChanged;
+        _onParamChanged   = onParamChanged;
         _onHeaderDrag     = onHeaderDrag;
         _onBlockSplitDrag = onBlockSplitDrag;
         _onDoubleClick    = onDoubleClick;
@@ -196,7 +199,18 @@ public partial class BlockScript : Control
 
         // Parameters via descriptor
         if (ScratchCanvas.TryGetDescriptor(block.Type, out var desc) && desc is not null)
+        {
             desc.BuildUI?.Invoke(row, block, _getSlotOpts);
+            // Wire param controls to notify cost/stat refresh without rebuilding the UI
+            var captScript = this;
+            foreach (var child in row.GetChildren())
+            {
+                if (child is SpinBox sb)
+                    sb.ValueChanged += _ => _onParamChanged?.Invoke(captScript);
+                else if (child is OptionButton ob)
+                    ob.ItemSelected += _ => _onParamChanged?.Invoke(captScript);
+            }
+        }
 
         row.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill, MouseFilter = MouseFilterEnum.Ignore });
 
