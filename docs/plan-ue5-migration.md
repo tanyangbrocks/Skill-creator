@@ -132,12 +132,15 @@ USTRUCT()
 struct FBlockNode {
     GENERATED_BODY()
     EBlockType Type;
-    TMap<FString, FInstancedStruct> Params;
+    // FName key（不是 FString）：FName 是 int32 索引，比較 O(1)，且只在編譯期讀一次
+    TMap<FName, FInstancedStruct> Params;
     // 子分支不加 UPROPERTY（UHT 無法追蹤 TUniquePtr，且 BlockNode 不需要 BP 序列化）
     TArray<TUniquePtr<FBlockNode>> ThenBranch;
     TArray<TUniquePtr<FBlockNode>> ElseBranch;
     TArray<TUniquePtr<FBlockNode>> LoopBody;
 };
+// 注意：FInstruction（runtime）用單一 FInstancedStruct Payload，不用 TMap；
+//       FBlockNode（design-time）用 TMap<FName, ...>，SpellCompiler 編譯時讀一次
 ```
 
 `TUniquePtr` vs `TSharedPtr`：BlockNode 的擁有權是嚴格父→子（樹），不需要引用計數和執行緒鎖，用 `TUniquePtr` 語義更精確、overhead 更低。
