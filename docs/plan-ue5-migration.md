@@ -217,7 +217,17 @@ struct FBlockNode {
 - [ ] `SpellArray.h/cpp`：SpellSlot、SpellArray、EngraveData
 - [ ] `ManaType.h/cpp`：ManaTypeRegistry（18 種基礎 MP）
 - [ ] `WorldScale.h`：常數（Grain、PlayerW、PlayerH 等）
-- [ ] `GridPos.h`：FIntVector wrapper（加 Manhattan distance 方法）
+- [ ] `GridPos.h`：FIntVector wrapper（加 Manhattan distance 方法）+ **必須補 `GetTypeHash` 以便作 TMap key**：
+  ```cpp
+  // FIntVector 本身在 UE5 已有 GetTypeHash，但自訂 wrapper 必須手動加
+  FORCEINLINE uint32 GetTypeHash(const FGridPos& Pos)
+  {
+      uint32 Hash = GetTypeHash(Pos.X);
+      Hash = HashCombine(Hash, GetTypeHash(Pos.Y));
+      return HashCombine(Hash, GetTypeHash(Pos.Z));
+  }
+  // 如果 ChunkMap 直接用 FIntVector 作 key，則不需要上面這段（UE5 已內建）
+  ```
 - [ ] `MaterialType.h`：Tile 材質 enum，**同時定義 gameplay 分類旗標**：
   ```cpp
   enum class ETileCategory : uint8 {
@@ -235,7 +245,16 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：在 UE5 C++ 裡跑起技能 VM，不依賴任何渲染
 
-- [ ] `Instruction.h/cpp`：OpCode + Params（`TMap<FString, FInstancedStruct>`）
+- [ ] `Instruction.h/cpp`：**單一 Payload 設計（不用 TMap）**
+  ```cpp
+  struct FInstruction {
+      EOpCode OpCode;
+      FInstancedStruct Payload;  // 型別由 OpCode 隱式決定，不需要 key 查詢
+  };
+  // 執行時：Instr.Payload.Get<FDamageArgs>()
+  // 每種 OpCode 對應一個固定的 Args struct（FMoveArgs / FDamageArgs / FWaitArgs …）
+  ```
+  ⚠️ 不要用 `TMap<FString, FInstancedStruct>`（FString key 每次執行都做字串雜湊）也不要用 `TMap<FName, FInstancedStruct>`（FName 比 FString 快，但仍有 Map 查詢 overhead）；opcode 本身已告知型別，直接 Get\<T\>() 是最優路徑
 - [ ] `ExecutionContext.h/cpp`：狀態、delegate 注入（EntityQuery、RaycastQuery）
 - [ ] `ExecutionLoop.h/cpp`：OpCode dispatch table（switch/case，對應現有 ~50 個 opcode）
 - [ ] `SpellCompiler.h/cpp`：BlockNode AST → Instruction list
@@ -248,10 +267,21 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：TileWorld3D + CA 在 C++ 裡跑，暫不做 GPU
 
-- [ ] `TileCell.h`：tile 狀態資料
-- [ ] `Chunk3D.h/cpp`：16³ tile 陣列 + dirty tracking
-- [ ] `TileWorld3D.h/cpp`：Chunk 字典、GetTile/SetTile、CA 更新迴圈
-- [ ] `WorldSaveData.h/cpp`：Chunk 二進位序列化
+- [ ] `TileCell.h`：**純 POD 結構，只含基本型別**
+  ```cpp
+  struct FTileCell {         // 絕不繼承 UObject，不含 UObject 指標
+      uint8  MaterialID;     // 查表用 ID，不存指標
+      uint8  CA_State;       // CA 模擬狀態
+      uint8  Category;       // ETileCategory（GameplayBlock / VisualCA）
+      uint8  Flags;          // dirty / occupied …
+  };
+  // ✅ 背景 Thread FArchive 反序列化安全（純整數，不觸碰 GC / UObject 系統）
+  // ❌ 禁止加 UMaterialInterface*、FString、或任何 UObject 欄位
+  // Game Thread 轉化：拿 MaterialID 查 MaterialRegistry，換成 UMaterialInstanceDynamic*
+  ```
+- [ ] `Chunk3D.h/cpp`：16³ FTileCell 陣列 + dirty tracking
+- [ ] `TileWorld3D.h/cpp`：Chunk 字典（`TMap<FIntVector, TUniquePtr<FChunk3D>>`，FIntVector 已有 UE5 內建 hash）、GetTile/SetTile、CA 更新迴圈
+- [ ] `WorldSaveData.h/cpp`：Chunk 二進位序列化（`FArchive << uint8`，純 POD，background thread 安全）
 - [ ] `MapGenerator3D.h/cpp`：程序地形生成（Perlin noise → tile）
 - [ ] 接入 UE5 Task Graph 做多執行緒 Chunk 更新
 
