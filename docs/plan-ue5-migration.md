@@ -188,8 +188,9 @@ struct FBlockNode {
 | `GD.Load<T>()` | `LoadObject<T>()` / `ConstructorHelpers::FObjectFinder` |
 | `ArrayMesh` | `URuntimeMeshComponent` / `UProceduralMeshComponent` |
 | `StandardMaterial3D` | `UMaterialInstanceDynamic` |
-| `async/await` | `FLatentActionInfo` / UE Coroutine（5.5+） |
-| `interface` | UE5 `IInterface` 抽象類 |
+| `async/await` | 手動 Tick 累加器（SpellRunner）/ UE Coroutine（5.5+，複雜 async） |
+| `interface`（純 C++ 系統間） | **純虛擬基類** `class IFoo { virtual void Bar() = 0; }`（無 UINTERFACE） |
+| `interface`（暴露給 Blueprint / AActor） | UE5 `UINTERFACE` + `IFoo`（雙生宏），Cast\<IFoo\> 才有效 |
 
 ---
 
@@ -209,7 +210,9 @@ struct FBlockNode {
 
 > 目標：建立 C++ 資料結構，讓後續系統有型別基礎
 
-- [ ] `BlockNode.h/cpp`：對應現有 BlockNode（ThenBranch/ElseBranch/LoopBody 用 `TArray<FBlockNode>`）
+- [ ] `BlockNode.h/cpp`：**runtime 型別（USTRUCT，TUniquePtr 樹）**，子分支用 `TArray<TUniquePtr<FBlockNode>>`，不加 UPROPERTY（見 §2-6 坑三）
+  - ⚠️ 這是執行期型別，**不是** M-9 Slate editor 用的節點型別
+  - M-9 的 `UMyEdGraphNode : UEdGraphNode` 是 editor 專屬型別，載入時從 FBlockNode 轉換過去
 - [ ] `BlockType.h`：OpCode enum → UE5 UENUM
 - [ ] `SpellArray.h/cpp`：SpellSlot、SpellArray、EngraveData
 - [ ] `ManaType.h/cpp`：ManaTypeRegistry（18 種基礎 MP）
@@ -309,7 +312,9 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：完整 ScriptCanvas 功能，對標現有 Godot 版本
 
-- [ ] 自訂 `UEdGraphNode`（對應 BlockNode）
+> **runtime / editor 型別分離**：M-1 的 `FBlockNode`（USTRUCT + TUniquePtr 樹）是執行期型別，不直接用於 Slate。M-9 的 `UMyEdGraphNode : UEdGraphNode`（UObject，GC 管理）是 editor 專屬型別。載入技能時做一次轉換：`FBlockNode` → `UMyEdGraphNode`；儲存時反向轉換。這樣 Slate 可以用 UObject 的 DetailsView 自動生成 UPROPERTY 的 UI 控制項，而執行期完全不受 GC 影響。
+
+- [ ] 自訂 `UMyEdGraphNode : UEdGraphNode`（對應 FBlockNode，持有 EBlockType 和 UPROPERTY Params）
 - [ ] 自訂 `SGraphPanel`（積木畫布，拖曳、磁吸、連結）
 - [ ] 調色盤（積木庫側欄，搜尋、分類）
 - [ ] 積木卡片（顯示類型色塊、參數 SpinBox / OptionButton）
@@ -322,11 +327,37 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：Grain 64+ 世界 CA 模擬達到可接受幀率
 
-- [ ] 設計 GPU Tile Buffer 格式（每 tile 2-4 byte 狀態）
+#### ⚠️ 雙軌制（Hybrid）架構：CPU authoritative + GPU simulation
+
+**核心約束**：SpellRunner VM、敵人 AI 尋路、`RaycastQuery`（「前方有沒有 tile」）全部在 CPU 執行（M-2/M-4）。它們需要的是「哪個格子有什麼 tile」的即時答案。
+
+如果 GPU CA 取代 CPU tile 陣列，CPU 每次查詢都需要 GPU Readback（等 GPU fence）→ pipeline stall → 抵消所有效能優勢。
+
+**解法：不是「GPU 取代 CPU」，而是「GPU 加速 CPU」**：
+
+| 資料 | 位置 | 說明 |
+|------|------|------|
+| `Chunk3D` tile 陣列 | **CPU**（永遠保留） | AI / SpellRunner / Raycast 的 authoritative source |
+| GPU Tile Buffer | **GPU VRAM** | Compute Shader 模擬用的鏡像，每幀從 CPU sync |
+| Simulation 結果 | GPU → CPU（**async，非同步**） | CA 模擬完的差異格（dirty set）異步寫回 CPU tile 陣列 |
+
+**低階做法（Phase B，Grain 32~64）**：
+- GPU 只模擬純視覺、無 gameplay 碰撞的粒子 CA（煙霧、流體擴散動畫）
+- 具有 gameplay 碰撞的硬核方塊（泥土、石頭、城牆）依然在 CPU `Chunk3D`
+- GPU simulation 的結果只寫回「視覺層 mesh 資料」，不寫回 tile 陣列
+
+**高階做法（Phase C，遠期）**：
+- 所有 CA 模擬移到 GPU，但在每 chunk update 週期末，只把 dirty tile 的差異集合異步 readback 到 CPU（不是整個 buffer）
+- SpellRunner VM、AI 等 CPU 系統讀到的是「最多 1 幀舊」的 tile 狀態（acceptable latency）
+- 未來若 AI 和簡單的實體偵測也移到 Compute Shader，才能實現真正的「純 GPU Gameplay 迴圈」
+
+**M-10 實作順序**：
+- [ ] 決定 Phase B 策略（視覺 CA 分離 or Hybrid readback），先不動 CPU tile 陣列
+- [ ] 設計 GPU Tile Buffer 格式（每 tile 2-4 byte 狀態），只含 CA 視覺層 tile
 - [ ] 實作棋盤格（checkerboard）Compute Shader（解決並行寫入競爭）
-- [ ] RDG FRDGBuilder 整合，每幀 dispatch + readback
-- [ ] Chunk 邊界交換邏輯（GPU ↔ CPU 同步）
-- [ ] 效能測試：Grain 64 × 8 chunk radius 維持 60fps
+- [ ] RDG `FRDGBuilder` 整合，每幀 dispatch；readback 限 dirty set，async 回寫
+- [ ] Chunk 邊界交換邏輯（GPU ↔ CPU 同步，async ping-pong buffer）
+- [ ] 效能測試：Grain 64 × 8 chunk radius 維持 60fps，CPU AI/Raycast 延遲 ≤ 1 frame
 
 ---
 
