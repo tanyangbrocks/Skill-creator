@@ -218,7 +218,14 @@ struct FBlockNode {
 - [ ] `ManaType.h/cpp`：ManaTypeRegistry（18 種基礎 MP）
 - [ ] `WorldScale.h`：常數（Grain、PlayerW、PlayerH 等）
 - [ ] `GridPos.h`：FIntVector wrapper（加 Manhattan distance 方法）
-- [ ] `MaterialType.h`：Tile 材質 enum
+- [ ] `MaterialType.h`：Tile 材質 enum，**同時定義 gameplay 分類旗標**：
+  ```cpp
+  enum class ETileCategory : uint8 {
+      GameplayBlock,   // 實心碰撞 tile（石頭/城牆/技能護盾）→ CPU authoritative，即時推 GPU
+      VisualCA,        // 純視覺 CA 擴散（煙霧/裝飾水流）→ GPU 模擬，async readback 允許 ≤1 幀延遲
+  };
+  ```
+  ⚠️ 這條分類是 M-10 雙軌制的基礎，在 M-1 就必須定義清楚（見 §2-6 M-10 補充說明）
 
 Build 確認 0 錯誤，進入 M-2。
 
@@ -232,7 +239,7 @@ Build 確認 0 錯誤，進入 M-2。
 - [ ] `ExecutionContext.h/cpp`：狀態、delegate 注入（EntityQuery、RaycastQuery）
 - [ ] `ExecutionLoop.h/cpp`：OpCode dispatch table（switch/case，對應現有 ~50 個 opcode）
 - [ ] `SpellCompiler.h/cpp`：BlockNode AST → Instruction list
-- [ ] `SpellRunner.h/cpp`：跨幀執行容器（用 UE5 `FLatentActionManager` 或協程）
+- [ ] `SpellRunner.h/cpp`：跨幀執行容器（手動 Tick 累加器，見 §2-6 坑二）
 - [ ] 單元測試：用 UE5 Automation Test Framework 跑幾個技能腳本
 
 ---
@@ -278,9 +285,18 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：世界可以正確顯示，瓦片有顏色/材質
 
+> ⚠️ **M-6 開始前必須決定 Mesh Section 粒度**：  
+> 「1 Chunk = 1 RMC Section」在 Grain 64+ 下視野內可達 ~9,000 chunks → 9,000 Draw Calls → Render Thread 過載。  
+> **解法：Mega-Chunk（4×4×4 = 64³）作為一個 Section 的提交單位**：
+> - 4×4×4 個 16³ chunk 共用一個 RMC Section，視野內 Section 數壓到幾十個
+> - 其中任一小 chunk dirty → 在 Task Graph 裡重算整個 64³ 區域的 Greedy Mesh → 一次更新 Section
+> - 此做法讓 Draw Call 降回個位數到數十個，才能在 Grain 64+ 下維持幀率
+> - M-6 初版可先 1:1 實作驗證正確性；**M-6 上線前必須切換到 Mega-Chunk 模式**
+
 - [ ] 建立 `VoxelWorldRenderer` Actor（持有 RealtimeMeshComponent）
 - [ ] 移植 Greedy Meshing 邏輯（C# → C++，演算法不變）
-- [ ] 每個 Chunk 對應一個 RMC Section，dirty 時重建該 Section
+- [ ] **Mega-Chunk（64³）作為 RMC Section 單位**，不是 1:1 chunk → section
+- [ ] 小 chunk dirty 時，在 Task Graph 裡重算所屬 Mega-Chunk 的 Greedy Mesh
 - [ ] 基礎材質：先用 vertex color 區分 tile 類型
 - [ ] 相機控制（3D 視角，滑鼠旋轉，捲輪縮放）
 
@@ -290,9 +306,19 @@ Build 確認 0 錯誤，進入 M-2。
 
 > 目標：角色資料 + 世界狀態可以持久化
 
-- [ ] `FlowSaveSystem.h/cpp`：FArchive 二進位 + JSON 混合方案
-- [ ] `CharacterSaveData.h/cpp`：SpellGroup、ManaSlots、裝備、物品
-- [ ] Chunk 二進位存檔（與現有格式相容或重定義）
+> **混合格式決策（不全面拋棄 JSON）**：
+> - **Chunk 資料** → 純二進位 FArchive（資料量大、頻率高，binary 必要）
+> - **技能組 / 角色裝備** → JSON（資料量小，載入一次，版本遷移容易）
+> - 全面改二進位對 spell 資料是過度工程：~2,000 個 FBlockNode 的 JSON 解析 ≤ 20ms，遊戲啟動跑一次，完全不是瓶頸
+>
+> ⚠️ **Grain 64+ 的真實瓶頸是 Chunk 串流，不是 JSON**：
+> - 玩家移動時新進入視野的 chunk 必須在 background thread 反序列化 + 建 Greedy Mesh
+> - 不能在主執行緒做 → 建立 `ChunkStreamingManager`，UE5 `AsyncTask` 管線負責 chunk 載入
+
+- [ ] `FlowSaveSystem.h/cpp`：FArchive 二進位（chunk）+ JSON（character/spell）混合
+- [ ] `CharacterSaveData.h/cpp`：SpellGroup、ManaSlots、裝備、物品（JSON 序列化）
+- [ ] `ChunkStreamingManager.h/cpp`：玩家移動時 async 預載附近 chunk（`UE::Tasks::Launch` 或 `AsyncTask`）
+- [ ] Chunk 二進位存讀（`FArchive <<` 運算子序列化 TileCell 陣列）
 - [ ] 遊戲啟動時讀存檔，對照 Godot 版本驗證資料正確性
 
 ---
