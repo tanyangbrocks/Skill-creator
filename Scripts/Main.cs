@@ -1850,6 +1850,7 @@ public partial class Main : Node
 		_charData.SpellGroupJson = spellGroupJson;
 		FlowSaveSystem.SaveCharacter(_charData);
 		GD.Print("[存檔] 技能組已同步至角色存檔");
+		UpdateActiveManaSlots(); // 技能儲存後同步 HUD MP 條
 	}
 
 	// ── Helper ────────────────────────────────────────────────────
@@ -2004,7 +2005,7 @@ public partial class Main : Node
 		_manaHudContainer.Position = new Vector2(10, -30);             // 底邊 30px
 		_manaHudContainer.AddThemeConstantOverride("separation", 2);
 		hud.AddChild(_manaHudContainer);
-		RebuildManaHud();
+		UpdateActiveManaSlots(); // 依當前技能組初始化正確條數
 	}
 
 	private void RebuildManaHud()

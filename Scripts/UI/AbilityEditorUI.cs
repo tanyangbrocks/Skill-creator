@@ -1257,6 +1257,22 @@ public partial class AbilityEditorUI : Control
     // 顏色同樣委託給 ScratchCanvas._descs，與積木頭部色塊保持一致
     private static Color BlockTypeColor(BlockType type) => ScratchCanvas.BlockColor(type);
 
+    // 遞迴掃描 blocks，檢查是否有 SetActivation* 積木（含 IF/Loop 內部）
+    private static bool HasActivationTypeBlock(List<BlockNode> blocks)
+    {
+        foreach (var b in blocks)
+        {
+            if (b.Type is BlockType.SetActivationInstant
+                       or BlockType.SetActivationDeclare
+                       or BlockType.SetActivationSustained)
+                return true;
+            if (HasActivationTypeBlock(b.ThenBranch)) return true;
+            if (HasActivationTypeBlock(b.ElseBranch)) return true;
+            if (HasActivationTypeBlock(b.LoopBody))   return true;
+        }
+        return false;
+    }
+
     private bool SaveSpell()
     {
         // 先同步 Slots / GlobalEngravings / Container
@@ -1268,7 +1284,16 @@ public partial class AbilityEditorUI : Control
         if (string.IsNullOrWhiteSpace(_spell.Name))
             errors.Add("• 請填寫技能整構名稱（必填）");
 
-        // ActivationType 預設 None（不顯示標籤），發動方式由積木在執行時設定，無需此處驗證
+        // 主被動驗證：主腳本必須含有至少一個技能因子
+        bool hasTotem = _spell.Blocks.Any(b => b.Type == BlockType.Totem);
+        if (!hasTotem)
+            errors.Add("• 請加入技能因子來定義主被動類型");
+        else if (!_spell.IsPassive && !HasActivationTypeBlock(_spell.Blocks))
+            errors.Add("• 主動技能需要定義發動類型（請加入「即時型」、「宣告型」或「持續生效型」積木）");
+
+        // MP 未綁定驗證
+        if (_spell.HasUnboundMpBlocks())
+            errors.Add("• 有技能因子存在需消耗 MP 的積木，但尚未指定 MP 類型");
 
         if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel))
         {
