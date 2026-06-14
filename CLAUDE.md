@@ -1,6 +1,18 @@
 # SkillCreator — Claude Code 工作規則
 
-## 專案概要
+---
+
+> ⚠️ **此 Godot 專案已於 2026-06-14 封存（archived）。**
+> 主線開發已移至 UE5：
+> - 本地路徑：`C:\Users\譚揚勳\SkillCreatorUE5\`
+> - GitHub：https://github.com/tanyangbrocks/Skill-creator-UE5.git
+> - 遷移計畫：`docs/plan-ue5-migration.md`（兩個 repo 都有副本）
+>
+> 此 repo 僅供邏輯對照，不再做任何新功能。
+
+---
+
+## 專案概要（Godot 封存版）
 Godot 4.6.3 mono（.NET 8、C#）技能設計系統。玩家用類 Scratch 積木設計能力，效果與 Noita 式細胞自動機世界物理互動。
 世界觀以**蒼究（`Import word setting/`）**為主軸，導入計畫獨立於主線之外。
 
