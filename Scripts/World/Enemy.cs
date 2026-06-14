@@ -176,8 +176,10 @@ public class Enemy : IElementalTarget, ISnapshottable, ICreature
 
         int dx   = Math.Sign(player.Position.X - Position.X);
         int dz   = Math.Sign(player.Position.Z - Position.Z);
+        // player.Position.Y 是頭頂 tile；用腳底 tile 對齊 enemy.Position.Y（腳底格）
+        int playerFeetY = player.Position.Y + player.BodyH - 1;
         int dist = Math.Abs(player.Position.X - Position.X)
-                 + Math.Abs(player.Position.Y - Position.Y)
+                 + Math.Abs(playerFeetY - Position.Y)
                  + Math.Abs(player.Position.Z - Position.Z);
 
         if (dx != 0) FacingX = dx;
