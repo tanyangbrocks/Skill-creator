@@ -86,6 +86,64 @@ YourGame/
     └── SkillCreatorUI/         ← 積木編輯器 Slate UI
 ```
 
+### 2-6 已驗證的 UE5 開發陷阱
+
+#### 坑一：Live Coding + UHT 反射資料不同步 → 無預警 crash
+
+**觸發條件**：開著 UE Editor（含 Live Coding）時，修改 `.h` 裡的 `UCLASS/UENUM/UPROPERTY/USTRUCT` 並熱編譯。
+
+**原因**：Live Coding 把新 `.dll` patch 進正在執行的 process，但 UHT 的反射資料（`*.generated.h`、`TClassCompiledInDefer` 登記表）不會更新。新 `.h` 改變了 struct 的記憶體 layout，舊的 UObject 系統仍用舊 offset 讀寫 → crash 或靜默資料損壞。
+
+**強制工作流**：
+- **安全**（Live Coding 可用）：只改 `.cpp` 的純邏輯（switch/case 內容、算法本體）
+- **危險，必須關閉 Editor + VS Rebuild**：改 `.h` 裡任何 `U*` 巨集修飾的成員或 enum
+
+#### 坑二：FLatentActionManager 不適合 SpellRunner
+
+`FLatentActionManager` 是 Blueprint Delay 節點的底層實現，設計為低頻使用。SpellRunner 需要每幀推進 VM 指針，應改用**手動 Tick 累加器**：
+
+```cpp
+struct FSpellRunner {
+    TArray<FInstruction> Instructions;
+    int32  ProgramCounter  = 0;
+    float  TimeAccumulator = 0.f;
+
+    // 在 AActor::Tick 或 GameMode Tick 裡每幀呼叫
+    void Advance(float DeltaTime);
+};
+```
+
+這樣效能可控、容易 debug。`FLatentActionInfo` 和 UE5.5+ 協程可在需要非常深的巢狀 async 語義時再考慮，但 SpellRunner 的跨幀 Wait 靠累加器足夠。
+
+> 注意：CA 瓦片不跑 SpellRunner VM，兩個系統完全獨立。FLatentActionManager 的壓力來源是 SpellRunner 實例數，實際並發量是個位數到幾十個，不是問題根源；**可控性才是選手動 Tick 的真正理由。**
+
+#### 坑三：TArray\<FBlockNode\> 遞迴樹的記憶體搬家
+
+`TArray<T>` 是連續值記憶體。`FBlockNode` 含子分支陣列，擴容時會整棵子樹 deep copy，且舊指標全部懸空。
+
+**錯誤做法**：
+```cpp
+TArray<FBlockNode> ThenBranch;  // ← 擴容時整棵子樹 deep copy
+```
+
+**正確做法**（單一擁有權樹，用 `TUniquePtr`）：
+```cpp
+USTRUCT()
+struct FBlockNode {
+    GENERATED_BODY()
+    EBlockType Type;
+    TMap<FString, FInstancedStruct> Params;
+    // 子分支不加 UPROPERTY（UHT 無法追蹤 TUniquePtr，且 BlockNode 不需要 BP 序列化）
+    TArray<TUniquePtr<FBlockNode>> ThenBranch;
+    TArray<TUniquePtr<FBlockNode>> ElseBranch;
+    TArray<TUniquePtr<FBlockNode>> LoopBody;
+};
+```
+
+`TUniquePtr` vs `TSharedPtr`：BlockNode 的擁有權是嚴格父→子（樹），不需要引用計數和執行緒鎖，用 `TUniquePtr` 語義更精確、overhead 更低。
+
+> BlockNode 是「設計完成後編譯一次、只讀執行」的 AST，這個問題只影響 spell 載入時期，不影響每幀執行。即便如此，在 M-1 階段就正確宣告，避免之後大量積木的 spell 載入期 stall。
+
 ---
 
 ## 三、現有專案系統遷移評估
@@ -99,7 +157,7 @@ YourGame/
 | 元素/Aura 系統 | ~325 | 無 | **低** | 純 C++ |
 | 快照/回滾系統 | ~342 | 無 | **低** | 純 C++ |
 | 物品/裝備系統 | ~302 | 無 | **低** | 純 C++，可接 GAS ItemFragment |
-| 技能施放（SpellCaster / SpellRunner） | ~1,650 | 極低 | **低** | 純 C++，SpellRunner 改用 UE LatentAction |
+| 技能施放（SpellCaster / SpellRunner） | ~1,650 | 極低 | **低** | 純 C++，SpellRunner 改用手動 Tick 累加器（見 §2-6 坑二） |
 | 敵人 AI（Enemy / EnemyManager） | ~1,000 | 低（Vector3I → FIntVector） | **低-中** | C++ 狀態機，或升級為 Behavior Tree |
 | 世界模擬（TileWorld3D / Chunk3D） | ~2,500 | 低（Vector 型別） | **中** | C++ + GPU Compute（Phase 3） |
 | 存讀檔（FlowSaveSystem） | ~518 | 低（user:// 路徑） | **中** | UE FArchive + 自訂 JSON |
