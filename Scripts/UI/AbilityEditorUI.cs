@@ -905,7 +905,7 @@ public partial class AbilityEditorUI : Control
                 }
                 else
                 {
-                    // 已有技能 → 浮動積木停在落點，使用者手動拼接至主腳本
+                    // 畫布已有積木：浮動停在拖放位置，不插入主腳本
                     _canvas.SpawnPaletteScript(blocks, localPos);
                 }
             }
@@ -1192,7 +1192,10 @@ public partial class AbilityEditorUI : Control
             }
         }
 
-        _spell.Container = TotemToContainer(firstNonPassive);
+        // Container 優先順序：投射 > 召喚 > 其他（範圍/武技等 = DirectCast）
+        var projectileTotem = _spell.Slots.Select(s => s.Totem).FirstOrDefault(t => t?.Type == TotemType.Projectile);
+        var summonTotem     = _spell.Slots.Select(s => s.Totem).FirstOrDefault(t => t?.Type == TotemType.Summon);
+        _spell.Container = TotemToContainer(projectileTotem ?? summonTotem ?? firstNonPassive);
     }
 
     // 掃描主腳本，對尚未處理的 Totem 積木自動插入預設 Action 刻印。
@@ -1265,7 +1268,7 @@ public partial class AbilityEditorUI : Control
         if (string.IsNullOrWhiteSpace(_spell.Name))
             errors.Add("• 請填寫技能整構名稱（必填）");
 
-        // ActivationType 無 None 值（預設 Instant），發動方式由積木在執行時設定，無需此處驗證
+        // ActivationType 預設 None（不顯示標籤），發動方式由積木在執行時設定，無需此處驗證
 
         if (AbilityPointCalculator.ExceedsLevelCap(_spell, PlayerLevel))
         {
