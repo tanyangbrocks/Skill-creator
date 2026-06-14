@@ -45,4 +45,31 @@ public static class AbilityPointCalculator
     // 判斷技能整構能力點是否超過境界上限（數值定義於 PlayerController.TierApCap）
     public static bool ExceedsLevelCap(SpellArray spell, int playerLevel)
         => CalculateTotalCost(spell) > PlayerController.TierApCap(playerLevel);
+
+    // 計算各 MP 類型的分攤消耗（供編輯器右側面板 read-only 顯示）
+    // 未綁定 ManaTypeKey 的 Slot 不計入分攤；比例 = 該類型 Slot 數 / 全部已綁定 Slot 數。
+    public static Dictionary<string, float> CalculateSlotCostByType(SpellArray spell)
+    {
+        var result = new Dictionary<string, float>();
+        float multiplier = MpMultiplier.GetValueOrDefault(spell.ActivationType, 1.0f);
+        float totalMp = spell.BaseMpCost * multiplier;
+
+        var countByType = new Dictionary<string, int>();
+        int totalBound = 0;
+        foreach (var slot in spell.Slots)
+        {
+            if (slot.IsEmpty || slot.Totem?.Type == TotemType.Passive) continue;
+            if (slot.ManaTypeKey is null) continue;
+            countByType.TryGetValue(slot.ManaTypeKey, out int c);
+            countByType[slot.ManaTypeKey] = c + 1;
+            totalBound++;
+        }
+
+        if (totalBound == 0) return result;
+
+        foreach (var (key, count) in countByType)
+            result[key] = totalMp * count / totalBound;
+
+        return result;
+    }
 }

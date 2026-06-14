@@ -119,9 +119,10 @@ public class MobSpawnController
             tx = Math.Clamp(tx, 1, W - 2);
             tz = Math.Clamp(tz, 1, D - 2);
 
-            // 用地形噪音取得此位置的地表 Y，讓敵人生成在正確高度而非玩家 Y
+            // surfaceH = 地表固體格 tile Y（Y-down：更大 = 更深）
+            // 敵人腳底座標 = surfaceH - 1（固體正上方一格空氣），不是頭部偏移
             int surfaceH = GetTerrainY?.Invoke(tx, tz) ?? (player.Y + WorldScale.PlayerH);
-            int ty = Math.Clamp(surfaceH - WorldScale.PlayerH, 0, H - 2);
+            int ty = Math.Clamp(surfaceH - 1, 0, H - 2);
             if ((uint)ty >= (uint)(H - 1)) continue;
 
             // Area 怪物：檢查是否在限定區域內

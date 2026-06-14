@@ -16,7 +16,7 @@ public class SpellArray
     // 全域刻印（影響整個技能整構所有技能因子）
     public List<EngraveData> GlobalEngravings { get; } = new();
 
-    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.Instant;
+    public AbilityActivationType ActivationType { get; set; } = AbilityActivationType.None;
 
     // 施放方式：直接施放 或 透過哪個容器執行
     public ContainerType Container { get; set; } = ContainerType.DirectCast;

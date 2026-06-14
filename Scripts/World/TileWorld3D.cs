@@ -574,6 +574,9 @@ public sealed class TileWorld3D : IWorldInterface
         chunk.MarkDirty(lx, ly, lz);
         _dirtyChunks.Add(coord);
         MarkNeighborsMeshDirty(coord, lx, ly, lz);
+        // 挖空時喚醒相鄰 chunk CA，讓跨邊界的液體/粉末能流入新空間
+        if (type == MaterialType.Air)
+            MarkNeighborsCaDirty(coord, lx, ly, lz);
     }
 
     private void WriteCell(int x, int y, int z, TileCell cell)
@@ -613,6 +616,27 @@ public sealed class TileWorld3D : IWorldInterface
         if (ly == Chunk3D.Size - 1)  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y + 1, coord.Z    ));
         if (lz == 0)                  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y,     coord.Z - 1));
         if (lz == Chunk3D.Size - 1)  _pendingNeighborDirty.Add(new Vector3I(coord.X,     coord.Y,     coord.Z + 1));
+    }
+
+    // 挖空 tile 時喚醒相鄰 chunk CA（讓液體/粉末能跨 chunk 邊界流入新空間）。
+    // 只在 tile 位於 chunk 邊界時有效；標記相鄰 chunk 的邊界格為 dirty。
+    private void MarkNeighborsCaDirty(Vector3I coord, int lx, int ly, int lz)
+    {
+        const int S = Chunk3D.Size;
+        void Wake(Vector3I c, int bx, int by, int bz)
+        {
+            if (_chunks.TryGetValue(c, out var nb))
+            {
+                nb.MarkDirty(bx, by, bz);
+                _dirtyChunks.Add(c);
+            }
+        }
+        if (lx == 0)     Wake(new Vector3I(coord.X - 1, coord.Y, coord.Z), S - 1, ly, lz);
+        if (lx == S - 1) Wake(new Vector3I(coord.X + 1, coord.Y, coord.Z), 0,     ly, lz);
+        if (ly == 0)     Wake(new Vector3I(coord.X, coord.Y - 1, coord.Z), lx, S - 1, lz);
+        if (ly == S - 1) Wake(new Vector3I(coord.X, coord.Y + 1, coord.Z), lx, 0,     lz);
+        if (lz == 0)     Wake(new Vector3I(coord.X, coord.Y, coord.Z - 1), lx, ly, S - 1);
+        if (lz == S - 1) Wake(new Vector3I(coord.X, coord.Y, coord.Z + 1), lx, ly, 0    );
     }
 
     // 每幀由 Main.cs 呼叫一次，將累積的鄰居重建請求去重後統一觸發。
