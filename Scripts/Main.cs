@@ -1109,6 +1109,8 @@ public partial class Main : Node
 
 		_enemies.Update(_world3d, _player, dt);
 		_runner.Update(dt);
+		// SpellRunner 跨幀執行路徑中 act_fire_projectile 產生的投射物
+		foreach (var p in SpellCaster.TakePendingProjectiles()) _projectiles.Add(p);
 
 		// 投射物更新
 		for (int i = _projectiles.Count - 1; i >= 0; i--)
@@ -1467,6 +1469,8 @@ public partial class Main : Node
 			GD.Print($"[施放] 槽位 {slotIdx} 失敗：MP 不足或冷卻中");
 		else if (result.Projectile != null)
 			_projectiles.Add(result.Projectile);
+		// 同步執行路徑中 act_fire_projectile 可能產生的子投射物
+		foreach (var p in SpellCaster.TakePendingProjectiles()) _projectiles.Add(p);
 	}
 
 	private void RefreshHotbar()

@@ -174,6 +174,10 @@ public class Enemy : IElementalTarget, ISnapshottable, ICreature
         ApplyGravity(world, delta);
         WantsToFire = false;
 
+        // 水平距離過遠（超過 soft-despawn 邊界）時跳過 AI，節省每幀計算
+        int hd = Math.Abs(player.Position.X - Position.X) + Math.Abs(player.Position.Z - Position.Z);
+        if (hd > MobSpawnController.DespawnSoftDist) return;
+
         int dx   = Math.Sign(player.Position.X - Position.X);
         int dz   = Math.Sign(player.Position.Z - Position.Z);
         // player.Position.Y 是頭頂 tile；用腳底 tile 對齊 enemy.Position.Y（腳底格）

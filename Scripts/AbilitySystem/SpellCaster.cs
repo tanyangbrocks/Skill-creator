@@ -13,6 +13,16 @@ public static class SpellCaster
     // MaxComboDepth 統一定義於 SafetyGuard.MaxComboDepth
     private const int MeleeRange    = 3;   // Contact 容器掃描格數
 
+    // act_fire_projectile 在 slot 執行路徑中無法直接回傳投射物；
+    // 暫存於此靜態欄位，由 Main.cs 在每幀結束前 TakePendingProjectiles() 收集。
+    private static List<SpellProjectile>? _pendingProjectiles;
+    internal static List<SpellProjectile> TakePendingProjectiles()
+    {
+        var r = _pendingProjectiles ?? new List<SpellProjectile>();
+        _pendingProjectiles = null;
+        return r;
+    }
+
     // 施放結果（成功 + 可能產生的投射物）
     public readonly struct SpellCastResult
     {
@@ -449,7 +459,7 @@ public static class SpellCaster
 
         if (actionId != null)
         {
-            DispatchAction(actionId, slot, player, world, atHitPoint, originOverride);
+            DispatchAction(actionId, slot, player, world, atHitPoint, originOverride, enemies);
             ApplyModsToNearbyEnemies(m, origin, enemies, world);
             return;
         }
@@ -460,7 +470,7 @@ public static class SpellCaster
         {
             case TotemType.Area:         ExecuteArea("act_area_around", slot, player, world, originOverride); break;
             case TotemType.Technique:    ExecuteTechnique(slot, player, world, atHitPoint, originOverride);   break;
-            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride);         break;
+            case TotemType.Projectile:   ExecuteProjectileTotem(slot, player, world, originOverride, enemies); break;
             case TotemType.Morph:        ExecuteMorph(slot, player, world, originOverride);                   break;
             case TotemType.Displacement: ExecuteDisplacement(slot, player, world);                            break;
             case TotemType.Summon:       ExecuteSummon(slot, player, world, originOverride);                  break;
@@ -471,7 +481,7 @@ public static class SpellCaster
 
     // 以 act_* 刻印 Id 分派到對應執行器
     private static void DispatchAction(string actionId, SpellSlot slot, PlayerController player,
-        TileWorld3D world, bool atHitPoint, GridPos? originOverride)
+        TileWorld3D world, bool atHitPoint, GridPos? originOverride, EnemyManager? enemies = null)
     {
         switch (actionId)
         {
@@ -489,7 +499,7 @@ public static class SpellCaster
                 break;
 
             case "act_fire_projectile":
-                ExecuteProjectileTotem(slot, player, world, originOverride);
+                ExecuteProjectileTotem(slot, player, world, originOverride, enemies);
                 break;
 
             case "act_morph_apply":
@@ -599,11 +609,27 @@ public static class SpellCaster
         }
     }
 
-    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player, TileWorld3D world, GridPos? originOverride)
+    private static void ExecuteProjectileTotem(SpellSlot slot, PlayerController player,
+        TileWorld3D world, GridPos? originOverride, EnemyManager? enemies)
     {
-        // TODO-STUB: 投射物技能因子（能量/實物投射），目前以爆炸佔位
+        // 建立命中時施放 act_area_around 的迷你技能整構，繼承來源槽位的 modifier 刻印
+        var hitSlot = new SpellSlot();
+        foreach (var e in slot.LocalEngravings)
+            if (e.Category == EngraveCategory.Modifier) hitSlot.LocalEngravings.Add(e);
+        hitSlot.LocalEngravings.Add(new EngraveData
+            { Id = "act_area_around", Category = EngraveCategory.Action, Trigger = EngraveTrigger.OnCast });
+        var hitSpell = new SpellArray();
+        hitSpell.Slots.Add(hitSlot);
+
+        // 發射起點：身體側緣外一格，身體中段高度
         var origin = originOverride ?? player.Position;
-        world.Explode(origin.X, origin.Y, origin.Z, 1);
+        int fx = player.Facing.X != 0 ? player.Facing.X : 1;
+        int halfW = WorldScale.PlayerW / 2;
+        int halfH = player.BodyH / 2;
+        var start  = new GridPos(origin.X + fx * (halfW + 1), origin.Y + halfH, origin.Z);
+
+        _pendingProjectiles ??= new List<SpellProjectile>();
+        _pendingProjectiles.Add(new SpellProjectile(start, fx, 0f, 0f, hitSpell, player, enemies));
     }
 
     // ════════════════════════════════════════════════════════════
